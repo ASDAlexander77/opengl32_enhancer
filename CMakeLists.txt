@@ -44,6 +44,11 @@ else()
 endif()
 
 # .ts files compile with TSLANG command; .cpp with the C++ compiler.
+add_executable(${PROJECT_NAME}
+    dummy.cpp
+    main.ts
+)
+
 add_library("opengl32" SHARED
     dummy.cpp
     wrapper.ts
@@ -65,6 +70,7 @@ else()
     list(APPEND TSLANG_LINK_LIBS "LLVMDemangle" "stdc++" "m" "pthread" "tinfo" "dl" "rt")
 endif()
 
+target_link_libraries(${PROJECT_NAME} ${TSLANG_LINK_LIBS})
 target_link_libraries("opengl32" ${TSLANG_LINK_LIBS})
 
 # The GC-model default lib depends on gc.dll at runtime; copy it next to the
