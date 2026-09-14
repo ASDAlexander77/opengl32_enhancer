@@ -15,5 +15,5 @@
       "lib": ["ESNext"],
       "types": ["./types/tslang", "I:\\tslang/defaultlib/lib.d.ts"]
     },
-    "include": ["wrapper.ts"]
+    "include": ["main.ts", "wrapper.ts"]
 }
