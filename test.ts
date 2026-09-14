@@ -1,9 +1,8 @@
 // AUTO-GENERATED interception test for wrapper.ts.
 //
-// Loads the proxy opengl32.dll built from wrapper.ts (by its plain name, the
-// same way a real host application would - relying on it sitting next to this
-// executable and being found before the real System32 one) and checks two
-// things:
+// Loads the opengl32_enh.dll proxy built from wrapper.ts (by its build output
+// name, from the same output directory this test executable is built into) and
+// checks two things:
 //
 //  1. Every function this wrapper claims to intercept actually resolves via
 //     GetProcAddress under its original name (catches typos in @dllname, or a
@@ -16,10 +15,10 @@
 declare function LoadLibraryA(libraryName: Opaque): Opaque;
 declare function GetProcAddress(library: Opaque, functionName: Opaque): Opaque;
 
-console.log("Loading proxy opengl32.dll...");
-const mod = LoadLibraryA("opengl32.dll");
+console.log("Loading proxy opengl32_enh.dll...");
+const mod = LoadLibraryA("opengl32_enh.dll");
 if (mod === null) {
-    console.error("Failed to load opengl32.dll (proxy build not next to this executable?)");
+    console.error("Failed to load opengl32_enh.dll (proxy build not next to this executable?)");
 } else {
     console.log("Proxy loaded. Resolving all intercepted functions...");
 

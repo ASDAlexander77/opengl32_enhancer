@@ -43,13 +43,15 @@ else()
     set(CMAKE_TSLANG_FLAGS "${CMAKE_TSLANG_FLAGS} -relocation-model=pic") # global
 endif()
 
+set (WRAPPER_NAME "opengl32_enh")
+
 # .ts files compile with TSLANG command; .cpp with the C++ compiler.
 add_executable(${PROJECT_NAME}
     dummy.cpp
     main.ts
 )
 
-add_library("opengl32" SHARED
+add_library(${WRAPPER_NAME} SHARED
     dummy.cpp
     wrapper.ts
 )
@@ -81,15 +83,15 @@ else()
 endif()
 
 target_link_libraries(${PROJECT_NAME} ${TSLANG_LINK_LIBS})
-target_link_libraries("opengl32" ${TSLANG_LINK_LIBS})
+target_link_libraries(${WRAPPER_NAME} ${TSLANG_LINK_LIBS})
 target_link_libraries("test" ${TSLANG_LINK_LIBS})
 
 # The GC-model default lib depends on gc.dll at runtime; copy it next to the
 # built binary so the program can find it without relying on PATH.
 if (TSLANG_MEMORY_MODEL STREQUAL "gc")
-    add_custom_command(TARGET "opengl32" POST_BUILD
+    add_custom_command(TARGET ${WRAPPER_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_TSLANG_DIR}/gcdll/gc.dll"
-            "$<TARGET_FILE_DIR:opengl32>"
+            "$<TARGET_FILE_DIR:${WRAPPER_NAME}>"
     )
 endif()
