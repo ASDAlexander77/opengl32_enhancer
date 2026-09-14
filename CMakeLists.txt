@@ -54,6 +54,16 @@ add_library("opengl32" SHARED
     wrapper.ts
 )
 
+# Exercises the opengl32 proxy built from wrapper.ts: resolves every intercepted
+# function by name and calls a representative subset through it, to check the
+# interception is actually catching the calls rather than just compiling. Needs
+# the "opengl32" target's DLL to sit next to it at runtime (same output directory,
+# which is the default for a single-config generator like Ninja).
+add_executable("test"
+    dummy.cpp
+    test.ts
+)
+
 # required libs
 set(TSLANG_LINK_LIBS "TypeScriptDefaultLib" "TypeScriptAsyncRuntime" "LLVMSupport")
 
@@ -72,6 +82,7 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} ${TSLANG_LINK_LIBS})
 target_link_libraries("opengl32" ${TSLANG_LINK_LIBS})
+target_link_libraries("test" ${TSLANG_LINK_LIBS})
 
 # The GC-model default lib depends on gc.dll at runtime; copy it next to the
 # built binary so the program can find it without relying on PATH.
