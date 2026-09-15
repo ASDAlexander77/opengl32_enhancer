@@ -121,7 +121,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -149,3 +149,9 @@ target_link_libraries(bilinear_upscale_test opengl32 gdi32 user32)
 # ApplyNVSharpen's GPU pipelines run to completion with no GL error - see nis_effect_test.cpp.
 add_executable(nis_effect_test nis_effect_test.cpp nis_effect.cpp gl_loader.cpp)
 target_link_libraries(nis_effect_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, and checks ApplyHdrLook()'s GPU
+# pipeline at strength=0 (must reproduce the input) and strength=0.8 (must run with no GL
+# error) - see hdr_look_test.cpp.
+add_executable(hdr_look_test hdr_look_test.cpp hdr_look.cpp gl_loader.cpp)
+target_link_libraries(hdr_look_test opengl32 gdi32 user32)
