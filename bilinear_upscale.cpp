@@ -148,6 +148,7 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
     gl.glGenFramebuffers(1, &fbo);
     gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outputTexture, 0);
+    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     g_state.inputTexture = inputTexture;
     g_state.outputTexture = outputTexture;
@@ -191,10 +192,9 @@ void ApplyBilinearUpscale() {
         return;
     }
 
-    EnsureTextures(gl, width, height);
-
     // Save the GL state this pipeline is about to touch, so the host app's own state comes
-    // back untouched afterward.
+    // back untouched afterward. This must happen BEFORE EnsureTextures to capture the app's
+    // original FBO binding, not EnsureTextures' newly-created FBO.
     int savedActiveTexture = 0;
     gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
     gl.glActiveTexture(GL_TEXTURE0);
@@ -206,6 +206,8 @@ void ApplyBilinearUpscale() {
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
     int savedDrawFbo = 0;
     gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
+
+    EnsureTextures(gl, width, height);
 
     // Capture: copy the current back buffer straight into the input texture, GPU-to-GPU.
     // Nothing in this function has touched GL_READ_FRAMEBUFFER yet, so the default
