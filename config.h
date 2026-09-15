@@ -10,12 +10,16 @@ enum class EffectKind {
     Bilinear,
     NVScaler,
     NVSharpen,
+    TAA,
+    HdrLook,
 };
 
 struct AnaxConfig {
     EffectKind effect = EffectKind::None;
     float sharpness = 0.5f;
     float scale = 1.0f;
+    float taaBlend = 0.5f;
+    float hdrStrength = 0.5f;
 };
 
 // Parses an INI-style config file at the given path. A missing file, a missing key, or an

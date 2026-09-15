@@ -39,6 +39,8 @@ int main() {
         Check(config.effect == EffectKind::None, "missing file falls back to effect=none");
         Check(config.sharpness == 0.5f, "missing file falls back to default sharpness");
         Check(config.scale == 1.0f, "missing file falls back to default scale");
+        Check(config.taaBlend == 0.5f, "missing file falls back to default taaBlend");
+        Check(config.hdrStrength == 0.5f, "missing file falls back to default hdrStrength");
     }
 
     // Well-formed file.
@@ -65,16 +67,37 @@ int main() {
         Check(config.scale == 0.6f, "comments/whitespace: scale=0.6 parsed with inline comment stripped");
     }
 
+    // TAA and HDR-look fields.
+    {
+        WriteFixture("config_test_taa_hdr.ini",
+            "effect=taa\n"
+            "taaBlend=0.85\n"
+            "hdrStrength=0.3\n");
+        AnaxConfig config = ParseConfigFile("config_test_taa_hdr.ini");
+        Check(config.effect == EffectKind::TAA, "parses effect=taa");
+        Check(config.taaBlend == 0.85f, "parses taaBlend=0.85");
+        Check(config.hdrStrength == 0.3f, "parses hdrStrength=0.3");
+    }
+    {
+        WriteFixture("config_test_hdrlook.ini", "effect=hdrlook\n");
+        AnaxConfig config = ParseConfigFile("config_test_hdrlook.ini");
+        Check(config.effect == EffectKind::HdrLook, "parses effect=hdrlook");
+    }
+
     // Bad values fall back to defaults for just that field, not the whole config.
     {
         WriteFixture("config_test_bad.ini",
             "effect=not_a_real_effect\n"
             "sharpness=nope\n"
-            "scale=5.0\n");
+            "scale=5.0\n"
+            "taaBlend=-1.0\n"
+            "hdrStrength=2.0\n");
         AnaxConfig config = ParseConfigFile("config_test_bad.ini");
         Check(config.effect == EffectKind::None, "unrecognized effect falls back to none");
         Check(config.sharpness == 0.5f, "unparseable sharpness falls back to default");
         Check(config.scale == 1.0f, "out-of-range scale (5.0) clamps to max 1.0");
+        Check(config.taaBlend == 0.0f, "out-of-range taaBlend (-1.0) clamps to min 0.0");
+        Check(config.hdrStrength == 1.0f, "out-of-range hdrStrength (2.0) clamps to max 1.0");
     }
 
     if (g_failures > 0) {

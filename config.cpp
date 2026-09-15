@@ -73,6 +73,8 @@ EffectKind ParseEffect(const char* value) {
     if (strcmp(value, "bilinear") == 0) return EffectKind::Bilinear;
     if (strcmp(value, "nvscaler") == 0) return EffectKind::NVScaler;
     if (strcmp(value, "nvsharpen") == 0) return EffectKind::NVSharpen;
+    if (strcmp(value, "taa") == 0) return EffectKind::TAA;
+    if (strcmp(value, "hdrlook") == 0) return EffectKind::HdrLook;
     printf("[opengl32_enh_cpp] config: unrecognized effect '%s', falling back to none\n", value);
     return EffectKind::None;
 }
@@ -141,12 +143,18 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.sharpness = ParseClampedFloat(value, 0.0f, 1.0f, config.sharpness, "sharpness");
         } else if (strcmp(key, "scale") == 0) {
             config.scale = ParseClampedFloat(value, 0.5f, 1.0f, config.scale, "scale");
+        } else if (strcmp(key, "taaBlend") == 0) {
+            config.taaBlend = ParseClampedFloat(value, 0.0f, 1.0f, config.taaBlend, "taaBlend");
+        } else if (strcmp(key, "hdrStrength") == 0) {
+            config.hdrStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.hdrStrength, "hdrStrength");
         }
     }
     fclose(f);
 
-    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, sharpness=%.3f, scale=%.3f)\n",
-           path, static_cast<int>(config.effect), config.sharpness, config.scale);
+    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, sharpness=%.3f, scale=%.3f, "
+           "taaBlend=%.3f, hdrStrength=%.3f)\n",
+           path, static_cast<int>(config.effect), config.sharpness, config.scale,
+           config.taaBlend, config.hdrStrength);
     return config;
 }
 
