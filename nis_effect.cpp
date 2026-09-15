@@ -492,6 +492,7 @@ const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
 const unsigned int GL_SHADER_STORAGE_BARRIER_BIT = 0x00002000;
 const unsigned int GL_UNIFORM_BARRIER_BIT      = 0x00000004;
 const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
+const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
 const unsigned int GL_STATIC_DRAW              = 0x88E4;
 const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
 const unsigned int GL_NO_ERROR                 = 0;
@@ -676,6 +677,8 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
     int savedDrawFbo = 0;
     gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
+    int savedUniformBuffer = 0;
+    gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
     EnsureResources(gl, state, width, height);
     EnsureStaticResources(gl, state, variant);
@@ -686,6 +689,8 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
         gl.glUseProgram((unsigned int)savedProgram);
         gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
         gl.glActiveTexture((unsigned int)savedActiveTexture);
+        gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
+        gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
     };
 
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
