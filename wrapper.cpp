@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include "pixel_invert.h"
+#include "post_effects.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -5813,7 +5814,7 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
             printf("[opengl32_enh_cpp]   wglSwapBuffers: resolved OK\n");
         }
     }
-    InvertBackBufferColors();
+    ApplySelectedEffect();
     return __proc_wglSwapBuffers(p0);
 }
 

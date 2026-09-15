@@ -18,8 +18,8 @@ import re
 import sys
 
 GL_FILE = r"gl_full.txt"
-CPP_OUT = r"..\wrapper32.cpp"
-DEF_OUT = r"..\wrapper32.def"
+CPP_OUT = r"..\wrapper.cpp"
+DEF_OUT = r"..\wrapper.def"
 
 # Raw C type -> C++ type used in the generated file. Any pointer/handle type collapses to
 # void* (ABI only cares about pointer size/slot, never the pointee), matching Opaque in the
@@ -172,6 +172,7 @@ def emit_cpp(funcs):
     lines.append("")
     lines.append("#include <cstdio>")
     lines.append('#include "pixel_invert.h"')
+    lines.append('#include "post_effects.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -210,7 +211,7 @@ def emit_cpp(funcs):
         lines.append("        }")
         lines.append("    }")
         if name == "wglSwapBuffers":
-            lines.append("    InvertBackBufferColors();")
+            lines.append("    ApplySelectedEffect();")
         if ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:

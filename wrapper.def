@@ -1,4 +1,4 @@
-LIBRARY opengl32_enh
+LIBRARY opengl32_enh32
 EXPORTS
     glAccum
     glAlphaFunc
