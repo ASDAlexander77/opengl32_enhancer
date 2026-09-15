@@ -144,3 +144,8 @@ target_link_libraries(gl_loader_test opengl32 gdi32 user32)
 # bilinear_upscale_test.cpp.
 add_executable(bilinear_upscale_test bilinear_upscale_test.cpp bilinear_upscale.cpp gl_loader.cpp)
 target_link_libraries(bilinear_upscale_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, and checks both ApplyNVScaler and
+# ApplyNVSharpen's GPU pipelines run to completion with no GL error - see nis_effect_test.cpp.
+add_executable(nis_effect_test nis_effect_test.cpp nis_effect.cpp gl_loader.cpp)
+target_link_libraries(nis_effect_test opengl32 gdi32 user32)
