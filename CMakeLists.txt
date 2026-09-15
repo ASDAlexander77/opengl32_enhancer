@@ -133,3 +133,8 @@ add_dependencies(${WRAPPER_NAME_CXX}_test ${WRAPPER_NAME_CXX})
 
 # Exercises config.cpp's INI parsing directly (no DLL/GL involved) - see config_test.cpp.
 add_executable(config_test config_test.cpp config.cpp)
+
+# Creates a real GL context and checks gl_loader.cpp resolves every GL 4.3 compute-shader
+# entry point it needs - see gl_loader_test.cpp.
+add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
+target_link_libraries(gl_loader_test opengl32 gdi32 user32)
