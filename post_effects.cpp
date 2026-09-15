@@ -3,6 +3,7 @@
 #include "post_effects.h"
 #include "config.h"
 #include "pixel_invert.h"
+#include "bilinear_upscale.h"
 
 namespace {
 
@@ -29,11 +30,12 @@ void ApplySelectedEffect() {
             InvertBackBufferColors();
             break;
         case EffectKind::Bilinear:
+            ApplyBilinearUpscale();
+            break;
         case EffectKind::NVScaler:
         case EffectKind::NVSharpen: {
-            // GPU pipeline (capture -> compute dispatch -> blit back) lands in a follow-up
-            // plan (see the plan's Scope note). Until then, these are recognized and
-            // logged, and fall back to doing nothing, same as effect=none.
+            // NIS shader port lands in a follow-up plan. Until then, these are recognized
+            // and logged, and fall back to doing nothing, same as effect=none.
             static bool warned = false;
             if (!warned) {
                 printf("[opengl32_enh_cpp] post_effects: effect='%s' is not implemented yet, "
