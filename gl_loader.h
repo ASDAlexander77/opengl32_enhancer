@@ -55,6 +55,8 @@ typedef void (__stdcall *PFNGLBINDTEXTUREPROC)(unsigned int target, unsigned int
 typedef void (__stdcall *PFNGLTEXPARAMETERIPROC)(unsigned int target, unsigned int pname, int param);
 typedef void (__stdcall *PFNGLCOPYTEXSUBIMAGE2DPROC)(unsigned int target, int level, int xoffset, int yoffset,
     int x, int y, int width, int height);
+typedef void (__stdcall *PFNGLTEXSUBIMAGE2DPROC)(unsigned int target, int level, int xoffset, int yoffset,
+    int width, int height, unsigned int format, unsigned int type, const void* pixels);
 typedef void (__stdcall *PFNGLREADBUFFERPROC)(unsigned int mode);
 typedef void (__stdcall *PFNGLGETINTEGERVPROC)(unsigned int pname, int* params);
 typedef unsigned int (__stdcall *PFNGLGETERRORPROC)(void);
@@ -94,6 +96,7 @@ struct GlComputeApi {
     PFNGLBINDTEXTUREPROC glBindTexture = nullptr;
     PFNGLTEXPARAMETERIPROC glTexParameteri = nullptr;
     PFNGLCOPYTEXSUBIMAGE2DPROC glCopyTexSubImage2D = nullptr;
+    PFNGLTEXSUBIMAGE2DPROC glTexSubImage2D = nullptr;
     PFNGLREADBUFFERPROC glReadBuffer = nullptr;
     PFNGLGETINTEGERVPROC glGetIntegerv = nullptr;
     PFNGLGETERRORPROC glGetError = nullptr;

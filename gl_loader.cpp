@@ -112,6 +112,7 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= ResolveLegacy("glBindTexture", api.glBindTexture);
     ok &= ResolveLegacy("glTexParameteri", api.glTexParameteri);
     ok &= ResolveLegacy("glCopyTexSubImage2D", api.glCopyTexSubImage2D);
+    ok &= ResolveLegacy("glTexSubImage2D", api.glTexSubImage2D);
     ok &= ResolveLegacy("glReadBuffer", api.glReadBuffer);
     ok &= ResolveLegacy("glGetIntegerv", api.glGetIntegerv);
     ok &= ResolveLegacy("glGetError", api.glGetError);
