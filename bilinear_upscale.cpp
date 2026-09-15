@@ -209,12 +209,35 @@ void ApplyBilinearUpscale() {
 
     EnsureTextures(gl, width, height);
 
+    // Restores the GL state saved above. Factored out so both the normal exit and the
+    // early bail-out below (on a capture failure) leave the host app's state untouched.
+    auto restoreState = [&]() {
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
+        gl.glUseProgram((unsigned int)savedProgram);
+        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
+        gl.glActiveTexture((unsigned int)savedActiveTexture);
+    };
+
+    // Force the read framebuffer to the default (live back buffer) before Capture. This is
+    // needed on every call, not just after EnsureTextures' slow (first-call/resize) path:
+    // on the common fast path (EnsureTextures returns immediately), whatever the host app
+    // had bound as its read framebuffer at swap time would otherwise still be bound here,
+    // and glReadBuffer(GL_BACK) is invalid while a non-default FBO is the read target.
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
     // Capture: copy the current back buffer straight into the input texture, GPU-to-GPU.
-    // Nothing in this function has touched GL_READ_FRAMEBUFFER yet, so the default
-    // framebuffer (the live back buffer) is still the read source at this point.
     gl.glReadBuffer(GL_BACK);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
     gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+
+    unsigned int captureErr = gl.glGetError();
+    if (captureErr != GL_NO_ERROR) {
+        printf("[opengl32_enh_cpp] bilinear_upscale: glGetError() = 0x%04X after capture, "
+               "skipping this frame\n", captureErr);
+        restoreState();
+        return;
+    }
 
     // Dispatch: run the compute shader, sampling the input texture and writing the output
     // texture as an image.
@@ -237,10 +260,5 @@ void ApplyBilinearUpscale() {
         printf("[opengl32_enh_cpp] bilinear_upscale: glGetError() = 0x%04X after dispatch\n", err);
     }
 
-    // Restore.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-    gl.glUseProgram((unsigned int)savedProgram);
-    gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
-    gl.glActiveTexture((unsigned int)savedActiveTexture);
+    restoreState();
 }
