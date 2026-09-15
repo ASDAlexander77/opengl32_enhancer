@@ -21,11 +21,21 @@ extern "C" {
 
 namespace {
 
+HMODULE GetRealOpenGL32Module() {
+    static HMODULE real = [] {
+        HMODULE result = LoadLibraryA("C:\\Windows\\System32\\opengl32.dll");
+        if (result == nullptr) {
+            printf("[opengl32_enh_cpp] gl_loader: FAILED to load real opengl32.dll, GetLastError=%lu\n", GetLastError());
+        }
+        return result;
+    }();
+    return real;
+}
+
 PFNWGLGETPROCADDRESSPROC GetRealWglGetProcAddress() {
     static PFNWGLGETPROCADDRESSPROC fn = [] {
-        HMODULE real = LoadLibraryA("C:\\Windows\\System32\\opengl32.dll");
+        HMODULE real = GetRealOpenGL32Module();
         if (real == nullptr) {
-            printf("[opengl32_enh_cpp] gl_loader: FAILED to load real opengl32.dll, GetLastError=%lu\n", GetLastError());
             return static_cast<PFNWGLGETPROCADDRESSPROC>(nullptr);
         }
         auto result = reinterpret_cast<PFNWGLGETPROCADDRESSPROC>(GetProcAddress(real, "wglGetProcAddress"));
@@ -41,6 +51,20 @@ template <typename T>
 bool Resolve(const char* name, T& outFn) {
     PFNWGLGETPROCADDRESSPROC wglGetProcAddress = GetRealWglGetProcAddress();
     outFn = wglGetProcAddress ? reinterpret_cast<T>(wglGetProcAddress(name)) : nullptr;
+    if (outFn == nullptr) {
+        printf("[opengl32_enh_cpp] gl_loader: FAILED to resolve '%s'\n", name);
+        return false;
+    }
+    return true;
+}
+
+// GL 1.1 core entry points are NOT reliably resolvable via wglGetProcAddress - see this
+// file's header comment. The real opengl32.dll's ordinary static export table (plain
+// GetProcAddress) is the correct way to resolve them.
+template <typename T>
+bool ResolveLegacy(const char* name, T& outFn) {
+    HMODULE real = GetRealOpenGL32Module();
+    outFn = real ? reinterpret_cast<T>(GetProcAddress(real, name)) : nullptr;
     if (outFn == nullptr) {
         printf("[opengl32_enh_cpp] gl_loader: FAILED to resolve '%s'\n", name);
         return false;
@@ -83,12 +107,20 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= Resolve("glBufferSubData", api.glBufferSubData);
     ok &= Resolve("glActiveTexture", api.glActiveTexture);
     ok &= Resolve("glTexStorage2D", api.glTexStorage2D);
+    ok &= ResolveLegacy("glGenTextures", api.glGenTextures);
+    ok &= ResolveLegacy("glDeleteTextures", api.glDeleteTextures);
+    ok &= ResolveLegacy("glBindTexture", api.glBindTexture);
+    ok &= ResolveLegacy("glTexParameteri", api.glTexParameteri);
+    ok &= ResolveLegacy("glCopyTexSubImage2D", api.glCopyTexSubImage2D);
+    ok &= ResolveLegacy("glReadBuffer", api.glReadBuffer);
+    ok &= ResolveLegacy("glGetIntegerv", api.glGetIntegerv);
+    ok &= ResolveLegacy("glGetError", api.glGetError);
 
     api.loaded = ok;
     if (ok) {
-        printf("[opengl32_enh_cpp] gl_loader: all GL 4.3 compute entry points resolved OK\n");
+        printf("[opengl32_enh_cpp] gl_loader: all GL entry points resolved OK\n");
     } else {
-        printf("[opengl32_enh_cpp] gl_loader: one or more GL 4.3 entry points unavailable - "
+        printf("[opengl32_enh_cpp] gl_loader: one or more GL entry points unavailable - "
                "compute-shader effects (bilinear/nvscaler/nvsharpen) are disabled on this context\n");
     }
     return ok;

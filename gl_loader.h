@@ -2,12 +2,20 @@
 
 #include <cstddef>
 
-// Resolves the GL 4.3+ function pointers the post-process compute-shader effects need
+// Resolves the extra GL function pointers the post-process compute-shader effects need
+// beyond what wrapper.cpp's generated per-function forwarding already covers
 // (BilinearUpscale/NVScaler/NVSharpen - see
-// docs/superpowers/specs/2026-09-15-nis-post-effects-design.md). None of these are part of
-// opengl32.dll's static export table, so wrapper.cpp's generated per-function forwarding
-// doesn't cover them - this resolves them independently via wglGetProcAddress on the real
-// system opengl32.dll.
+// docs/superpowers/specs/2026-09-15-nis-post-effects-design.md). Two categories:
+//   - GL 4.3+ functions (compute shaders, image load/store, framebuffer blit, buffers):
+//     not part of opengl32.dll's static export table, resolved via wglGetProcAddress.
+//   - A handful of GL 1.1 functions (glGenTextures, glGetIntegerv, ...): part of the
+//     static export table, but NOT reliably resolvable via wglGetProcAddress (the WGL
+//     spec only guarantees it for functions beyond GL 1.1) - resolved via plain
+//     GetProcAddress on the real opengl32.dll module instead.
+// Both categories are resolved independently of wrapper.cpp's own exported forwarding
+// (see gl_loader.cpp's header comment for why) and both live in the same GlComputeApi
+// struct/loaded flag, since callers need both together and a context-capability check
+// that covers only one category would be meaningless.
 
 typedef void (__stdcall *PFNGLBINDIMAGETEXTUREPROC)(unsigned int unit, unsigned int texture, int level,
     unsigned char layered, int layer, unsigned int access, unsigned int format);
@@ -41,6 +49,15 @@ typedef void (__stdcall *PFNGLBUFFERDATAPROC)(unsigned int target, ptrdiff_t siz
 typedef void (__stdcall *PFNGLBUFFERSUBDATAPROC)(unsigned int target, ptrdiff_t offset, ptrdiff_t size, const void* data);
 typedef void (__stdcall *PFNGLACTIVETEXTUREPROC)(unsigned int texture);
 typedef void (__stdcall *PFNGLTEXSTORAGE2DPROC)(unsigned int target, int levels, unsigned int internalformat, int width, int height);
+typedef void (__stdcall *PFNGLGENTEXTURESPROC)(int n, unsigned int* textures);
+typedef void (__stdcall *PFNGLDELETETEXTURESPROC)(int n, const unsigned int* textures);
+typedef void (__stdcall *PFNGLBINDTEXTUREPROC)(unsigned int target, unsigned int texture);
+typedef void (__stdcall *PFNGLTEXPARAMETERIPROC)(unsigned int target, unsigned int pname, int param);
+typedef void (__stdcall *PFNGLCOPYTEXSUBIMAGE2DPROC)(unsigned int target, int level, int xoffset, int yoffset,
+    int x, int y, int width, int height);
+typedef void (__stdcall *PFNGLREADBUFFERPROC)(unsigned int mode);
+typedef void (__stdcall *PFNGLGETINTEGERVPROC)(unsigned int pname, int* params);
+typedef unsigned int (__stdcall *PFNGLGETERRORPROC)(void);
 
 struct GlComputeApi {
     PFNGLBINDIMAGETEXTUREPROC glBindImageTexture = nullptr;
@@ -72,6 +89,14 @@ struct GlComputeApi {
     PFNGLBUFFERSUBDATAPROC glBufferSubData = nullptr;
     PFNGLACTIVETEXTUREPROC glActiveTexture = nullptr;
     PFNGLTEXSTORAGE2DPROC glTexStorage2D = nullptr;
+    PFNGLGENTEXTURESPROC glGenTextures = nullptr;
+    PFNGLDELETETEXTURESPROC glDeleteTextures = nullptr;
+    PFNGLBINDTEXTUREPROC glBindTexture = nullptr;
+    PFNGLTEXPARAMETERIPROC glTexParameteri = nullptr;
+    PFNGLCOPYTEXSUBIMAGE2DPROC glCopyTexSubImage2D = nullptr;
+    PFNGLREADBUFFERPROC glReadBuffer = nullptr;
+    PFNGLGETINTEGERVPROC glGetIntegerv = nullptr;
+    PFNGLGETERRORPROC glGetError = nullptr;
 
     bool loaded = false;
 };
