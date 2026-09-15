@@ -116,6 +116,8 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= ResolveLegacy("glReadBuffer", api.glReadBuffer);
     ok &= ResolveLegacy("glGetIntegerv", api.glGetIntegerv);
     ok &= ResolveLegacy("glGetError", api.glGetError);
+    ok &= ResolveLegacy("glPixelStorei", api.glPixelStorei);
+    ok &= ResolveLegacy("glReadPixels", api.glReadPixels);
 
     api.loaded = ok;
     if (ok) {

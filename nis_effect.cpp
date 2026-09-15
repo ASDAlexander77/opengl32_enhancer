@@ -496,6 +496,11 @@ const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
 const unsigned int GL_STATIC_DRAW              = 0x88E4;
 const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
 const unsigned int GL_NO_ERROR                 = 0;
+const unsigned int GL_UNPACK_SWAP_BYTES        = 0x0CF0;
+const unsigned int GL_UNPACK_ROW_LENGTH        = 0x0CF2;
+const unsigned int GL_UNPACK_SKIP_ROWS         = 0x0CF3;
+const unsigned int GL_UNPACK_SKIP_PIXELS       = 0x0CF4;
+const unsigned int GL_FALSE                    = 0;
 
 enum class NisVariant { Scaler, Sharpen };
 
@@ -571,6 +576,13 @@ unsigned int CreateCoefTexture(const GlComputeApi& gl, const float table[64][8])
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA32F, 2, 64);
+    // Force known GL_UNPACK_* pixel-store state before this one-shot upload: the host app may
+    // have left non-default values (e.g. GL_UNPACK_ROW_LENGTH) set, which would silently
+    // corrupt the read of this tightly-packed 2x64 table (and could read past its end).
+    gl.glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    gl.glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    gl.glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
     // table[phase] is 8 floats = 2 vec4 texels (x=[0..3], y=[4..7]); upload directly, the
     // float layout already matches RGBA32F row-major with width=2.
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 64, GL_RGBA, GL_FLOAT, table);
@@ -668,9 +680,29 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
 
     int savedActiveTexture = 0;
     gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
+
+    // Save every texture unit the dispatch-time bindings below will touch: unit 1 (in_texture,
+    // both variants) and, for NVScaler only, units 3/4 (coef_scaler/coef_usm). Unit 0 is only
+    // ever used transiently to capture the backbuffer into inputTexture, but we still save/
+    // restore it for symmetry with the pre-fix behavior.
     gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
+    int savedTextureBinding0 = 0;
+    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding0);
+
+    gl.glActiveTexture(GL_TEXTURE0 + 1);
+    int savedTextureBinding1 = 0;
+    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding1);
+
+    int savedTextureBinding3 = 0;
+    int savedTextureBinding4 = 0;
+    if (variant == NisVariant::Scaler) {
+        gl.glActiveTexture(GL_TEXTURE0 + 3);
+        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding3);
+        gl.glActiveTexture(GL_TEXTURE0 + 4);
+        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding4);
+    }
+    gl.glActiveTexture(GL_TEXTURE0);
+
     int savedProgram = 0;
     gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
     int savedReadFbo = 0;
@@ -687,8 +719,19 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
         gl.glUseProgram((unsigned int)savedProgram);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
+
+        gl.glActiveTexture(GL_TEXTURE0);
+        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding0);
+        gl.glActiveTexture(GL_TEXTURE0 + 1);
+        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding1);
+        if (variant == NisVariant::Scaler) {
+            gl.glActiveTexture(GL_TEXTURE0 + 3);
+            gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding3);
+            gl.glActiveTexture(GL_TEXTURE0 + 4);
+            gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding4);
+        }
         gl.glActiveTexture((unsigned int)savedActiveTexture);
+
         gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
         gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
     };
@@ -733,17 +776,20 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NISConfig), &config, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, state.configUbo);
 
+    // Texture image units must match the shaders' layout(binding=N) declarations exactly:
+    // in_texture=1, out_texture=2 (image unit, separate namespace via glBindImageTexture),
+    // coef_scaler=3, coef_usm=4 (NVScaler only - NVSharpen's shader doesn't declare them).
     gl.glUseProgram(state.program);
-    gl.glActiveTexture(GL_TEXTURE0);
+    gl.glActiveTexture(GL_TEXTURE0 + 1);
     gl.glBindTexture(GL_TEXTURE_2D, state.inputTexture);
     gl.glBindImageTexture(2, state.outputTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
     if (variant == NisVariant::Scaler) {
-        gl.glActiveTexture(GL_TEXTURE0 + 2);
-        gl.glBindTexture(GL_TEXTURE_2D, state.coefScaleTexture);
         gl.glActiveTexture(GL_TEXTURE0 + 3);
+        gl.glBindTexture(GL_TEXTURE_2D, state.coefScaleTexture);
+        gl.glActiveTexture(GL_TEXTURE0 + 4);
         gl.glBindTexture(GL_TEXTURE_2D, state.coefUsmTexture);
-        gl.glActiveTexture(GL_TEXTURE0);
     }
+    gl.glActiveTexture(GL_TEXTURE0);
 
     // Dispatch grid: one thread group per NIS_BLOCK_WIDTH x NIS_BLOCK_HEIGHT output block -
     // 32x24 for NVScaler, 32x32 for NVSharpen (see each shader's #define block above).
