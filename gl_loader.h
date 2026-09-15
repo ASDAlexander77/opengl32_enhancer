@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 // Resolves the GL 4.3+ function pointers the post-process compute-shader effects need
 // (BilinearUpscale/NVScaler/NVSharpen - see
 // docs/superpowers/specs/2026-09-15-nis-post-effects-design.md). None of these are part of
@@ -35,8 +37,8 @@ typedef void (__stdcall *PFNGLGENBUFFERSPROC)(int n, unsigned int* buffers);
 typedef void (__stdcall *PFNGLDELETEBUFFERSPROC)(int n, const unsigned int* buffers);
 typedef void (__stdcall *PFNGLBINDBUFFERPROC)(unsigned int target, unsigned int buffer);
 typedef void (__stdcall *PFNGLBINDBUFFERBASEPROC)(unsigned int target, unsigned int index, unsigned int buffer);
-typedef void (__stdcall *PFNGLBUFFERDATAPROC)(unsigned int target, long long size, const void* data, unsigned int usage);
-typedef void (__stdcall *PFNGLBUFFERSUBDATAPROC)(unsigned int target, long long offset, long long size, const void* data);
+typedef void (__stdcall *PFNGLBUFFERDATAPROC)(unsigned int target, ptrdiff_t size, const void* data, unsigned int usage);
+typedef void (__stdcall *PFNGLBUFFERSUBDATAPROC)(unsigned int target, ptrdiff_t offset, ptrdiff_t size, const void* data);
 typedef void (__stdcall *PFNGLACTIVETEXTUREPROC)(unsigned int texture);
 typedef void (__stdcall *PFNGLTEXSTORAGE2DPROC)(unsigned int target, int levels, unsigned int internalformat, int width, int height);
 
