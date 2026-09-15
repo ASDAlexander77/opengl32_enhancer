@@ -121,7 +121,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -138,3 +138,9 @@ add_executable(config_test config_test.cpp config.cpp)
 # entry point it needs - see gl_loader_test.cpp.
 add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
 target_link_libraries(gl_loader_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, and checks ApplyBilinearUpscale()'s
+# GPU pipeline (capture -> compute dispatch -> blit) reproduces it without a GL error - see
+# bilinear_upscale_test.cpp.
+add_executable(bilinear_upscale_test bilinear_upscale_test.cpp bilinear_upscale.cpp gl_loader.cpp)
+target_link_libraries(bilinear_upscale_test opengl32 gdi32 user32)
