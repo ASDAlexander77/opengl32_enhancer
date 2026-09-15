@@ -171,6 +171,7 @@ def emit_cpp(funcs):
     lines.append(f"// NOT wrapped (signature genuinely unknown/undocumented): {', '.join(UNKNOWN_EXPORTS)}.")
     lines.append("")
     lines.append("#include <cstdio>")
+    lines.append('#include "pixel_invert.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -208,6 +209,8 @@ def emit_cpp(funcs):
         lines.append(f'            printf("[opengl32_enh_cpp]   {name}: resolved OK\\n");')
         lines.append("        }")
         lines.append("    }")
+        if name == "wglSwapBuffers":
+            lines.append("    InvertBackBufferColors();")
         if ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:

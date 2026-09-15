@@ -112,7 +112,7 @@ endif()
 # here as x64 instead - purely to prove the negative: a 32-bit process cannot LoadLibrary
 # this DLL. See wrapper32_test.cpp in the x86 build, which attempts exactly that and
 # expects ERROR_BAD_EXE_FORMAT (193).
-add_library(opengl32_enh32_x64 SHARED wrapper32.cpp)
+add_library(opengl32_enh32_x64 SHARED wrapper32.cpp pixel_invert.cpp)
 set_target_properties(opengl32_enh32_x64 PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper32.def"
 )
@@ -122,7 +122,7 @@ elseif (CMAKE_SIZEOF_VOID_P EQUAL 4)
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(opengl32_enh32 SHARED wrapper32.cpp)
+add_library(opengl32_enh32 SHARED wrapper32.cpp pixel_invert.cpp)
 set_target_properties(opengl32_enh32 PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper32.def"
 )
