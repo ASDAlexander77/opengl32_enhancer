@@ -14,6 +14,18 @@ static const unsigned int GL_BACK           = 0x0405;
 static const unsigned int GL_RGBA           = 0x1908;
 static const unsigned int GL_UNSIGNED_BYTE  = 0x1401;
 static const unsigned int GL_PACK_ALIGNMENT = 0x0D05;
+static const unsigned int GL_PROJECTION     = 0x1701;
+static const unsigned int GL_MODELVIEW      = 0x1700;
+static const unsigned int GL_DEPTH_TEST     = 0x0B71;
+static const unsigned int GL_BLEND          = 0x0BE2;
+static const unsigned int GL_ALPHA_TEST     = 0x0BC0;
+static const unsigned int GL_SCISSOR_TEST   = 0x0C11;
+static const unsigned int GL_TEXTURE_2D     = 0x0DE1;
+static const unsigned int GL_LIGHTING       = 0x0B50;
+// Bits for glPushAttrib/glPopAttrib - GL_CURRENT_BIT covers the raster position set by
+// glRasterPos2f, so it round-trips through the push/pop along with the enable states below.
+static const unsigned int GL_CURRENT_BIT    = 0x00000001;
+static const unsigned int GL_ENABLE_BIT     = 0x00002000;
 
 // The real entry points, defined (and forwarded to the system opengl32.dll) elsewhere in
 // this same DLL by wrapper32.cpp. Declaring and calling them directly here reuses that
@@ -25,8 +37,15 @@ extern "C" {
     void __stdcall glDrawBuffer(unsigned int mode);
     void __stdcall glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void* pixels);
     void __stdcall glDrawPixels(int width, int height, unsigned int format, unsigned int type, void* pixels);
-    void __stdcall glRasterPos2i(int x, int y);
+    void __stdcall glRasterPos2f(float x, float y);
     void __stdcall glPixelZoom(float xfactor, float yfactor);
+    void __stdcall glMatrixMode(unsigned int mode);
+    void __stdcall glPushMatrix(void);
+    void __stdcall glPopMatrix(void);
+    void __stdcall glLoadIdentity(void);
+    void __stdcall glPushAttrib(unsigned int mask);
+    void __stdcall glPopAttrib(void);
+    void __stdcall glDisable(unsigned int cap);
 }
 
 void InvertBackBufferColors() {
@@ -57,10 +76,37 @@ void InvertBackBufferColors() {
         // alpha (p[3]) is left untouched
     }
 
-    glRasterPos2i(0, 0);
+    // glRasterPos and glDrawPixels are affected by the app's current matrices and enable
+    // state (projection/modelview transform the raster position; depth test, blending,
+    // scissor etc. can silently drop or alter the drawn pixels), so save and neutralize all
+    // of that first, or the overlay can end up invisible.
+    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_LIGHTING);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // With identity projection/modelview, object coords (-1,-1) map to NDC (-1,-1), i.e. the
+    // bottom-left corner of the viewport - matching glReadPixels' (0,0) origin above.
+    glRasterPos2f(-1.0f, -1.0f);
     glPixelZoom(1.0f, 1.0f);
     glDrawBuffer(GL_BACK);
     glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glPopAttrib();
 
     free(pixels);
 }

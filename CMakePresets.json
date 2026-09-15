@@ -16,7 +16,7 @@
     {
       "name": "x86",
       "displayName": "x86 (Ninja, plain C++ proxy only)",
-      "description": "Builds only opengl32_enh32.dll + wrapper32_test.exe (see CMakeLists.txt's CMAKE_SIZEOF_VOID_P branch and generators/gen_wrapper_cpp.py) - no TSLANG involved. The environment below stands in for vcvars32.bat so this configures without needing to be run from an x86 Native Tools prompt; bump the MSVC/SDK version strings here if the toolchain is updated.",
+      "description": "Builds only opengl32_enh32.dll + opengl32_enh32_test.exe (see CMakeLists.txt's CMAKE_SIZEOF_VOID_P branch and generators/gen_wrapper_cpp.py) - no TSLANG involved. The environment below stands in for vcvars32.bat so this configures without needing to be run from an x86 Native Tools prompt; bump the MSVC/SDK version strings here if the toolchain is updated.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-x86",
       "cacheVariables": {
