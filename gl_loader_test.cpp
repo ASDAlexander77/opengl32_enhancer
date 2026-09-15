@@ -60,6 +60,12 @@ int main() {
     bool ok = LoadGlComputeApi(api);
     printf("LoadGlComputeApi -> %s\n", ok ? "PASS (all entry points resolved)" : "FAIL (see FAILED lines above)");
 
+    // Sanity check for GetGlComputeApi()'s retry-until-success caching (gl_loader.cpp): with
+    // a real context already current, it should resolve successfully on this first call too.
+    const GlComputeApi& cachedApi = GetGlComputeApi();
+    printf("GetGlComputeApi -> %s\n", cachedApi.loaded ? "PASS (loaded=true)" : "FAIL (loaded=false)");
+    ok = ok && cachedApi.loaded;
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);

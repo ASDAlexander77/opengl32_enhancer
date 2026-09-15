@@ -1,3 +1,5 @@
 /.vs
 /.vscode
 /build*/
+/config_test_*.ini
+/build_output.txt

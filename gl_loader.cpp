@@ -95,10 +95,14 @@ bool LoadGlComputeApi(GlComputeApi& api) {
 }
 
 const GlComputeApi& GetGlComputeApi() {
-    static const GlComputeApi api = [] {
-        GlComputeApi result;
-        LoadGlComputeApi(result);
-        return result;
-    }();
+    // Not synchronized: like wrapper.cpp's EnsureRealOpenGL32 and other lazy-init patterns
+    // in this codebase, this is only ever called from the single render thread inside the
+    // wglSwapBuffers-family hooks, so no locking is needed. Only a successful resolution is
+    // cached - a failed attempt (e.g. called before any GL context is current) is retried on
+    // every subsequent call instead of latching failure for the rest of the process.
+    static GlComputeApi api;
+    if (!api.loaded) {
+        LoadGlComputeApi(api);
+    }
     return api;
 }

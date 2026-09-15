@@ -82,6 +82,10 @@ struct GlComputeApi {
 // then treat every compute-shader effect as unavailable and fall back to effect=none.
 bool LoadGlComputeApi(GlComputeApi& api);
 
-// Cached, process-lifetime singleton wrapping LoadGlComputeApi(): the first call resolves
-// the API (logging once on failure), later calls return the same cached result.
+// Cached wrapper around LoadGlComputeApi(): once resolution succeeds, the result is cached
+// for the rest of the process and returned as-is on every subsequent call. Until then (e.g.
+// if called before any GL context is current), each call re-attempts resolution from
+// scratch and re-logs any failures - a failed attempt is never cached, so a later call made
+// once a capable context is current can still succeed. Not synchronized; assumes all calls
+// come from the single render thread (see gl_loader.cpp).
 const GlComputeApi& GetGlComputeApi();
