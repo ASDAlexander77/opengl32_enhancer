@@ -69,12 +69,7 @@ const char* kHdrLookShaderSource =
     "    vec4 color = texture(inputTex, uv);\n"
     "    vec3 c = color.rgb;\n"
     "    vec3 toneMapped = acesFilm(c);\n"
-    "    vec3 graded = mix(c, toneMapped, strength);\n"
-    "    float luma = dot(graded, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    vec3 saturated = mix(vec3(luma), graded, 1.0 + 0.5 * strength);\n"
-    "    float highlightMask = smoothstep(0.55, 1.0, luma);\n"
-    "    vec3 result = saturated + highlightMask * 0.2 * strength;\n"
-    "    result = clamp(result, 0.0, 1.0);\n"
+    "    vec3 result = mix(c, toneMapped, strength);\n"
     "    imageStore(outputImage, outCoord, vec4(result, color.a));\n"
     "}\n";
 

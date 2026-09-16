@@ -49,6 +49,9 @@ typedef void (__stdcall *PFNGLBUFFERDATAPROC)(unsigned int target, ptrdiff_t siz
 typedef void (__stdcall *PFNGLBUFFERSUBDATAPROC)(unsigned int target, ptrdiff_t offset, ptrdiff_t size, const void* data);
 typedef void (__stdcall *PFNGLACTIVETEXTUREPROC)(unsigned int texture);
 typedef void (__stdcall *PFNGLTEXSTORAGE2DPROC)(unsigned int target, int levels, unsigned int internalformat, int width, int height);
+typedef void (__stdcall *PFNGLTEXSTORAGE3DPROC)(unsigned int target, int levels, unsigned int internalformat, int width, int height, int depth);
+typedef void (__stdcall *PFNGLTEXSUBIMAGE3DPROC)(unsigned int target, int level, int xoffset, int yoffset, int zoffset,
+    int width, int height, int depth, unsigned int format, unsigned int type, const void* pixels);
 typedef void (__stdcall *PFNGLGENTEXTURESPROC)(int n, unsigned int* textures);
 typedef void (__stdcall *PFNGLDELETETEXTURESPROC)(int n, const unsigned int* textures);
 typedef void (__stdcall *PFNGLBINDTEXTUREPROC)(unsigned int target, unsigned int texture);
@@ -94,6 +97,8 @@ struct GlComputeApi {
     PFNGLBUFFERSUBDATAPROC glBufferSubData = nullptr;
     PFNGLACTIVETEXTUREPROC glActiveTexture = nullptr;
     PFNGLTEXSTORAGE2DPROC glTexStorage2D = nullptr;
+    PFNGLTEXSTORAGE3DPROC glTexStorage3D = nullptr;
+    PFNGLTEXSUBIMAGE3DPROC glTexSubImage3D = nullptr;
     PFNGLGENTEXTURESPROC glGenTextures = nullptr;
     PFNGLDELETETEXTURESPROC glDeleteTextures = nullptr;
     PFNGLBINDTEXTUREPROC glBindTexture = nullptr;

@@ -72,9 +72,17 @@ EffectKind ParseEffect(const char* value) {
     if (strcmp(value, "invert") == 0) return EffectKind::Invert;
     if (strcmp(value, "bilinear") == 0) return EffectKind::Bilinear;
     if (strcmp(value, "nvscaler") == 0) return EffectKind::NVScaler;
-    if (strcmp(value, "nvsharpen") == 0) return EffectKind::NVSharpen;
     printf("[opengl32_enh_cpp] config: unrecognized effect '%s', falling back to none\n", value);
     return EffectKind::None;
+}
+
+void CopyLutPath(AnaxConfig& config, const char* value) {
+    if (strlen(value) >= sizeof(config.lutPath)) {
+        printf("[opengl32_enh_cpp] config: 'lutPath' value '%s' is too long (max %zu chars), ignoring\n",
+               value, sizeof(config.lutPath) - 1);
+        return;
+    }
+    strcpy(config.lutPath, value);
 }
 
 bool ParseBool(const char* value, bool fallback, const char* key) {
@@ -144,18 +152,23 @@ AnaxConfig ParseConfigFile(const char* path) {
         Trim(value);
 
         if (strcmp(key, "effect") == 0) {
-            // effect=taa / effect=hdrlook are pre-addon config files (TAA/HdrLook used to be
-            // primary effects); map them onto the equivalent addon flag for compatibility.
+            // effect=taa / hdrlook / nvsharpen are pre-addon config files (all three used to
+            // be primary effects); map them onto the equivalent addon flag for compatibility.
             if (strcmp(value, "taa") == 0) {
                 printf("[opengl32_enh_cpp] config: 'effect=taa' is now expressed as 'enableTaa=true', "
                        "treating as effect=none + enableTaa=true\n");
                 config.effect = EffectKind::None;
                 config.enableTaa = true;
             } else if (strcmp(value, "hdrlook") == 0) {
-                printf("[opengl32_enh_cpp] config: 'effect=hdrlook' is now expressed as 'enableHdrLook=true', "
-                       "treating as effect=none + enableHdrLook=true\n");
+                printf("[opengl32_enh_cpp] config: 'effect=hdrlook' is now expressed as 'enableAcesToneMap=true', "
+                       "treating as effect=none + enableAcesToneMap=true\n");
                 config.effect = EffectKind::None;
-                config.enableHdrLook = true;
+                config.enableAcesToneMap = true;
+            } else if (strcmp(value, "nvsharpen") == 0) {
+                printf("[opengl32_enh_cpp] config: 'effect=nvsharpen' is now expressed as 'enableSharpen=true', "
+                       "treating as effect=none + enableSharpen=true\n");
+                config.effect = EffectKind::None;
+                config.enableSharpen = true;
             } else {
                 config.effect = ParseEffect(value);
             }
@@ -163,23 +176,42 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.sharpness = ParseClampedFloat(value, 0.0f, 1.0f, config.sharpness, "sharpness");
         } else if (strcmp(key, "scale") == 0) {
             config.scale = ParseClampedFloat(value, 0.5f, 1.0f, config.scale, "scale");
+        } else if (strcmp(key, "enableSharpen") == 0) {
+            config.enableSharpen = ParseBool(value, config.enableSharpen, "enableSharpen");
         } else if (strcmp(key, "enableTaa") == 0) {
             config.enableTaa = ParseBool(value, config.enableTaa, "enableTaa");
         } else if (strcmp(key, "taaBlend") == 0) {
             config.taaBlend = ParseClampedFloat(value, 0.0f, 1.0f, config.taaBlend, "taaBlend");
+        } else if (strcmp(key, "enableAcesToneMap") == 0) {
+            config.enableAcesToneMap = ParseBool(value, config.enableAcesToneMap, "enableAcesToneMap");
+        } else if (strcmp(key, "acesStrength") == 0) {
+            config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "acesStrength");
         } else if (strcmp(key, "enableHdrLook") == 0) {
-            config.enableHdrLook = ParseBool(value, config.enableHdrLook, "enableHdrLook");
+            // Renamed to enableAcesToneMap (this key now only controls the ACES tone-mapping
+            // stage - LUT grading, formerly folded into the same pass, is now its own stage).
+            printf("[opengl32_enh_cpp] config: 'enableHdrLook' is now 'enableAcesToneMap', treating as such\n");
+            config.enableAcesToneMap = ParseBool(value, config.enableAcesToneMap, "enableHdrLook");
         } else if (strcmp(key, "hdrStrength") == 0) {
-            config.hdrStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.hdrStrength, "hdrStrength");
+            printf("[opengl32_enh_cpp] config: 'hdrStrength' is now 'acesStrength', treating as such\n");
+            config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "hdrStrength");
+        } else if (strcmp(key, "enableLutGrading") == 0) {
+            config.enableLutGrading = ParseBool(value, config.enableLutGrading, "enableLutGrading");
+        } else if (strcmp(key, "lutPath") == 0) {
+            CopyLutPath(config, value);
+        } else if (strcmp(key, "lutStrength") == 0) {
+            config.lutStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.lutStrength, "lutStrength");
         }
     }
     fclose(f);
 
-    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, sharpness=%.3f, scale=%.3f, "
-           "enableTaa=%s, taaBlend=%.3f, enableHdrLook=%s, hdrStrength=%.3f)\n",
-           path, static_cast<int>(config.effect), config.sharpness, config.scale,
-           config.enableTaa ? "true" : "false", config.taaBlend,
-           config.enableHdrLook ? "true" : "false", config.hdrStrength);
+    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, scale=%.3f, "
+           "enableAcesToneMap=%s, acesStrength=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
+           "enableSharpen=%s, sharpness=%.3f, enableTaa=%s, taaBlend=%.3f)\n",
+           path, static_cast<int>(config.effect), config.scale,
+           config.enableAcesToneMap ? "true" : "false", config.acesStrength,
+           config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
+           config.enableSharpen ? "true" : "false", config.sharpness,
+           config.enableTaa ? "true" : "false", config.taaBlend);
     return config;
 }
 

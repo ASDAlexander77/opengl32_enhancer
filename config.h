@@ -9,20 +9,28 @@ enum class EffectKind {
     Invert,
     Bilinear,
     NVScaler,
-    NVSharpen,
 };
 
 struct AnaxConfig {
+    // effect: the primary/base effect - upscale or misc, runs first against the raw capture.
     EffectKind effect = EffectKind::None;
-    float sharpness = 0.5f;
     float scale = 1.0f;
-    // TAA and HDR-look are addon passes layered after the primary effect above (see
-    // post_effects.cpp), not primary effects themselves - both can be enabled independently
-    // of, and in combination with, effect and each other.
+
+    // Everything below is an addon pass layered after `effect` above (see post_effects.cpp),
+    // each independently optional, always applied in this fixed order:
+    // effect -> AcesToneMap -> LutGrading -> Sharpen -> Taa -> (real swap).
+    bool enableAcesToneMap = false;
+    float acesStrength = 0.5f;
+
+    bool enableLutGrading = false;
+    char lutPath[256] = "";
+    float lutStrength = 1.0f;
+
+    bool enableSharpen = false;
+    float sharpness = 0.5f;
+
     bool enableTaa = false;
     float taaBlend = 0.5f;
-    bool enableHdrLook = false;
-    float hdrStrength = 0.5f;
 };
 
 // Parses an INI-style config file at the given path. A missing file, a missing key, or an

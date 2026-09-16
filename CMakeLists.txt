@@ -29,7 +29,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp taa.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp lut_grading.cpp taa.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -69,3 +69,10 @@ target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 # scene's color with no drift and no GL error - see taa_test.cpp.
 add_executable(taa_test taa_test.cpp taa.cpp gl_loader.cpp)
 target_link_libraries(taa_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, writes an identity .cube LUT fixture,
+# and checks ApplyLutGrading()'s GPU pipeline (parse .cube -> 3D texture -> dispatch -> blit)
+# at strength=1 (identity LUT reproduces the input), strength=0 (exact passthrough), and a
+# missing LUT file (no-op, no GL error) - see lut_grading_test.cpp.
+add_executable(lut_grading_test lut_grading_test.cpp lut_grading.cpp gl_loader.cpp)
+target_link_libraries(lut_grading_test opengl32 gdi32 user32)

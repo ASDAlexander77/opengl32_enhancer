@@ -5,12 +5,14 @@
 #include "pixel_invert.h"
 #include "bilinear_upscale.h"
 #include "nis_effect.h"
-#include "taa.h"
 #include "hdr_look.h"
+#include "lut_grading.h"
+#include "taa.h"
 
 void ApplySelectedEffect() {
     const AnaxConfig& config = GetAnaxConfig();
 
+    // Primary effect: captures the raw back buffer and runs the base upscale/misc transform.
     switch (config.effect) {
         case EffectKind::None:
             break;
@@ -23,16 +25,18 @@ void ApplySelectedEffect() {
         case EffectKind::NVScaler:
             ApplyNVScaler(config.sharpness);
             break;
-        case EffectKind::NVSharpen:
-            ApplyNVSharpen(config.sharpness);
-            break;
     }
 
-    // TAA and HDR-look are optional addon passes layered after the primary effect above,
-    // independent of it and of each other. HDR-look runs first so TAA stabilizes the graded
-    // result rather than grading already-stabilized output.
-    if (config.enableHdrLook) {
-        ApplyHdrLook(config.hdrStrength);
+    // Everything below is an optional addon pass, each independent of the others, always
+    // applied in this fixed order: ACES tone map -> LUT grading -> Sharpen -> TAA.
+    if (config.enableAcesToneMap) {
+        ApplyHdrLook(config.acesStrength);
+    }
+    if (config.enableLutGrading) {
+        ApplyLutGrading(config.lutPath, config.lutStrength);
+    }
+    if (config.enableSharpen) {
+        ApplyNVSharpen(config.sharpness);
     }
     if (config.enableTaa) {
         ApplyTaa(config.taaBlend);

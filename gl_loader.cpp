@@ -107,6 +107,8 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= Resolve("glBufferSubData", api.glBufferSubData);
     ok &= Resolve("glActiveTexture", api.glActiveTexture);
     ok &= Resolve("glTexStorage2D", api.glTexStorage2D);
+    ok &= Resolve("glTexStorage3D", api.glTexStorage3D);
+    ok &= Resolve("glTexSubImage3D", api.glTexSubImage3D);
     ok &= ResolveLegacy("glGenTextures", api.glGenTextures);
     ok &= ResolveLegacy("glDeleteTextures", api.glDeleteTextures);
     ok &= ResolveLegacy("glBindTexture", api.glBindTexture);
