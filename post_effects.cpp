@@ -186,20 +186,20 @@ void ApplySelectedEffect() {
     // applied in this fixed order: ACES tone map -> Bloom -> Sharpen -> LUT grading -> TAA ->
     // Dither. Dither runs last (right before the final blit) so it dithers whatever the rest
     // of the pipeline produced.
-    if (config.enableAcesToneMap) {
-        if (ApplyHdrLook(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.acesStrength)) cur = 1 - cur;
-    }
     if (config.enableBloom) {
         if (ApplyBloom(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.bloomThreshold, config.bloomIntensity)) cur = 1 - cur;
     }
-    if (config.enableSharpen) {
-        if (ApplyNVSharpen(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.sharpness)) cur = 1 - cur;
+    if (config.enableAcesToneMap) {
+        if (ApplyHdrLook(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.acesStrength)) cur = 1 - cur;
     }
     if (config.enableLutGrading) {
         if (ApplyLutGrading(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.lutPath, config.lutStrength)) cur = 1 - cur;
     }
     if (config.enableTaa) {
         if (ApplyTaa(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.taaBlend)) cur = 1 - cur;
+    }
+    if (config.enableSharpen) {
+        if (ApplyNVSharpen(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.sharpness)) cur = 1 - cur;
     }
     if (config.enableDither) {
         if (ApplyDither(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.ditherStrength)) cur = 1 - cur;
