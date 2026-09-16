@@ -176,6 +176,7 @@ def emit_cpp(funcs):
     lines.append("#include <cstdio>")
     lines.append('#include "pixel_invert.h"')
     lines.append('#include "post_effects.h"')
+    lines.append('#include "texture_sharpen.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -232,7 +233,12 @@ def emit_cpp(funcs):
         lines.append("    }")
         if name == "wglSwapBuffers":
             lines.append("    ApplySelectedEffect();")
-        if ret == "void":
+        if name == "glTexImage2D":
+            # See texture_sharpen.h: decides whether to sharpen this upload and calls
+            # cache_var itself (with either the original pixels or the sharpened ones, same
+            # width/height either way), so this skips the default passthrough line below.
+            lines.append(f"    SharpenTextureUpload({cache_var}, {params_call});")
+        elif ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:
             lines.append(f"    return {cache_var}({params_call});")
