@@ -9,6 +9,10 @@ real `opengl32.dll` function (forwarding each call to the system OpenGL
 library), and hooks `wglSwapBuffers` to run a chain of post-process effects
 on the rendered frame right before it's presented.
 
+| Enhancement off | Enhancement on |
+| --- | --- |
+| ![Enhancement off](docs/imgs/enh_off.jpg) | ![Enhancement on](docs/imgs/enh_on.jpg) |
+
 ## Effects
 
 The pipeline is a comma-separated list of stages in `opengl32_enhancer.ini`,
