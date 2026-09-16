@@ -18,16 +18,20 @@ struct AnaxConfig {
 
     // Everything below is an addon pass layered after `effect` above (see post_effects.cpp),
     // each independently optional, always applied in this fixed order:
-    // effect -> AcesToneMap -> LutGrading -> Sharpen -> Taa -> (real swap).
+    // effect -> AcesToneMap -> Bloom -> Sharpen -> LutGrading -> Taa -> (real swap).
     bool enableAcesToneMap = false;
     float acesStrength = 0.5f;
+
+    bool enableBloom = false;
+    float bloomThreshold = 0.8f;
+    float bloomIntensity = 0.5f;
+
+    bool enableSharpen = false;
+    float sharpness = 0.5f;
 
     bool enableLutGrading = false;
     char lutPath[256] = "";
     float lutStrength = 1.0f;
-
-    bool enableSharpen = false;
-    float sharpness = 0.5f;
 
     bool enableTaa = false;
     float taaBlend = 0.5f;

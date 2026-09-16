@@ -6,6 +6,7 @@
 #include "bilinear_upscale.h"
 #include "nis_effect.h"
 #include "hdr_look.h"
+#include "bloom.h"
 #include "lut_grading.h"
 #include "taa.h"
 
@@ -28,15 +29,18 @@ void ApplySelectedEffect() {
     }
 
     // Everything below is an optional addon pass, each independent of the others, always
-    // applied in this fixed order: ACES tone map -> LUT grading -> Sharpen -> TAA.
+    // applied in this fixed order: ACES tone map -> Bloom -> Sharpen -> LUT grading -> TAA.
     if (config.enableAcesToneMap) {
         ApplyHdrLook(config.acesStrength);
     }
-    if (config.enableLutGrading) {
-        ApplyLutGrading(config.lutPath, config.lutStrength);
+    if (config.enableBloom) {
+        ApplyBloom(config.bloomThreshold, config.bloomIntensity);
     }
     if (config.enableSharpen) {
         ApplyNVSharpen(config.sharpness);
+    }
+    if (config.enableLutGrading) {
+        ApplyLutGrading(config.lutPath, config.lutStrength);
     }
     if (config.enableTaa) {
         ApplyTaa(config.taaBlend);

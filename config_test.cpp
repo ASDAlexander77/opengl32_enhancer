@@ -40,6 +40,9 @@ int main() {
         Check(config.scale == 1.0f, "missing file falls back to default scale");
         Check(config.enableAcesToneMap == false, "missing file falls back to default enableAcesToneMap (false)");
         Check(config.acesStrength == 0.5f, "missing file falls back to default acesStrength");
+        Check(config.enableBloom == false, "missing file falls back to default enableBloom (false)");
+        Check(config.bloomThreshold == 0.8f, "missing file falls back to default bloomThreshold");
+        Check(config.bloomIntensity == 0.5f, "missing file falls back to default bloomIntensity");
         Check(config.enableLutGrading == false, "missing file falls back to default enableLutGrading (false)");
         Check(strcmp(config.lutPath, "") == 0, "missing file falls back to default lutPath (empty)");
         Check(config.lutStrength == 1.0f, "missing file falls back to default lutStrength");
@@ -75,12 +78,15 @@ int main() {
         Check(config.scale == 0.6f, "comments/whitespace: scale=0.6 parsed with inline comment stripped");
     }
 
-    // All addon fields together: ACES tone map, LUT grading, sharpen, TAA.
+    // All addon fields together: ACES tone map, bloom, LUT grading, sharpen, TAA.
     {
         WriteFixture("config_test_addons.ini",
             "effect=nvscaler\n"
             "enableAcesToneMap=true\n"
             "acesStrength=0.3\n"
+            "enableBloom=true\n"
+            "bloomThreshold=0.7\n"
+            "bloomIntensity=1.5\n"
             "enableLutGrading=true\n"
             "lutPath=luts/look.cube\n"
             "lutStrength=0.7\n"
@@ -92,6 +98,9 @@ int main() {
         Check(config.effect == EffectKind::NVScaler, "parses effect=nvscaler alongside addons");
         Check(config.enableAcesToneMap == true, "parses enableAcesToneMap=true");
         Check(config.acesStrength == 0.3f, "parses acesStrength=0.3");
+        Check(config.enableBloom == true, "parses enableBloom=true");
+        Check(config.bloomThreshold == 0.7f, "parses bloomThreshold=0.7");
+        Check(config.bloomIntensity == 1.5f, "parses bloomIntensity=1.5");
         Check(config.enableLutGrading == true, "parses enableLutGrading=true");
         Check(strcmp(config.lutPath, "luts/look.cube") == 0, "parses lutPath=luts/look.cube");
         Check(config.lutStrength == 0.7f, "parses lutStrength=0.7");
@@ -156,6 +165,7 @@ int main() {
             "scale=5.0\n"
             "taaBlend=-1.0\n"
             "acesStrength=2.0\n"
+            "bloomIntensity=5.0\n"
             "lutStrength=-2.0\n");
         AnaxConfig config = ParseConfigFile("config_test_bad.ini");
         Check(config.effect == EffectKind::None, "unrecognized effect falls back to none");
@@ -163,6 +173,7 @@ int main() {
         Check(config.scale == 1.0f, "out-of-range scale (5.0) clamps to max 1.0");
         Check(config.taaBlend == 0.0f, "out-of-range taaBlend (-1.0) clamps to min 0.0");
         Check(config.acesStrength == 1.0f, "out-of-range acesStrength (2.0) clamps to max 1.0");
+        Check(config.bloomIntensity == 2.0f, "out-of-range bloomIntensity (5.0) clamps to max 2.0");
         Check(config.lutStrength == 0.0f, "out-of-range lutStrength (-2.0) clamps to min 0.0");
     }
 

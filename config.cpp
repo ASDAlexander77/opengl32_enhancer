@@ -186,6 +186,12 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.enableAcesToneMap = ParseBool(value, config.enableAcesToneMap, "enableAcesToneMap");
         } else if (strcmp(key, "acesStrength") == 0) {
             config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "acesStrength");
+        } else if (strcmp(key, "enableBloom") == 0) {
+            config.enableBloom = ParseBool(value, config.enableBloom, "enableBloom");
+        } else if (strcmp(key, "bloomThreshold") == 0) {
+            config.bloomThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.bloomThreshold, "bloomThreshold");
+        } else if (strcmp(key, "bloomIntensity") == 0) {
+            config.bloomIntensity = ParseClampedFloat(value, 0.0f, 2.0f, config.bloomIntensity, "bloomIntensity");
         } else if (strcmp(key, "enableHdrLook") == 0) {
             // Renamed to enableAcesToneMap (this key now only controls the ACES tone-mapping
             // stage - LUT grading, formerly folded into the same pass, is now its own stage).
@@ -205,12 +211,14 @@ AnaxConfig ParseConfigFile(const char* path) {
     fclose(f);
 
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, scale=%.3f, "
-           "enableAcesToneMap=%s, acesStrength=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
-           "enableSharpen=%s, sharpness=%.3f, enableTaa=%s, taaBlend=%.3f)\n",
+           "enableAcesToneMap=%s, acesStrength=%.3f, enableBloom=%s, bloomThreshold=%.3f, bloomIntensity=%.3f, "
+           "enableSharpen=%s, sharpness=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
+           "enableTaa=%s, taaBlend=%.3f)\n",
            path, static_cast<int>(config.effect), config.scale,
            config.enableAcesToneMap ? "true" : "false", config.acesStrength,
-           config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
+           config.enableBloom ? "true" : "false", config.bloomThreshold, config.bloomIntensity,
            config.enableSharpen ? "true" : "false", config.sharpness,
+           config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
            config.enableTaa ? "true" : "false", config.taaBlend);
     return config;
 }

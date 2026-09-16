@@ -29,7 +29,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp lut_grading.cpp taa.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp taa.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -76,3 +76,10 @@ target_link_libraries(taa_test opengl32 gdi32 user32)
 # missing LUT file (no-op, no GL error) - see lut_grading_test.cpp.
 add_executable(lut_grading_test lut_grading_test.cpp lut_grading.cpp gl_loader.cpp)
 target_link_libraries(lut_grading_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, and checks ApplyBloom()'s four-pass GPU
+# pipeline (extract -> blur x2 -> composite -> blit) at intensity=0 (must reproduce the input
+# exactly, no bloom contribution) and a nonzero intensity (must run with no GL error) - see
+# bloom_test.cpp.
+add_executable(bloom_test bloom_test.cpp bloom.cpp gl_loader.cpp)
+target_link_libraries(bloom_test opengl32 gdi32 user32)
