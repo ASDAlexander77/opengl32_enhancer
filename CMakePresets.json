@@ -13,6 +13,7 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-x86",
       "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Professional/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x86/cl.exe",
         "CMAKE_CXX_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Professional/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x86/cl.exe",
         "CMAKE_LINKER": "C:/Program Files/Microsoft Visual Studio/18/Professional/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x86/link.exe",
@@ -23,12 +24,26 @@
         "LIB": "C:\\Program Files\\Microsoft Visual Studio\\18\\Professional\\VC\\Tools\\MSVC\\14.51.36231\\lib\\x86;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.28000.0\\um\\x86;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.28000.0\\ucrt\\x86",
         "PATH": "C:\\Program Files\\Microsoft Visual Studio\\18\\Professional\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x86;C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.28000.0\\x86;$penv{PATH}"
       }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release (Ninja, plain C++ proxy only)",
+      "description": "Same target as 'x86' (opengl32_enh32.dll + tests), built optimized (/O2, NDEBUG, no /RTC1 runtime checks) instead of the debug config. Separate binaryDir so a Debug and a Release build can coexist without reconfiguring over each other.",
+      "inherits": "x86",
+      "binaryDir": "${sourceDir}/build-x86-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "x86",
       "configurePreset": "x86"
+    },
+    {
+      "name": "x86-release",
+      "configurePreset": "x86-release"
     }
   ]
 }

@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.20)
 
 project(anax_enhancer CXX)
 
+# Ninja (this project's only generator - see CMakePresets.json) is single-config: whatever
+# CMAKE_BUILD_TYPE is at configure time is the only thing that build directory can ever
+# produce, unlike a Visual Studio/multi-config generator where it's chosen per-build. Default
+# to Debug when the preset/command line didn't set one, so a bare `cmake .` still works the
+# way it always has; pick "x86-release" (see CMakePresets.json) or pass
+# -DCMAKE_BUILD_TYPE=Release yourself for an optimized build.
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif()
+
 # The tslang toolchain's runtime libraries (TypeScriptAsyncRuntime.lib, LLVMSupport.lib -
 # these link into every tslang-built program, not just the compiler) are only built for
 # x64 right now; a genuine wrapper.ts x86 build needs an x86 LLVM/MLIR rebuild first (see
