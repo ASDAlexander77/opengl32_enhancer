@@ -26,11 +26,15 @@ void ApplySelectedEffect() {
         case EffectKind::NVSharpen:
             ApplyNVSharpen(config.sharpness);
             break;
-        case EffectKind::TAA:
-            ApplyTaa(config.taaBlend);
-            break;
-        case EffectKind::HdrLook:
-            ApplyHdrLook(config.hdrStrength);
-            break;
+    }
+
+    // TAA and HDR-look are optional addon passes layered after the primary effect above,
+    // independent of it and of each other. HDR-look runs first so TAA stabilizes the graded
+    // result rather than grading already-stabilized output.
+    if (config.enableHdrLook) {
+        ApplyHdrLook(config.hdrStrength);
+    }
+    if (config.enableTaa) {
+        ApplyTaa(config.taaBlend);
     }
 }

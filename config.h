@@ -10,15 +10,18 @@ enum class EffectKind {
     Bilinear,
     NVScaler,
     NVSharpen,
-    TAA,
-    HdrLook,
 };
 
 struct AnaxConfig {
     EffectKind effect = EffectKind::None;
     float sharpness = 0.5f;
     float scale = 1.0f;
+    // TAA and HDR-look are addon passes layered after the primary effect above (see
+    // post_effects.cpp), not primary effects themselves - both can be enabled independently
+    // of, and in combination with, effect and each other.
+    bool enableTaa = false;
     float taaBlend = 0.5f;
+    bool enableHdrLook = false;
     float hdrStrength = 0.5f;
 };
 

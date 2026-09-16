@@ -73,10 +73,16 @@ EffectKind ParseEffect(const char* value) {
     if (strcmp(value, "bilinear") == 0) return EffectKind::Bilinear;
     if (strcmp(value, "nvscaler") == 0) return EffectKind::NVScaler;
     if (strcmp(value, "nvsharpen") == 0) return EffectKind::NVSharpen;
-    if (strcmp(value, "taa") == 0) return EffectKind::TAA;
-    if (strcmp(value, "hdrlook") == 0) return EffectKind::HdrLook;
     printf("[opengl32_enh_cpp] config: unrecognized effect '%s', falling back to none\n", value);
     return EffectKind::None;
+}
+
+bool ParseBool(const char* value, bool fallback, const char* key) {
+    if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) return true;
+    if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) return false;
+    printf("[opengl32_enh_cpp] config: '%s' value '%s' is not a bool, using default %s\n",
+           key, value, fallback ? "true" : "false");
+    return fallback;
 }
 
 float ParseClampedFloat(const char* value, float minValue, float maxValue, float fallback, const char* key) {
@@ -138,13 +144,31 @@ AnaxConfig ParseConfigFile(const char* path) {
         Trim(value);
 
         if (strcmp(key, "effect") == 0) {
-            config.effect = ParseEffect(value);
+            // effect=taa / effect=hdrlook are pre-addon config files (TAA/HdrLook used to be
+            // primary effects); map them onto the equivalent addon flag for compatibility.
+            if (strcmp(value, "taa") == 0) {
+                printf("[opengl32_enh_cpp] config: 'effect=taa' is now expressed as 'enableTaa=true', "
+                       "treating as effect=none + enableTaa=true\n");
+                config.effect = EffectKind::None;
+                config.enableTaa = true;
+            } else if (strcmp(value, "hdrlook") == 0) {
+                printf("[opengl32_enh_cpp] config: 'effect=hdrlook' is now expressed as 'enableHdrLook=true', "
+                       "treating as effect=none + enableHdrLook=true\n");
+                config.effect = EffectKind::None;
+                config.enableHdrLook = true;
+            } else {
+                config.effect = ParseEffect(value);
+            }
         } else if (strcmp(key, "sharpness") == 0) {
             config.sharpness = ParseClampedFloat(value, 0.0f, 1.0f, config.sharpness, "sharpness");
         } else if (strcmp(key, "scale") == 0) {
             config.scale = ParseClampedFloat(value, 0.5f, 1.0f, config.scale, "scale");
+        } else if (strcmp(key, "enableTaa") == 0) {
+            config.enableTaa = ParseBool(value, config.enableTaa, "enableTaa");
         } else if (strcmp(key, "taaBlend") == 0) {
             config.taaBlend = ParseClampedFloat(value, 0.0f, 1.0f, config.taaBlend, "taaBlend");
+        } else if (strcmp(key, "enableHdrLook") == 0) {
+            config.enableHdrLook = ParseBool(value, config.enableHdrLook, "enableHdrLook");
         } else if (strcmp(key, "hdrStrength") == 0) {
             config.hdrStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.hdrStrength, "hdrStrength");
         }
@@ -152,9 +176,10 @@ AnaxConfig ParseConfigFile(const char* path) {
     fclose(f);
 
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, sharpness=%.3f, scale=%.3f, "
-           "taaBlend=%.3f, hdrStrength=%.3f)\n",
+           "enableTaa=%s, taaBlend=%.3f, enableHdrLook=%s, hdrStrength=%.3f)\n",
            path, static_cast<int>(config.effect), config.sharpness, config.scale,
-           config.taaBlend, config.hdrStrength);
+           config.enableTaa ? "true" : "false", config.taaBlend,
+           config.enableHdrLook ? "true" : "false", config.hdrStrength);
     return config;
 }
 

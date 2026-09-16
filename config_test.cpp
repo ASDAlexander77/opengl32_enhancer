@@ -39,7 +39,9 @@ int main() {
         Check(config.effect == EffectKind::None, "missing file falls back to effect=none");
         Check(config.sharpness == 0.5f, "missing file falls back to default sharpness");
         Check(config.scale == 1.0f, "missing file falls back to default scale");
+        Check(config.enableTaa == false, "missing file falls back to default enableTaa (false)");
         Check(config.taaBlend == 0.5f, "missing file falls back to default taaBlend");
+        Check(config.enableHdrLook == false, "missing file falls back to default enableHdrLook (false)");
         Check(config.hdrStrength == 0.5f, "missing file falls back to default hdrStrength");
     }
 
@@ -67,21 +69,34 @@ int main() {
         Check(config.scale == 0.6f, "comments/whitespace: scale=0.6 parsed with inline comment stripped");
     }
 
-    // TAA and HDR-look fields.
+    // TAA and HDR-look addon fields.
     {
         WriteFixture("config_test_taa_hdr.ini",
-            "effect=taa\n"
+            "effect=nvscaler\n"
+            "enableTaa=true\n"
             "taaBlend=0.85\n"
+            "enableHdrLook=true\n"
             "hdrStrength=0.3\n");
         AnaxConfig config = ParseConfigFile("config_test_taa_hdr.ini");
-        Check(config.effect == EffectKind::TAA, "parses effect=taa");
+        Check(config.effect == EffectKind::NVScaler, "parses effect=nvscaler alongside addons");
+        Check(config.enableTaa == true, "parses enableTaa=true");
         Check(config.taaBlend == 0.85f, "parses taaBlend=0.85");
+        Check(config.enableHdrLook == true, "parses enableHdrLook=true");
         Check(config.hdrStrength == 0.3f, "parses hdrStrength=0.3");
     }
+
+    // effect=taa / effect=hdrlook (pre-addon config files) migrate to the equivalent addon flag.
     {
-        WriteFixture("config_test_hdrlook.ini", "effect=hdrlook\n");
-        AnaxConfig config = ParseConfigFile("config_test_hdrlook.ini");
-        Check(config.effect == EffectKind::HdrLook, "parses effect=hdrlook");
+        WriteFixture("config_test_taa_migrate.ini", "effect=taa\n");
+        AnaxConfig config = ParseConfigFile("config_test_taa_migrate.ini");
+        Check(config.effect == EffectKind::None, "effect=taa migrates effect to none");
+        Check(config.enableTaa == true, "effect=taa migrates to enableTaa=true");
+    }
+    {
+        WriteFixture("config_test_hdrlook_migrate.ini", "effect=hdrlook\n");
+        AnaxConfig config = ParseConfigFile("config_test_hdrlook_migrate.ini");
+        Check(config.effect == EffectKind::None, "effect=hdrlook migrates effect to none");
+        Check(config.enableHdrLook == true, "effect=hdrlook migrates to enableHdrLook=true");
     }
 
     // Bad values fall back to defaults for just that field, not the whole config.
