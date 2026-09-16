@@ -40,6 +40,16 @@ it off.
 A `cyberpunk.cube` LUT (teal-tinted shadows, magenta/pink highlights, boosted
 contrast/saturation) ships as the default `lutgrading` look.
 
+## Texture sharpening
+
+Independent of the `effect=` pipeline above (which only touches the final
+composited frame), `textureSharpen=1` in `opengl32_enhancer.ini` sharpens the
+game's own textures in place as they're uploaded - reusing the same
+NVIDIA Image Scaling adaptive-sharpen pass as the `sharpen` stage, at the
+`sharpness` value. Only small, uncompressed `GL_RGBA`/`GL_UNSIGNED_BYTE`
+uploads are handled (no S3TC/BC decode), and dimensions are never changed -
+only pixel content is. Enabled by default; set it to `0` to disable.
+
 ## Installing into a game
 
 1. Grab `opengl32.dll`, `opengl32_enhancer.ini`, and `cyberpunk.cube` from the
