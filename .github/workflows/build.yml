@@ -2,7 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
     inputs:
@@ -10,6 +12,9 @@ on:
         description: 'Tag to publish as a GitHub Release (e.g. v1.0.0). Leave empty to just build.'
         required: false
         type: string
+
+permissions:
+  contents: write
 
 jobs:
   build:
