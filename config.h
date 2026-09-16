@@ -18,7 +18,7 @@ struct AnaxConfig {
 
     // Everything below is an addon pass layered after `effect` above (see post_effects.cpp),
     // each independently optional, always applied in this fixed order:
-    // effect -> AcesToneMap -> Bloom -> Sharpen -> LutGrading -> Taa -> (real swap).
+    // effect -> AcesToneMap -> Bloom -> Sharpen -> LutGrading -> Taa -> Dither -> (real swap).
     bool enableAcesToneMap = false;
     float acesStrength = 0.5f;
 
@@ -35,6 +35,9 @@ struct AnaxConfig {
 
     bool enableTaa = false;
     float taaBlend = 0.5f;
+
+    bool enableDither = false;
+    float ditherStrength = 1.0f;
 };
 
 // Parses an INI-style config file at the given path. A missing file, a missing key, or an

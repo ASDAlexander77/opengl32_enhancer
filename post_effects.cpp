@@ -9,6 +9,7 @@
 #include "bloom.h"
 #include "lut_grading.h"
 #include "taa.h"
+#include "dither.h"
 
 void ApplySelectedEffect() {
     const AnaxConfig& config = GetAnaxConfig();
@@ -29,7 +30,9 @@ void ApplySelectedEffect() {
     }
 
     // Everything below is an optional addon pass, each independent of the others, always
-    // applied in this fixed order: ACES tone map -> Bloom -> Sharpen -> LUT grading -> TAA.
+    // applied in this fixed order: ACES tone map -> Bloom -> Sharpen -> LUT grading -> TAA ->
+    // Dither. Dither runs last (right before the real swap) so it dithers whatever the rest
+    // of the pipeline produced, masking 8-bit banding from all of the RGBA8 round-trips above.
     if (config.enableAcesToneMap) {
         ApplyHdrLook(config.acesStrength);
     }
@@ -44,5 +47,8 @@ void ApplySelectedEffect() {
     }
     if (config.enableTaa) {
         ApplyTaa(config.taaBlend);
+    }
+    if (config.enableDither) {
+        ApplyDither(config.ditherStrength);
     }
 }

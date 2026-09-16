@@ -29,7 +29,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp taa.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp taa.cpp dither.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -83,3 +83,10 @@ target_link_libraries(lut_grading_test opengl32 gdi32 user32)
 # bloom_test.cpp.
 add_executable(bloom_test bloom_test.cpp bloom.cpp gl_loader.cpp)
 target_link_libraries(bloom_test opengl32 gdi32 user32)
+
+# Creates a real GL context, clears to a known color, and checks ApplyDither()'s GPU pipeline
+# at strength=0 (must reproduce the input exactly) and strength=1.0 (must run with no GL
+# error, and stay within +-1 LSB of the input since the dither offset is bounded to +-0.5 of
+# one 8-bit step) - see dither_test.cpp.
+add_executable(dither_test dither_test.cpp dither.cpp gl_loader.cpp)
+target_link_libraries(dither_test opengl32 gdi32 user32)

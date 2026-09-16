@@ -206,6 +206,10 @@ AnaxConfig ParseConfigFile(const char* path) {
             CopyLutPath(config, value);
         } else if (strcmp(key, "lutStrength") == 0) {
             config.lutStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.lutStrength, "lutStrength");
+        } else if (strcmp(key, "enableDither") == 0) {
+            config.enableDither = ParseBool(value, config.enableDither, "enableDither");
+        } else if (strcmp(key, "ditherStrength") == 0) {
+            config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
         }
     }
     fclose(f);
@@ -213,13 +217,14 @@ AnaxConfig ParseConfigFile(const char* path) {
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, scale=%.3f, "
            "enableAcesToneMap=%s, acesStrength=%.3f, enableBloom=%s, bloomThreshold=%.3f, bloomIntensity=%.3f, "
            "enableSharpen=%s, sharpness=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
-           "enableTaa=%s, taaBlend=%.3f)\n",
+           "enableTaa=%s, taaBlend=%.3f, enableDither=%s, ditherStrength=%.3f)\n",
            path, static_cast<int>(config.effect), config.scale,
            config.enableAcesToneMap ? "true" : "false", config.acesStrength,
            config.enableBloom ? "true" : "false", config.bloomThreshold, config.bloomIntensity,
            config.enableSharpen ? "true" : "false", config.sharpness,
            config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
-           config.enableTaa ? "true" : "false", config.taaBlend);
+           config.enableTaa ? "true" : "false", config.taaBlend,
+           config.enableDither ? "true" : "false", config.ditherStrength);
     return config;
 }
 
