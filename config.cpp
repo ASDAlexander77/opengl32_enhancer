@@ -1,4 +1,4 @@
-// See config.h. Reads anax_enhancer.ini (INI-style key=value lines, ';'/'#' comments,
+// See config.h. Reads opengl32_enhancer.ini (INI-style key=value lines, ';'/'#' comments,
 // inline ';' comments) next to this DLL.
 //
 // The `effect` key is an ordered, comma-separated list of stage names - membership decides
@@ -55,7 +55,7 @@ bool GetIniPathNextToThisModule(char* outPath, size_t outPathSize) {
         return false;
     }
     *(lastSlash + 1) = '\0';
-    return snprintf(outPath, outPathSize, "%sanax_enhancer.ini", modulePath) > 0;
+    return snprintf(outPath, outPathSize, "%sopengl32_enhancer.ini", modulePath) > 0;
 }
 
 void Trim(char* s) {

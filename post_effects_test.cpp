@@ -1,4 +1,4 @@
-// Integration test for the CURRENT anax_enhancer.ini, run through the real entry point
+// Integration test for the CURRENT opengl32_enhancer.ini, run through the real entry point
 // (ApplySelectedEffect(), exactly what wrapper.cpp calls from wglSwapBuffers) rather than
 // through any one stage's Apply*() function directly. Where every other *_test.cpp in this
 // project unit-tests one stage in isolation against a flat clear color, this one exercises
@@ -6,9 +6,9 @@
 // image" - the question a config edit alone (no C++ change) can't be caught by any of those.
 //
 // This links config.cpp itself (not the built DLL), so GetAnaxConfig() resolves
-// anax_enhancer.ini the normal way - next to whichever module config.cpp is compiled into,
+// opengl32_enhancer.ini the normal way - next to whichever module config.cpp is compiled into,
 // which here is this test's own .exe (see config.cpp's GetIniPathNextToThisModule and its
-// AddressAnchor trick). CMakeLists.txt copies the real anax_enhancer.ini and cyberpunk.cube
+// AddressAnchor trick). CMakeLists.txt copies the real opengl32_enhancer.ini and cyberpunk.cube
 // next to the built post_effects_test.exe after each build specifically so this test reads
 // the SAME config file the DLL ships - not a fixture - so a config-only edit (reorder a
 // stage, retune a strength) is covered by re-running this test, no rebuild of anything else
@@ -219,7 +219,7 @@ int main() {
     ok = Check(blitErr == 0, "test pattern blitted onto the real back buffer with no GL error") && ok;
 
     // This is the actual call under test: the same zero-argument entry point wrapper.cpp
-    // calls from wglSwapBuffers, reading whatever anax_enhancer.ini next to this .exe says.
+    // calls from wglSwapBuffers, reading whatever opengl32_enhancer.ini next to this .exe says.
     ApplySelectedEffect();
     unsigned int applyErr = gl.glGetError();
     ok = Check(applyErr == 0, "ApplySelectedEffect() left no GL error") && ok;

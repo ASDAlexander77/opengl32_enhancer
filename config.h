@@ -1,7 +1,7 @@
 #pragma once
 
 // Selects and configures the post-process effects applied in wglSwapBuffers (see
-// post_effects.h). Read from an INI-style anax_enhancer.ini file next to this DLL - see
+// post_effects.h). Read from an INI-style opengl32_enhancer.ini file next to this DLL - see
 // docs/superpowers/specs/2026-09-15-nis-post-effects-design.md for the file format.
 
 // One stage of the post-effect pipeline. Every one of these is a peer: there is no longer a
@@ -65,6 +65,6 @@ const char* EffectNameFor(EffectKind stage);
 // code actually being loaded as a DLL next to a real config file.
 AnaxConfig ParseConfigFile(const char* path);
 
-// Reads anax_enhancer.ini from the same directory as this DLL, once, and caches the result
+// Reads opengl32_enhancer.ini from the same directory as this DLL, once, and caches the result
 // for the rest of the process lifetime (later calls are cheap and return the same object).
 const AnaxConfig& GetAnaxConfig();

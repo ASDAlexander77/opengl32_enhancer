@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(anax_enhancer CXX)
+project(opengl32_enhancer CXX)
 
 # Ninja (this project's only generator - see CMakePresets.json) is single-config: whatever
 # CMAKE_BUILD_TYPE is at configure time is the only thing that build directory can ever
@@ -18,7 +18,7 @@ endif()
 # x64 right now; a genuine wrapper.ts x86 build needs an x86 LLVM/MLIR rebuild first (see
 # generators/gen_wrapper_cpp.py's header comment for the full story). So the two
 # architectures build entirely different things here:
-#   - x64 (the "default" preset): the full TSLANG-based project - anax_enhancer.exe,
+#   - x64 (the "default" preset): the full TSLANG-based project - opengl32_enhancer.exe,
 #     opengl32_enh.dll (from wrapper.ts), test.exe - plus the plain-C++ proxy below.
 #   - x86 (the "x86" preset): just the plain-C++ proxy below (opengl32_enh32.dll, generated
 #     by gen_wrapper_cpp.py into wrapper.cpp). No TSLANG involved on this side at all.
@@ -116,7 +116,7 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 add_executable(chromatic_aberration_test chromatic_aberration_test.cpp chromatic_aberration.cpp gl_loader.cpp)
 target_link_libraries(chromatic_aberration_test opengl32 gdi32 user32)
 
-# Integration test for the CURRENT anax_enhancer.ini: builds a synthetic test image, blits it
+# Integration test for the CURRENT opengl32_enhancer.ini: builds a synthetic test image, blits it
 # onto a real back buffer, calls the actual ApplySelectedEffect() entry point (the same one
 # wrapper.cpp calls from wglSwapBuffers), and checks it runs with no GL error and visibly
 # changes the image - then dumps input/output .ppm files for a human to judge whether today's
@@ -127,13 +127,13 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
-# post_effects_test resolves anax_enhancer.ini (and any lutPath it names) next to its own .exe
+# post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
 # the test reads the actual shipped config, not a fixture; re-run the test (no rebuild needed)
-# after editing anax_enhancer.ini to see the new pipeline exercised.
+# after editing opengl32_enhancer.ini to see the new pipeline exercised.
 add_custom_command(TARGET post_effects_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/anax_enhancer.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/opengl32_enhancer.ini
         ${CMAKE_CURRENT_SOURCE_DIR}/cyberpunk.cube
         $<TARGET_FILE_DIR:post_effects_test>
 )

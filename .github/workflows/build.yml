@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (x86)
+        run: cmake -S . -B build -A Win32
+
+      - name: Build
+        run: cmake --build build --config Release --target opengl32_enh32
+
+      - name: Stage archive contents
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path stage -Force | Out-Null
+          Copy-Item build/Release/opengl32_enh32.dll stage/opengl32.dll
+          Copy-Item opengl32_enhancer.ini stage/opengl32_enhancer.ini
+          Copy-Item cyberpunk.cube stage/cyberpunk.cube
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: opengl32_enhancer
+          path: stage/*
