@@ -1,5 +1,10 @@
 // See config.h. Reads anax_enhancer.ini (INI-style key=value lines, ';'/'#' comments,
 // inline ';' comments) next to this DLL.
+//
+// The `effect` key is an ordered, comma-separated list of stage names - membership decides
+// what runs and position decides when. The older `enableXxx=true/false` booleans are still
+// honored for config files written before that (see ApplyEnableOverrides below), but they
+// can only say whether a stage runs, not where in the chain it lands.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,13 +72,119 @@ void Trim(char* s) {
     }
 }
 
-EffectKind ParseEffect(const char* value) {
-    if (strcmp(value, "none") == 0) return EffectKind::None;
-    if (strcmp(value, "invert") == 0) return EffectKind::Invert;
-    if (strcmp(value, "bilinear") == 0) return EffectKind::Bilinear;
-    if (strcmp(value, "nvscaler") == 0) return EffectKind::NVScaler;
-    printf("[opengl32_enh_cpp] config: unrecognized effect '%s', falling back to none\n", value);
-    return EffectKind::None;
+char LowerChar(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+// Stage names in the ini are matched case-insensitively so `effect=AcesToneMap` and
+// `effect=acestonemap` both work - the canonical spelling (EffectNameFor) is the readable
+// mixed-case-free lowercase form, but nobody should have to remember that.
+bool EqualsIgnoreCase(const char* a, const char* b) {
+    while (*a != '\0' && *b != '\0') {
+        if (LowerChar(*a) != LowerChar(*b)) {
+            return false;
+        }
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+struct StageName {
+    EffectKind kind;
+    const char* name;
+};
+
+// The canonical name for each stage, in EffectKind order. EffectNameFor() indexes this
+// directly, so it must stay in sync with the enum.
+const StageName kStageNames[] = {
+    {EffectKind::None,                "none"},
+    {EffectKind::Invert,              "invert"},
+    {EffectKind::Bilinear,            "bilinear"},
+    {EffectKind::NVScaler,            "nvscaler"},
+    {EffectKind::AcesToneMap,         "acestonemap"},
+    {EffectKind::Bloom,               "bloom"},
+    {EffectKind::Sharpen,             "sharpen"},
+    {EffectKind::LutGrading,          "lutgrading"},
+    {EffectKind::Vignette,            "vignette"},
+    {EffectKind::ChromaticAberration, "chromaticaberration"},
+    {EffectKind::Taa,                 "taa"},
+    {EffectKind::Dither,              "dither"},
+};
+const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
+
+// Names that older config files used for stages that have since been renamed. Accepted on
+// input, but never written back out by EffectNameFor().
+const StageName kStageAliases[] = {
+    {EffectKind::AcesToneMap, "hdrlook"},    // was a primary effect named "hdrlook"
+    {EffectKind::Sharpen,     "nvsharpen"},  // was a primary effect named "nvsharpen"
+};
+const int kStageAliasCount = (int)(sizeof(kStageAliases) / sizeof(kStageAliases[0]));
+
+bool ParseStageName(const char* value, EffectKind& outKind) {
+    for (int i = 0; i < kStageNameCount; ++i) {
+        if (EqualsIgnoreCase(value, kStageNames[i].name)) {
+            outKind = kStageNames[i].kind;
+            return true;
+        }
+    }
+    for (int i = 0; i < kStageAliasCount; ++i) {
+        if (EqualsIgnoreCase(value, kStageAliases[i].name)) {
+            outKind = kStageAliases[i].kind;
+            printf("[opengl32_enh_cpp] config: effect '%s' is now called '%s', treating as such\n",
+                   value, EffectNameFor(outKind));
+            return true;
+        }
+    }
+    return false;
+}
+
+void AppendStage(AnaxConfig& config, EffectKind stage) {
+    if (stage == EffectKind::None) {
+        return;  // "none" is how a config says "no stages here", not a stage of its own.
+    }
+    if (config.stageCount >= kMaxEffectStages) {
+        printf("[opengl32_enh_cpp] config: more than %d effects listed, ignoring '%s' and "
+               "anything after it\n", kMaxEffectStages, EffectNameFor(stage));
+        return;
+    }
+    config.stages[config.stageCount++] = stage;
+}
+
+void RemoveStage(AnaxConfig& config, EffectKind stage) {
+    int write = 0;
+    for (int read = 0; read < config.stageCount; ++read) {
+        if (config.stages[read] != stage) {
+            config.stages[write++] = config.stages[read];
+        }
+    }
+    config.stageCount = write;
+}
+
+// Parses the comma-separated `effect` value into config.stages, replacing whatever was there
+// before (the key is authoritative - a second `effect=` line wins over the first, and over
+// any stages a legacy enableXxx flag had already contributed, which is why the enable flags
+// are collected during parsing and applied only once the whole file has been read).
+void ParseEffectList(AnaxConfig& config, char* value) {
+    config.stageCount = 0;
+
+    char* cursor = value;
+    while (cursor != nullptr && *cursor != '\0') {
+        char* comma = strchr(cursor, ',');
+        if (comma != nullptr) {
+            *comma = '\0';
+        }
+        Trim(cursor);
+        if (*cursor != '\0') {
+            EffectKind kind = EffectKind::None;
+            if (ParseStageName(cursor, kind)) {
+                AppendStage(config, kind);
+            } else {
+                printf("[opengl32_enh_cpp] config: unrecognized effect '%s', skipping it\n", cursor);
+            }
+        }
+        cursor = (comma != nullptr) ? comma + 1 : nullptr;
+    }
 }
 
 void CopyLutPath(AnaxConfig& config, const char* value) {
@@ -109,6 +220,73 @@ float ParseClampedFloat(const char* value, float minValue, float maxValue, float
     return parsed;
 }
 
+// One legacy enableXxx=true/false key that a config file set. Collected while parsing and
+// applied afterwards (see ApplyEnableOverrides) so the result doesn't depend on whether the
+// `effect` line happened to come before or after the enable flags in the file.
+struct EnableOverride {
+    bool seen = false;
+    bool value = false;
+};
+
+struct EnableKey {
+    EffectKind kind;
+    const char* key;
+};
+
+// The legacy enableXxx keys, listed in the order the pipeline used to hard-code. A config
+// file that only uses these keys therefore reproduces exactly the old fixed ordering, which
+// is the point: such a file never got to express an order, so the order it used to get is
+// the only correct thing to give it.
+const EnableKey kEnableKeys[] = {
+    {EffectKind::Bloom,               "enableBloom"},
+    {EffectKind::AcesToneMap,         "enableAcesToneMap"},
+    {EffectKind::LutGrading,          "enableLutGrading"},
+    {EffectKind::Vignette,            "enableVignette"},
+    {EffectKind::ChromaticAberration, "enableChromaticAberration"},
+    {EffectKind::Taa,                 "enableTaa"},
+    {EffectKind::Sharpen,             "enableSharpen"},
+    {EffectKind::Dither,              "enableDither"},
+};
+const int kEnableKeyCount = (int)(sizeof(kEnableKeys) / sizeof(kEnableKeys[0]));
+
+void ApplyEnableOverrides(AnaxConfig& config, const EnableOverride* overrides) {
+    bool warned = false;
+    for (int i = 0; i < kEnableKeyCount; ++i) {
+        if (!overrides[i].seen) {
+            continue;
+        }
+        if (!warned) {
+            printf("[opengl32_enh_cpp] config: 'enableXxx' keys still work but can't express "
+                   "ordering - prefer listing stages in 'effect=' instead\n");
+            warned = true;
+        }
+        bool present = HasEffectStage(config, kEnableKeys[i].kind);
+        if (overrides[i].value && !present) {
+            AppendStage(config, kEnableKeys[i].kind);
+        } else if (!overrides[i].value && present) {
+            RemoveStage(config, kEnableKeys[i].kind);
+        }
+    }
+}
+
+// Renders config.stages as "bilinear, bloom, dither" for the summary log line.
+void FormatStageList(const AnaxConfig& config, char* out, size_t outSize) {
+    if (config.stageCount == 0) {
+        snprintf(out, outSize, "none");
+        return;
+    }
+    size_t used = 0;
+    out[0] = '\0';
+    for (int i = 0; i < config.stageCount && used + 1 < outSize; ++i) {
+        int written = snprintf(out + used, outSize - used, "%s%s",
+                               i == 0 ? "" : ", ", EffectNameFor(config.stages[i]));
+        if (written <= 0) {
+            break;
+        }
+        used += (size_t)written;
+    }
+}
+
 AnaxConfig LoadConfig() {
     AnaxConfig config;
 
@@ -122,8 +300,26 @@ AnaxConfig LoadConfig() {
 
 }  // namespace
 
+bool HasEffectStage(const AnaxConfig& config, EffectKind stage) {
+    for (int i = 0; i < config.stageCount; ++i) {
+        if (config.stages[i] == stage) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* EffectNameFor(EffectKind stage) {
+    int index = (int)stage;
+    if (index < 0 || index >= kStageNameCount) {
+        return "unknown";
+    }
+    return kStageNames[index].name;
+}
+
 AnaxConfig ParseConfigFile(const char* path) {
     AnaxConfig config;
+    EnableOverride overrides[kEnableKeyCount];
 
     FILE* f = fopen(path, "r");
     if (f == nullptr) {
@@ -151,94 +347,81 @@ AnaxConfig ParseConfigFile(const char* path) {
         Trim(key);
         Trim(value);
 
-        if (strcmp(key, "effect") == 0) {
-            // effect=taa / hdrlook / nvsharpen are pre-addon config files (all three used to
-            // be primary effects); map them onto the equivalent addon flag for compatibility.
-            if (strcmp(value, "taa") == 0) {
-                printf("[opengl32_enh_cpp] config: 'effect=taa' is now expressed as 'enableTaa=true', "
-                       "treating as effect=none + enableTaa=true\n");
-                config.effect = EffectKind::None;
-                config.enableTaa = true;
-            } else if (strcmp(value, "hdrlook") == 0) {
-                printf("[opengl32_enh_cpp] config: 'effect=hdrlook' is now expressed as 'enableAcesToneMap=true', "
-                       "treating as effect=none + enableAcesToneMap=true\n");
-                config.effect = EffectKind::None;
-                config.enableAcesToneMap = true;
-            } else if (strcmp(value, "nvsharpen") == 0) {
-                printf("[opengl32_enh_cpp] config: 'effect=nvsharpen' is now expressed as 'enableSharpen=true', "
-                       "treating as effect=none + enableSharpen=true\n");
-                config.effect = EffectKind::None;
-                config.enableSharpen = true;
-            } else {
-                config.effect = ParseEffect(value);
+        // `effects` is accepted alongside `effect` purely because the value is a list now and
+        // the plural is the spelling people reach for.
+        if (strcmp(key, "effect") == 0 || strcmp(key, "effects") == 0) {
+            ParseEffectList(config, value);
+            continue;
+        }
+
+        bool handledAsEnableKey = false;
+        for (int i = 0; i < kEnableKeyCount; ++i) {
+            if (strcmp(key, kEnableKeys[i].key) == 0) {
+                overrides[i].seen = true;
+                overrides[i].value = ParseBool(value, true, kEnableKeys[i].key);
+                handledAsEnableKey = true;
+                break;
             }
-        } else if (strcmp(key, "sharpness") == 0) {
+        }
+        if (handledAsEnableKey) {
+            continue;
+        }
+
+        if (strcmp(key, "sharpness") == 0) {
             config.sharpness = ParseClampedFloat(value, 0.0f, 1.0f, config.sharpness, "sharpness");
         } else if (strcmp(key, "scale") == 0) {
             config.scale = ParseClampedFloat(value, 0.5f, 1.0f, config.scale, "scale");
-        } else if (strcmp(key, "enableSharpen") == 0) {
-            config.enableSharpen = ParseBool(value, config.enableSharpen, "enableSharpen");
-        } else if (strcmp(key, "enableTaa") == 0) {
-            config.enableTaa = ParseBool(value, config.enableTaa, "enableTaa");
         } else if (strcmp(key, "taaBlend") == 0) {
             config.taaBlend = ParseClampedFloat(value, 0.0f, 1.0f, config.taaBlend, "taaBlend");
-        } else if (strcmp(key, "enableAcesToneMap") == 0) {
-            config.enableAcesToneMap = ParseBool(value, config.enableAcesToneMap, "enableAcesToneMap");
         } else if (strcmp(key, "acesStrength") == 0) {
             config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "acesStrength");
-        } else if (strcmp(key, "enableBloom") == 0) {
-            config.enableBloom = ParseBool(value, config.enableBloom, "enableBloom");
         } else if (strcmp(key, "bloomThreshold") == 0) {
             config.bloomThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.bloomThreshold, "bloomThreshold");
         } else if (strcmp(key, "bloomIntensity") == 0) {
             config.bloomIntensity = ParseClampedFloat(value, 0.0f, 2.0f, config.bloomIntensity, "bloomIntensity");
         } else if (strcmp(key, "enableHdrLook") == 0) {
-            // Renamed to enableAcesToneMap (this key now only controls the ACES tone-mapping
-            // stage - LUT grading, formerly folded into the same pass, is now its own stage).
-            printf("[opengl32_enh_cpp] config: 'enableHdrLook' is now 'enableAcesToneMap', treating as such\n");
-            config.enableAcesToneMap = ParseBool(value, config.enableAcesToneMap, "enableHdrLook");
+            // Renamed to enableAcesToneMap, which is itself now legacy - fold it onto the
+            // same override slot so both spellings behave identically.
+            printf("[opengl32_enh_cpp] config: 'enableHdrLook' is now the 'acestonemap' effect, treating as such\n");
+            for (int i = 0; i < kEnableKeyCount; ++i) {
+                if (kEnableKeys[i].kind == EffectKind::AcesToneMap) {
+                    overrides[i].seen = true;
+                    overrides[i].value = ParseBool(value, true, "enableHdrLook");
+                    break;
+                }
+            }
         } else if (strcmp(key, "hdrStrength") == 0) {
             printf("[opengl32_enh_cpp] config: 'hdrStrength' is now 'acesStrength', treating as such\n");
             config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "hdrStrength");
-        } else if (strcmp(key, "enableLutGrading") == 0) {
-            config.enableLutGrading = ParseBool(value, config.enableLutGrading, "enableLutGrading");
         } else if (strcmp(key, "lutPath") == 0) {
             CopyLutPath(config, value);
         } else if (strcmp(key, "lutStrength") == 0) {
             config.lutStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.lutStrength, "lutStrength");
-        } else if (strcmp(key, "enableVignette") == 0) {
-            config.enableVignette = ParseBool(value, config.enableVignette, "enableVignette");
         } else if (strcmp(key, "vignetteIntensity") == 0) {
             config.vignetteIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.vignetteIntensity, "vignetteIntensity");
         } else if (strcmp(key, "vignetteRadius") == 0) {
             config.vignetteRadius = ParseClampedFloat(value, 0.0f, 1.0f, config.vignetteRadius, "vignetteRadius");
-        } else if (strcmp(key, "enableChromaticAberration") == 0) {
-            config.enableChromaticAberration = ParseBool(value, config.enableChromaticAberration, "enableChromaticAberration");
         } else if (strcmp(key, "chromaticAberrationStrength") == 0) {
             config.chromaticAberrationStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.chromaticAberrationStrength, "chromaticAberrationStrength");
-        } else if (strcmp(key, "enableDither") == 0) {
-            config.enableDither = ParseBool(value, config.enableDither, "enableDither");
         } else if (strcmp(key, "ditherStrength") == 0) {
             config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
         }
     }
     fclose(f);
 
-    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, scale=%.3f, "
-           "enableAcesToneMap=%s, acesStrength=%.3f, enableBloom=%s, bloomThreshold=%.3f, bloomIntensity=%.3f, "
-           "enableSharpen=%s, sharpness=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
-           "enableVignette=%s, vignetteIntensity=%.3f, vignetteRadius=%.3f, "
-           "enableChromaticAberration=%s, chromaticAberrationStrength=%.3f, "
-           "enableTaa=%s, taaBlend=%.3f, enableDither=%s, ditherStrength=%.3f)\n",
-           path, static_cast<int>(config.effect), config.scale,
-           config.enableAcesToneMap ? "true" : "false", config.acesStrength,
-           config.enableBloom ? "true" : "false", config.bloomThreshold, config.bloomIntensity,
-           config.enableSharpen ? "true" : "false", config.sharpness,
-           config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
-           config.enableVignette ? "true" : "false", config.vignetteIntensity, config.vignetteRadius,
-           config.enableChromaticAberration ? "true" : "false", config.chromaticAberrationStrength,
-           config.enableTaa ? "true" : "false", config.taaBlend,
-           config.enableDither ? "true" : "false", config.ditherStrength);
+    ApplyEnableOverrides(config, overrides);
+
+    char stageList[512];
+    FormatStageList(config, stageList, sizeof(stageList));
+    printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%s; scale=%.3f, acesStrength=%.3f, "
+           "bloomThreshold=%.3f, bloomIntensity=%.3f, sharpness=%.3f, lutPath='%s', lutStrength=%.3f, "
+           "vignetteIntensity=%.3f, vignetteRadius=%.3f, chromaticAberrationStrength=%.3f, "
+           "taaBlend=%.3f, ditherStrength=%.3f)\n",
+           path, stageList, config.scale, config.acesStrength,
+           config.bloomThreshold, config.bloomIntensity, config.sharpness,
+           config.lutPath, config.lutStrength,
+           config.vignetteIntensity, config.vignetteRadius, config.chromaticAberrationStrength,
+           config.taaBlend, config.ditherStrength);
     return config;
 }
 

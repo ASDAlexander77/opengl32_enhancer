@@ -1,9 +1,9 @@
 // Owns the shared post-effect pipeline: two RGBA16F ping-pong textures. Captures the real
-// back buffer into them exactly once per frame, chains every enabled stage by alternating
-// which texture is "source" and which is "destination" (each stage's ApplyX reads one and
-// writes the other, returning whether it actually wrote - see e.g. lut_grading.h's header
-// comment for why a stage can legitimately no-op), and blits the final result back to the
-// real back buffer exactly once. This replaces the old design where every effect captured
+// back buffer into them exactly once per frame, chains every stage the config listed - in the
+// order it listed them - by alternating which texture is "source" and which is "destination"
+// (each stage's ApplyX reads one and writes the other, returning whether it actually wrote -
+// see e.g. lut_grading.h's header comment for why a stage can legitimately no-op), and blits
+// the final result back to the real back buffer exactly once. This replaces the old design where every effect captured
 // and blitted independently (round-tripping through its own 8-bit RGBA8 texture even though
 // five effects chain together in one frame) - working in float and capturing/blitting once
 // meaningfully reduces the banding/precision loss that repeated 8-bit round-trips caused.
@@ -102,11 +102,7 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height) {
 void ApplySelectedEffect() {
     const AnaxConfig& config = GetAnaxConfig();
 
-    bool anyStageEnabled = config.effect != EffectKind::None || config.enableAcesToneMap ||
-        config.enableBloom || config.enableSharpen || config.enableLutGrading ||
-        config.enableVignette || config.enableChromaticAberration ||
-        config.enableTaa || config.enableDither;
-    if (!anyStageEnabled) {
+    if (config.stageCount == 0) {
         return;
     }
 
@@ -168,52 +164,58 @@ void ApplySelectedEffect() {
         return;
     }
 
+    // Run the stages in exactly the order the config listed them - there is no hard-coded
+    // pipeline order any more, and no distinction between a "primary" effect and an "addon".
+    // `cur` indexes whichever ping-pong texture currently holds the live image; a stage reads
+    // it, writes the other one, and only when the stage reports it actually wrote does `cur`
+    // flip to follow the image (see e.g. lut_grading.h for why a stage can legitimately
+    // no-op). A stage that no-ops therefore drops out of the chain cleanly instead of
+    // handing the next stage an untouched buffer.
     int cur = 0;
-
-    // Primary effect: the base upscale/misc transform, runs first against the raw capture.
-    switch (config.effect) {
-        case EffectKind::None:
-            break;
-        case EffectKind::Invert:
-            if (ApplyInvert(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height)) cur = 1 - cur;
-            break;
-        case EffectKind::Bilinear:
-            if (ApplyBilinearUpscale(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height)) cur = 1 - cur;
-            break;
-        case EffectKind::NVScaler:
-            if (ApplyNVScaler(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.sharpness)) cur = 1 - cur;
-            break;
-    }
-
-    // Everything below is an optional addon pass, each independent of the others, always
-    // applied in this fixed order: Bloom -> ACES tone map -> LUT grading -> Vignette ->
-    // Chromatic aberration -> TAA -> Sharpen -> Dither. Vignette and chromatic aberration sit
-    // after grading so the LUT grades the actual scene colors rather than colors the lens
-    // simulation already darkened/fringed. Dither runs last (right before the final blit) so
-    // it dithers whatever the rest of the pipeline produced.
-    if (config.enableBloom) {
-        if (ApplyBloom(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.bloomThreshold, config.bloomIntensity)) cur = 1 - cur;
-    }
-    if (config.enableAcesToneMap) {
-        if (ApplyHdrLook(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.acesStrength)) cur = 1 - cur;
-    }
-    if (config.enableLutGrading) {
-        if (ApplyLutGrading(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.lutPath, config.lutStrength)) cur = 1 - cur;
-    }
-    if (config.enableVignette) {
-        if (ApplyVignette(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.vignetteIntensity, config.vignetteRadius)) cur = 1 - cur;
-    }
-    if (config.enableChromaticAberration) {
-        if (ApplyChromaticAberration(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.chromaticAberrationStrength)) cur = 1 - cur;
-    }
-    if (config.enableTaa) {
-        if (ApplyTaa(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.taaBlend)) cur = 1 - cur;
-    }
-    if (config.enableSharpen) {
-        if (ApplyNVSharpen(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.sharpness)) cur = 1 - cur;
-    }
-    if (config.enableDither) {
-        if (ApplyDither(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.ditherStrength)) cur = 1 - cur;
+    for (int i = 0; i < config.stageCount; ++i) {
+        unsigned int src = g_pipeline.tex[cur];
+        unsigned int dst = g_pipeline.tex[1 - cur];
+        bool wrote = false;
+        switch (config.stages[i]) {
+            case EffectKind::None:
+                break;
+            case EffectKind::Invert:
+                wrote = ApplyInvert(src, dst, width, height);
+                break;
+            case EffectKind::Bilinear:
+                wrote = ApplyBilinearUpscale(src, dst, width, height);
+                break;
+            case EffectKind::NVScaler:
+                wrote = ApplyNVScaler(src, dst, width, height, config.sharpness);
+                break;
+            case EffectKind::AcesToneMap:
+                wrote = ApplyHdrLook(src, dst, width, height, config.acesStrength);
+                break;
+            case EffectKind::Bloom:
+                wrote = ApplyBloom(src, dst, width, height, config.bloomThreshold, config.bloomIntensity);
+                break;
+            case EffectKind::Sharpen:
+                wrote = ApplyNVSharpen(src, dst, width, height, config.sharpness);
+                break;
+            case EffectKind::LutGrading:
+                wrote = ApplyLutGrading(src, dst, width, height, config.lutPath, config.lutStrength);
+                break;
+            case EffectKind::Vignette:
+                wrote = ApplyVignette(src, dst, width, height, config.vignetteIntensity, config.vignetteRadius);
+                break;
+            case EffectKind::ChromaticAberration:
+                wrote = ApplyChromaticAberration(src, dst, width, height, config.chromaticAberrationStrength);
+                break;
+            case EffectKind::Taa:
+                wrote = ApplyTaa(src, dst, width, height, config.taaBlend);
+                break;
+            case EffectKind::Dither:
+                wrote = ApplyDither(src, dst, width, height, config.ditherStrength);
+                break;
+        }
+        if (wrote) {
+            cur = 1 - cur;
+        }
     }
 
     // Present: blit whichever texture ended up final back onto the real back buffer.

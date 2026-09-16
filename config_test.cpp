@@ -30,47 +30,111 @@ void WriteFixture(const char* path, const char* contents) {
     fclose(f);
 }
 
+// Compares config.stages against an expected sequence, so a test says what the pipeline is
+// rather than just what's switched on - the whole point of the ordered `effect` list.
+void CheckStages(const AnaxConfig& config, const EffectKind* expected, int expectedCount, const char* what) {
+    bool match = config.stageCount == expectedCount;
+    for (int i = 0; match && i < expectedCount; ++i) {
+        match = config.stages[i] == expected[i];
+    }
+    if (!match) {
+        printf("FAIL: %s\n  expected:", what);
+        for (int i = 0; i < expectedCount; ++i) {
+            printf(" %s", EffectNameFor(expected[i]));
+        }
+        printf("\n  actual:  ");
+        for (int i = 0; i < config.stageCount; ++i) {
+            printf(" %s", EffectNameFor(config.stages[i]));
+        }
+        printf("\n");
+        ++g_failures;
+    } else {
+        printf("PASS: %s\n", what);
+    }
+}
+
 }  // namespace
 
 int main() {
     // Missing file -> defaults.
     {
         AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
-        Check(config.effect == EffectKind::None, "missing file falls back to effect=none");
+        Check(config.stageCount == 0, "missing file falls back to an empty pipeline");
         Check(config.scale == 1.0f, "missing file falls back to default scale");
-        Check(config.enableAcesToneMap == false, "missing file falls back to default enableAcesToneMap (false)");
         Check(config.acesStrength == 0.5f, "missing file falls back to default acesStrength");
-        Check(config.enableBloom == false, "missing file falls back to default enableBloom (false)");
         Check(config.bloomThreshold == 0.8f, "missing file falls back to default bloomThreshold");
         Check(config.bloomIntensity == 0.5f, "missing file falls back to default bloomIntensity");
-        Check(config.enableLutGrading == false, "missing file falls back to default enableLutGrading (false)");
         Check(strcmp(config.lutPath, "") == 0, "missing file falls back to default lutPath (empty)");
         Check(config.lutStrength == 1.0f, "missing file falls back to default lutStrength");
-        Check(config.enableSharpen == false, "missing file falls back to default enableSharpen (false)");
         Check(config.sharpness == 0.5f, "missing file falls back to default sharpness");
-        Check(config.enableTaa == false, "missing file falls back to default enableTaa (false)");
         Check(config.taaBlend == 0.5f, "missing file falls back to default taaBlend");
-        Check(config.enableVignette == false, "missing file falls back to default enableVignette (false)");
         Check(config.vignetteIntensity == 0.3f, "missing file falls back to default vignetteIntensity");
         Check(config.vignetteRadius == 0.7f, "missing file falls back to default vignetteRadius");
-        Check(config.enableChromaticAberration == false, "missing file falls back to default enableChromaticAberration (false)");
         Check(config.chromaticAberrationStrength == 0.3f, "missing file falls back to default chromaticAberrationStrength");
-        Check(config.enableDither == false, "missing file falls back to default enableDither (false)");
         Check(config.ditherStrength == 1.0f, "missing file falls back to default ditherStrength");
     }
 
-    // Well-formed file.
+    // A single-stage effect list.
     {
         WriteFixture("config_test_valid.ini",
             "effect=nvscaler\n"
             "scale=0.8\n"
-            "enableSharpen=true\n"
             "sharpness=0.75\n");
         AnaxConfig config = ParseConfigFile("config_test_valid.ini");
-        Check(config.effect == EffectKind::NVScaler, "valid file parses effect=nvscaler");
+        const EffectKind expected[] = {EffectKind::NVScaler};
+        CheckStages(config, expected, 1, "single-stage effect=nvscaler");
         Check(config.scale == 0.8f, "valid file parses scale=0.8");
-        Check(config.enableSharpen == true, "valid file parses enableSharpen=true");
         Check(config.sharpness == 0.75f, "valid file parses sharpness=0.75");
+    }
+
+    // The whole pipeline in one list, in a non-default order, with mixed case and stray
+    // spaces around the commas.
+    {
+        WriteFixture("config_test_list.ini",
+            "effect = bilinear ,  Bloom,AcesToneMap , lutgrading,  VIGNETTE , chromaticaberration,taa, sharpen ,dither \n"
+            "acesStrength=0.3\n"
+            "bloomThreshold=0.7\n"
+            "bloomIntensity=1.5\n"
+            "lutPath=luts/look.cube\n"
+            "lutStrength=0.7\n"
+            "sharpness=0.6\n"
+            "taaBlend=0.85\n"
+            "vignetteIntensity=0.25\n"
+            "vignetteRadius=0.6\n"
+            "chromaticAberrationStrength=0.4\n"
+            "ditherStrength=0.5\n");
+        AnaxConfig config = ParseConfigFile("config_test_list.ini");
+        const EffectKind expected[] = {
+            EffectKind::Bilinear, EffectKind::Bloom, EffectKind::AcesToneMap,
+            EffectKind::LutGrading, EffectKind::Vignette, EffectKind::ChromaticAberration,
+            EffectKind::Taa, EffectKind::Sharpen, EffectKind::Dither,
+        };
+        CheckStages(config, expected, 9, "full pipeline list parses in order, case- and space-insensitively");
+        Check(config.acesStrength == 0.3f, "parses acesStrength=0.3");
+        Check(config.bloomThreshold == 0.7f, "parses bloomThreshold=0.7");
+        Check(config.bloomIntensity == 1.5f, "parses bloomIntensity=1.5");
+        Check(strcmp(config.lutPath, "luts/look.cube") == 0, "parses lutPath=luts/look.cube");
+        Check(config.lutStrength == 0.7f, "parses lutStrength=0.7");
+        Check(config.sharpness == 0.6f, "parses sharpness=0.6");
+        Check(config.taaBlend == 0.85f, "parses taaBlend=0.85");
+        Check(config.vignetteIntensity == 0.25f, "parses vignetteIntensity=0.25");
+        Check(config.vignetteRadius == 0.6f, "parses vignetteRadius=0.6");
+        Check(config.chromaticAberrationStrength == 0.4f, "parses chromaticAberrationStrength=0.4");
+        Check(config.ditherStrength == 0.5f, "parses ditherStrength=0.5");
+    }
+
+    // Order is preserved, not normalized: the same set of stages in a different order must
+    // come back in that different order.
+    {
+        WriteFixture("config_test_order_a.ini", "effect=bloom, acestonemap, dither\n");
+        AnaxConfig configA = ParseConfigFile("config_test_order_a.ini");
+        const EffectKind expectedA[] = {EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::Dither};
+        CheckStages(configA, expectedA, 3, "effect=bloom, acestonemap, dither keeps that order");
+
+        WriteFixture("config_test_order_b.ini", "effect=acestonemap, dither, bloom\n");
+        AnaxConfig configB = ParseConfigFile("config_test_order_b.ini");
+        const EffectKind expectedB[] = {EffectKind::AcesToneMap, EffectKind::Dither, EffectKind::Bloom};
+        CheckStages(configB, expectedB, 3, "the same three stages reordered come back reordered");
     }
 
     // Comments, blank lines, surrounding whitespace, inline comments.
@@ -78,89 +142,111 @@ int main() {
         WriteFixture("config_test_comments.ini",
             "; this is a comment\n"
             "\n"
-            "  effect = bilinear   \n"
+            "  effect = bilinear, dither  ; upscale then dither\n"
             "scale=0.6 ; half res\n");
         AnaxConfig config = ParseConfigFile("config_test_comments.ini");
-        Check(config.effect == EffectKind::Bilinear, "comments/whitespace: effect=bilinear parsed");
+        const EffectKind expected[] = {EffectKind::Bilinear, EffectKind::Dither};
+        CheckStages(config, expected, 2, "comments/whitespace: effect list parsed with inline comment stripped");
         Check(config.scale == 0.6f, "comments/whitespace: scale=0.6 parsed with inline comment stripped");
     }
 
-    // All addon fields together: ACES tone map, bloom, LUT grading, sharpen, TAA, dither.
+    // effect=none, and an empty list, both mean "no post-processing".
     {
-        WriteFixture("config_test_addons.ini",
-            "effect=nvscaler\n"
-            "enableAcesToneMap=true\n"
-            "acesStrength=0.3\n"
-            "enableBloom=true\n"
-            "bloomThreshold=0.7\n"
-            "bloomIntensity=1.5\n"
-            "enableLutGrading=true\n"
-            "lutPath=luts/look.cube\n"
-            "lutStrength=0.7\n"
-            "enableSharpen=true\n"
-            "sharpness=0.6\n"
-            "enableTaa=true\n"
-            "taaBlend=0.85\n"
-            "enableVignette=true\n"
-            "vignetteIntensity=0.25\n"
-            "vignetteRadius=0.6\n"
-            "enableChromaticAberration=true\n"
-            "chromaticAberrationStrength=0.4\n"
+        WriteFixture("config_test_none.ini", "effect=none\n");
+        AnaxConfig config = ParseConfigFile("config_test_none.ini");
+        Check(config.stageCount == 0, "effect=none produces an empty pipeline");
+    }
+    {
+        WriteFixture("config_test_empty_list.ini", "effect=\n");
+        AnaxConfig config = ParseConfigFile("config_test_empty_list.ini");
+        Check(config.stageCount == 0, "an empty effect list produces an empty pipeline");
+    }
+
+    // `effects` (plural) is accepted as a spelling of the same key.
+    {
+        WriteFixture("config_test_plural.ini", "effects=bloom, dither\n");
+        AnaxConfig config = ParseConfigFile("config_test_plural.ini");
+        const EffectKind expected[] = {EffectKind::Bloom, EffectKind::Dither};
+        CheckStages(config, expected, 2, "'effects' (plural) parses the same as 'effect'");
+    }
+
+    // Listing a stage twice is allowed - the pipeline just runs it twice, in both positions.
+    {
+        WriteFixture("config_test_dupe.ini", "effect=bloom, dither, bloom\n");
+        AnaxConfig config = ParseConfigFile("config_test_dupe.ini");
+        const EffectKind expected[] = {EffectKind::Bloom, EffectKind::Dither, EffectKind::Bloom};
+        CheckStages(config, expected, 3, "a stage listed twice appears twice, in both positions");
+    }
+
+    // An unrecognized name is skipped without taking the rest of the list with it.
+    {
+        WriteFixture("config_test_bad_name.ini", "effect=bloom, not_a_real_effect, dither\n");
+        AnaxConfig config = ParseConfigFile("config_test_bad_name.ini");
+        const EffectKind expected[] = {EffectKind::Bloom, EffectKind::Dither};
+        CheckStages(config, expected, 2, "an unrecognized stage name is skipped, later stages still parse");
+    }
+
+    // hdrlook / nvsharpen (the names these stages had when they were primary effects) still
+    // resolve, and land in the list at the position they were written in.
+    {
+        WriteFixture("config_test_aliases.ini", "effect=hdrlook, nvsharpen\n");
+        AnaxConfig config = ParseConfigFile("config_test_aliases.ini");
+        const EffectKind expected[] = {EffectKind::AcesToneMap, EffectKind::Sharpen};
+        CheckStages(config, expected, 2, "legacy names hdrlook/nvsharpen resolve to acestonemap/sharpen");
+    }
+
+    // Legacy enableXxx flags with no effect list: the stages come back in the fixed order the
+    // pipeline used to hard-code, regardless of what order the keys appear in the file (such
+    // a config never got to express an order, so the order it used to get is the right one).
+    {
+        WriteFixture("config_test_legacy_enable.ini",
             "enableDither=true\n"
-            "ditherStrength=0.5\n");
-        AnaxConfig config = ParseConfigFile("config_test_addons.ini");
-        Check(config.effect == EffectKind::NVScaler, "parses effect=nvscaler alongside addons");
-        Check(config.enableAcesToneMap == true, "parses enableAcesToneMap=true");
-        Check(config.acesStrength == 0.3f, "parses acesStrength=0.3");
-        Check(config.enableBloom == true, "parses enableBloom=true");
-        Check(config.bloomThreshold == 0.7f, "parses bloomThreshold=0.7");
-        Check(config.bloomIntensity == 1.5f, "parses bloomIntensity=1.5");
-        Check(config.enableLutGrading == true, "parses enableLutGrading=true");
-        Check(strcmp(config.lutPath, "luts/look.cube") == 0, "parses lutPath=luts/look.cube");
-        Check(config.lutStrength == 0.7f, "parses lutStrength=0.7");
-        Check(config.enableSharpen == true, "parses enableSharpen=true");
-        Check(config.sharpness == 0.6f, "parses sharpness=0.6");
-        Check(config.enableTaa == true, "parses enableTaa=true");
-        Check(config.taaBlend == 0.85f, "parses taaBlend=0.85");
-        Check(config.enableVignette == true, "parses enableVignette=true");
-        Check(config.vignetteIntensity == 0.25f, "parses vignetteIntensity=0.25");
-        Check(config.vignetteRadius == 0.6f, "parses vignetteRadius=0.6");
-        Check(config.enableChromaticAberration == true, "parses enableChromaticAberration=true");
-        Check(config.chromaticAberrationStrength == 0.4f, "parses chromaticAberrationStrength=0.4");
-        Check(config.enableDither == true, "parses enableDither=true");
-        Check(config.ditherStrength == 0.5f, "parses ditherStrength=0.5");
+            "enableSharpen=true\n"
+            "enableBloom=true\n"
+            "enableTaa=true\n");
+        AnaxConfig config = ParseConfigFile("config_test_legacy_enable.ini");
+        const EffectKind expected[] = {
+            EffectKind::Bloom, EffectKind::Taa, EffectKind::Sharpen, EffectKind::Dither,
+        };
+        CheckStages(config, expected, 4, "legacy enableXxx flags rebuild the old fixed pipeline order");
     }
 
-    // effect=taa / hdrlook / nvsharpen (pre-addon config files) migrate to the equivalent
-    // addon flag.
+    // A legacy enable flag alongside an effect list: appends what the list didn't mention,
+    // and removes what it did. Order of the lines in the file must not matter, which is why
+    // the flags are applied only after the whole file has been read.
     {
-        WriteFixture("config_test_taa_migrate.ini", "effect=taa\n");
-        AnaxConfig config = ParseConfigFile("config_test_taa_migrate.ini");
-        Check(config.effect == EffectKind::None, "effect=taa migrates effect to none");
-        Check(config.enableTaa == true, "effect=taa migrates to enableTaa=true");
-    }
-    {
-        WriteFixture("config_test_hdrlook_migrate.ini", "effect=hdrlook\n");
-        AnaxConfig config = ParseConfigFile("config_test_hdrlook_migrate.ini");
-        Check(config.effect == EffectKind::None, "effect=hdrlook migrates effect to none");
-        Check(config.enableAcesToneMap == true, "effect=hdrlook migrates to enableAcesToneMap=true");
-    }
-    {
-        WriteFixture("config_test_nvsharpen_migrate.ini", "effect=nvsharpen\n");
-        AnaxConfig config = ParseConfigFile("config_test_nvsharpen_migrate.ini");
-        Check(config.effect == EffectKind::None, "effect=nvsharpen migrates effect to none");
-        Check(config.enableSharpen == true, "effect=nvsharpen migrates to enableSharpen=true");
+        WriteFixture("config_test_legacy_mixed.ini",
+            "enableDither=true\n"
+            "effect=bilinear, bloom\n"
+            "enableBloom=false\n");
+        AnaxConfig config = ParseConfigFile("config_test_legacy_mixed.ini");
+        const EffectKind expected[] = {EffectKind::Bilinear, EffectKind::Dither};
+        CheckStages(config, expected, 2,
+                    "enableXxx=true appends and enableXxx=false removes, whichever side of 'effect=' they sit on");
     }
 
-    // enableHdrLook / hdrStrength (this same day's earlier addon-flag names) migrate to
-    // enableAcesToneMap / acesStrength.
+    // enableHdrLook / hdrStrength (this same day's earlier addon-flag names) migrate to the
+    // acestonemap stage / acesStrength.
     {
         WriteFixture("config_test_hdrlook_key_migrate.ini",
             "enableHdrLook=true\n"
             "hdrStrength=0.4\n");
         AnaxConfig config = ParseConfigFile("config_test_hdrlook_key_migrate.ini");
-        Check(config.enableAcesToneMap == true, "enableHdrLook migrates to enableAcesToneMap=true");
+        Check(HasEffectStage(config, EffectKind::AcesToneMap), "enableHdrLook enables the acestonemap stage");
         Check(config.acesStrength == 0.4f, "hdrStrength migrates to acesStrength=0.4");
+    }
+
+    // More stages listed than kMaxEffectStages: the overflow is dropped, nothing is corrupted.
+    {
+        char contents[1024];
+        size_t used = (size_t)snprintf(contents, sizeof(contents), "effect=bloom");
+        for (int i = 0; i < kMaxEffectStages + 5; ++i) {
+            used += (size_t)snprintf(contents + used, sizeof(contents) - used, ", bloom");
+        }
+        snprintf(contents + used, sizeof(contents) - used, "\n");
+        WriteFixture("config_test_overflow.ini", contents);
+        AnaxConfig config = ParseConfigFile("config_test_overflow.ini");
+        Check(config.stageCount == kMaxEffectStages, "an over-long effect list is capped at kMaxEffectStages");
     }
 
     // An ini line longer than ParseConfigFile's 256-byte line buffer is truncated safely by
@@ -192,7 +278,7 @@ int main() {
             "chromaticAberrationStrength=-0.5\n"
             "ditherStrength=-1.0\n");
         AnaxConfig config = ParseConfigFile("config_test_bad.ini");
-        Check(config.effect == EffectKind::None, "unrecognized effect falls back to none");
+        Check(config.stageCount == 0, "an effect list of only unrecognized names leaves an empty pipeline");
         Check(config.sharpness == 0.5f, "unparseable sharpness falls back to default");
         Check(config.scale == 1.0f, "out-of-range scale (5.0) clamps to max 1.0");
         Check(config.taaBlend == 0.0f, "out-of-range taaBlend (-1.0) clamps to min 0.0");
