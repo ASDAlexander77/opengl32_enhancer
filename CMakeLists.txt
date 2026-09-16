@@ -115,3 +115,25 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 # chromatic_aberration_test.cpp.
 add_executable(chromatic_aberration_test chromatic_aberration_test.cpp chromatic_aberration.cpp gl_loader.cpp)
 target_link_libraries(chromatic_aberration_test opengl32 gdi32 user32)
+
+# Integration test for the CURRENT anax_enhancer.ini: builds a synthetic test image, blits it
+# onto a real back buffer, calls the actual ApplySelectedEffect() entry point (the same one
+# wrapper.cpp calls from wglSwapBuffers), and checks it runs with no GL error and visibly
+# changes the image - then dumps input/output .ppm files for a human to judge whether today's
+# config actually looks right (an aesthetic call no automated assertion can make) - see
+# post_effects_test.cpp's header comment. Links the same stage sources as ${WRAPPER_NAME_CXX}
+# (everything except wrapper.cpp itself, which this doesn't need).
+add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
+    pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
+    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp)
+target_link_libraries(post_effects_test opengl32 gdi32 user32)
+# post_effects_test resolves anax_enhancer.ini (and any lutPath it names) next to its own .exe
+# - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
+# the test reads the actual shipped config, not a fixture; re-run the test (no rebuild needed)
+# after editing anax_enhancer.ini to see the new pipeline exercised.
+add_custom_command(TARGET post_effects_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/anax_enhancer.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/cyberpunk.cube
+        $<TARGET_FILE_DIR:post_effects_test>
+)
