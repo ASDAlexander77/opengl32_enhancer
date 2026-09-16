@@ -89,6 +89,7 @@ const char* kTaaShaderSource =
 struct TaaConfigData {
     float blend;
     int32_t historyValid;
+    int32_t pad[2];
 };
 
 struct TaaState {
@@ -280,7 +281,7 @@ void ApplyTaa(float blend) {
     int readIndex = g_state.activeHistory;
     int writeIndex = 1 - g_state.activeHistory;
 
-    TaaConfigData configData;
+    TaaConfigData configData{};
     configData.blend = blend;
     configData.historyValid = g_state.historyValid ? 1 : 0;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);

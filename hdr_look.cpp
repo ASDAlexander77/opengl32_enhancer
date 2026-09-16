@@ -68,6 +68,11 @@ const char* kHdrLookShaderSource =
     "    imageStore(outputImage, outCoord, vec4(result, color.a));\n"
     "}\n";
 
+struct HdrLookConfigData {
+    float strength;
+    float pad[3];
+};
+
 struct PipelineState {
     bool initTried = false;
     bool initOk = false;
@@ -167,7 +172,7 @@ void EnsureUbo(const GlComputeApi& gl) {
     }
     gl.glGenBuffers(1, &g_state.configUbo);
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
-    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(HdrLookConfigData), nullptr, GL_DYNAMIC_DRAW);
 }
 
 }  // namespace
@@ -244,8 +249,10 @@ void ApplyHdrLook(float strength) {
         return;
     }
 
+    HdrLookConfigData configData{};
+    configData.strength = strength;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
-    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(float), &strength, GL_DYNAMIC_DRAW);
+    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(HdrLookConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
 
     gl.glUseProgram(g_state.program);
