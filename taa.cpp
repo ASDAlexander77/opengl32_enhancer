@@ -1,8 +1,13 @@
-// See taa.h. GL pipeline mirrors bilinear_upscale.cpp's ApplyBilinearUpscale(), extended
-// with: a two-texture ping-pong history buffer (pingPong[0]/pingPong[1] alternate being
-// "last frame's output, read as history" and "this frame's write target") and a small UBO
-// (blend + historyValid) the same way hdr_look.cpp/nis_effect.cpp use UBOs for their
-// scalar/struct parameters.
+// See taa.h. Single compute dispatch writing to TWO images at once - dstTexture (this
+// pipeline stage's caller-owned output) and pingPong[writeIndex] (this effect's own
+// persistent history texture, read back as `historyTex` next call) - both get the same
+// computed result. That avoids an extra copy pass: TAA's history buffer can't simply *be*
+// dstTexture, because dstTexture is a slot in the shared pipeline's own ping-pong pair (see
+// post_effects.cpp), and which physical texture object plays "the shared pipeline's dst" on
+// any given frame depends on how many other stages ran before TAA that frame - not something
+// TAA can treat as consistently "last frame's output" the way its own private history buffer
+// is. No capture/blit/state-save of its own beyond that - the caller owns the app's GL state
+// around the whole chain.
 #include <cstdint>
 #include <cstdio>
 
@@ -11,50 +16,38 @@
 
 namespace {
 
-const unsigned int GL_VIEWPORT                 = 0x0BA2;
-const unsigned int GL_BACK                     = 0x0405;
-const unsigned int GL_TEXTURE_2D               = 0x0DE1;
-const unsigned int GL_TEXTURE0                 = 0x84C0;
-const unsigned int GL_ACTIVE_TEXTURE           = 0x84E0;
-const unsigned int GL_TEXTURE_BINDING_2D       = 0x8069;
-const unsigned int GL_TEXTURE_MIN_FILTER       = 0x2801;
-const unsigned int GL_TEXTURE_MAG_FILTER       = 0x2800;
-const unsigned int GL_TEXTURE_WRAP_S           = 0x2802;
-const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
-const unsigned int GL_LINEAR                   = 0x2601;
-const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
-const unsigned int GL_RGBA8                    = 0x8058;
-const unsigned int GL_WRITE_ONLY               = 0x88B9;
-const unsigned int GL_COMPUTE_SHADER           = 0x91B9;
-const unsigned int GL_COMPILE_STATUS           = 0x8B81;
-const unsigned int GL_LINK_STATUS              = 0x8B82;
-const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
-const unsigned int GL_FRAMEBUFFER              = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
-const unsigned int GL_DRAW_FRAMEBUFFER         = 0x8CA9;
-const unsigned int GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
-const unsigned int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
-const unsigned int GL_COLOR_ATTACHMENT0        = 0x8CE0;
-const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
-const unsigned int GL_NEAREST                  = 0x2600;
-const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
-const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
-const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
-const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
-const unsigned int GL_NO_ERROR                 = 0;
+const unsigned int GL_TEXTURE_2D                = 0x0DE1;
+const unsigned int GL_TEXTURE0                  = 0x84C0;
+const unsigned int GL_TEXTURE_MIN_FILTER        = 0x2801;
+const unsigned int GL_TEXTURE_MAG_FILTER        = 0x2800;
+const unsigned int GL_TEXTURE_WRAP_S            = 0x2802;
+const unsigned int GL_TEXTURE_WRAP_T            = 0x2803;
+const unsigned int GL_LINEAR                    = 0x2601;
+const unsigned int GL_CLAMP_TO_EDGE             = 0x812F;
+const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_WRITE_ONLY                = 0x88B9;
+const unsigned int GL_COMPUTE_SHADER            = 0x91B9;
+const unsigned int GL_COMPILE_STATUS            = 0x8B81;
+const unsigned int GL_LINK_STATUS               = 0x8B82;
+const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
+const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
+const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
+const unsigned int GL_DYNAMIC_DRAW              = 0x88E8;
+const unsigned int GL_NO_ERROR                  = 0;
 
-// currentTex=binding 0 (texture unit 0), historyTex=binding 1 (texture unit 1),
-// outputImage=binding 2 (image unit 2 - a separate namespace from texture units, no
-// collision with either sampler binding), TaaConfigBlock=binding 0 (uniform buffer binding
-// point 0 - a third separate namespace, no collision with currentTex's texture-unit 0). See
-// this plan's Global Constraints "Binding-number discipline" note; the C++ side below must
-// bind to these exact same units/points.
+// currentTex=binding 0 (texture unit 0), historyTex=binding 1 (texture unit 1), outputImage=
+// binding 2 and historyImage=binding 3 (image units - a separate namespace from texture
+// units, no collision with either sampler binding), TaaConfigBlock=binding 0 (uniform buffer
+// binding point 0 - a third separate namespace, no collision with currentTex's texture-unit
+// 0). See this plan's Global Constraints "Binding-number discipline" note; the C++ side below
+// must bind to these exact same units/points.
 const char* kTaaShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D currentTex;\n"
     "layout(binding = 1) uniform sampler2D historyTex;\n"
-    "layout(rgba8, binding = 2) uniform writeonly image2D outputImage;\n"
+    "layout(rgba16f, binding = 2) uniform writeonly image2D outputImage;\n"
+    "layout(rgba16f, binding = 3) uniform writeonly image2D historyImage;\n"
     "layout(std140, binding = 0) uniform TaaConfigBlock {\n"
     "    float blend;\n"
     "    int historyValid;\n"
@@ -68,6 +61,7 @@ const char* kTaaShaderSource =
     "    vec4 currentColor = texture(currentTex, uv);\n"
     "    if (historyValid == 0) {\n"
     "        imageStore(outputImage, outCoord, currentColor);\n"
+    "        imageStore(historyImage, outCoord, currentColor);\n"
     "        return;\n"
     "    }\n"
     "    vec3 neighborMin = currentColor.rgb;\n"
@@ -83,7 +77,9 @@ const char* kTaaShaderSource =
     "    vec4 historyColor = texture(historyTex, uv);\n"
     "    vec3 clampedHistory = clamp(historyColor.rgb, neighborMin, neighborMax);\n"
     "    vec3 result = mix(currentColor.rgb, clampedHistory, blend);\n"
-    "    imageStore(outputImage, outCoord, vec4(result, currentColor.a));\n"
+    "    vec4 out4 = vec4(result, currentColor.a);\n"
+    "    imageStore(outputImage, outCoord, out4);\n"
+    "    imageStore(historyImage, outCoord, out4);\n"
     "}\n";
 
 struct TaaConfigData {
@@ -101,9 +97,7 @@ struct TaaState {
     bool texturesValid = false;
     int width = 0;
     int height = 0;
-    unsigned int currentTexture = 0;
     unsigned int pingPong[2] = {0, 0};
-    unsigned int outputFbo = 0;
     int activeHistory = 0;     // pingPong[activeHistory] holds the last successful frame's output
     bool historyValid = false;
 };
@@ -152,31 +146,23 @@ void EnsureTextures(const GlComputeApi& gl, TaaState& state, int width, int heig
     }
 
     if (state.texturesValid) {
-        unsigned int textures[3] = {state.currentTexture, state.pingPong[0], state.pingPong[1]};
-        gl.glDeleteTextures(3, textures);
-        gl.glDeleteFramebuffers(1, &state.outputFbo);
+        gl.glDeleteTextures(2, state.pingPong);
         state.texturesValid = false;
     }
 
-    unsigned int textures[3] = {0, 0, 0};
-    gl.glGenTextures(3, textures);
-    state.currentTexture = textures[0];
-    state.pingPong[0] = textures[1];
-    state.pingPong[1] = textures[2];
+    unsigned int textures[2] = {0, 0};
+    gl.glGenTextures(2, textures);
+    state.pingPong[0] = textures[0];
+    state.pingPong[1] = textures[1];
 
-    unsigned int allTextures[3] = {state.currentTexture, state.pingPong[0], state.pingPong[1]};
-    for (int i = 0; i < 3; ++i) {
-        gl.glBindTexture(GL_TEXTURE_2D, allTextures[i]);
+    for (int i = 0; i < 2; ++i) {
+        gl.glBindTexture(GL_TEXTURE_2D, state.pingPong[i]);
         gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
+        gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16F, width, height);
     }
-
-    unsigned int fbo = 0;
-    gl.glGenFramebuffers(1, &fbo);
-    state.outputFbo = fbo;
 
     state.width = width;
     state.height = height;
@@ -199,7 +185,7 @@ void EnsureUbo(const GlComputeApi& gl, TaaState& state) {
 
 }  // namespace
 
-void ApplyTaa(float blend) {
+bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -208,7 +194,7 @@ void ApplyTaa(float blend) {
                    "context, effect disabled\n");
             warned = true;
         }
-        return;
+        return false;
     }
 
     if (!g_state.initTried) {
@@ -220,63 +206,15 @@ void ApplyTaa(float blend) {
         }
     }
     if (!g_state.initOk) {
-        return;
+        return false;
     }
 
-    int viewport[4] = {0, 0, 0, 0};
-    gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
     if (width <= 0 || height <= 0) {
-        return;
+        return false;
     }
-
-    int savedActiveTexture = 0;
-    gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding0 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding0);
-    gl.glActiveTexture(GL_TEXTURE0 + 1);
-    int savedTextureBinding1 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding1);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedProgram = 0;
-    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
-    int savedReadFbo = 0;
-    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    int savedDrawFbo = 0;
-    gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
-    int savedUniformBuffer = 0;
-    gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
     EnsureTextures(gl, g_state, width, height);
     EnsureUbo(gl, g_state);
-
-    auto restoreState = [&]() {
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-        gl.glUseProgram((unsigned int)savedProgram);
-        gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
-        gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
-        gl.glActiveTexture(GL_TEXTURE0 + 1);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding1);
-        gl.glActiveTexture(GL_TEXTURE0);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding0);
-        gl.glActiveTexture((unsigned int)savedActiveTexture);
-    };
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.currentTexture);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
-    unsigned int captureErr = gl.glGetError();
-    if (captureErr != GL_NO_ERROR) {
-        printf("[opengl32_enh_cpp] taa: glGetError() = 0x%04X after capture, skipping this "
-               "frame\n", captureErr);
-        restoreState();
-        return;
-    }
 
     int readIndex = g_state.activeHistory;
     int writeIndex = 1 - g_state.activeHistory;
@@ -290,31 +228,28 @@ void ApplyTaa(float blend) {
 
     gl.glUseProgram(g_state.program);
     gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.currentTexture);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glActiveTexture(GL_TEXTURE0 + 1);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.pingPong[readIndex]);
-    gl.glBindImageTexture(2, g_state.pingPong[writeIndex], 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
+    gl.glBindImageTexture(2, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    gl.glBindImageTexture(3, g_state.pingPong[writeIndex], 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
 
     unsigned int groupsX = (unsigned int)((width + 7) / 8);
     unsigned int groupsY = (unsigned int)((height + 7) / 8);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, g_state.outputFbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_state.pingPong[writeIndex], 0);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+    gl.glActiveTexture(GL_TEXTURE0);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] taa: glGetError() = 0x%04X after dispatch\n", err);
-    } else {
-        // Only flip roles on success - if dispatch/blit errored, pingPong[writeIndex] may
-        // hold garbage, so keep treating the same (valid) texture as history next call
-        // instead of promoting a possibly-bad frame.
-        g_state.activeHistory = writeIndex;
-        g_state.historyValid = true;
+        // Don't flip roles on a dispatch error - pingPong[writeIndex] may hold garbage, so
+        // keep treating the same (valid) texture as history next call instead of promoting a
+        // possibly-bad frame. dstTexture may also be garbage, so report failure to the caller.
+        return false;
     }
 
-    restoreState();
+    g_state.activeHistory = writeIndex;
+    g_state.historyValid = true;
+    return true;
 }

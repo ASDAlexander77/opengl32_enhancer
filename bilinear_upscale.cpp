@@ -1,12 +1,6 @@
-// See bilinear_upscale.h. Implements the GPU pipeline described in
-// docs/superpowers/specs/2026-09-15-nis-post-effects-design.md's "GPU pipeline" section:
-// capture the back buffer into a texture via glCopyTexSubImage2D (no CPU readback, unlike
-// pixel_invert.cpp's InvertBackBufferColors), run a compute shader, blit the result back.
-//
-// Only one FBO is created (for the output texture, as the glBlitFramebuffer read source)
-// rather than one per texture as the spec's wording suggested: glCopyTexSubImage2D reads
-// from whatever is bound as the current read framebuffer, which for a live back buffer is
-// already the default framebuffer - no FBO of its own is needed for the capture step.
+// See bilinear_upscale.h. Single compute dispatch, no capture/blit/state-save of its own -
+// see post_effects.cpp for the shared pipeline that owns srcTexture/dstTexture and the app's
+// GL state around the whole chain of stages this is one link in.
 #include <cstdio>
 
 #include "bilinear_upscale.h"
@@ -14,47 +8,27 @@
 
 namespace {
 
-// GL constants used here, defined by hand rather than pulling in <gl/gl.h> - see Global
-// Constraints in the plan / wrapper.cpp's header comment for why.
-const unsigned int GL_VIEWPORT                 = 0x0BA2;
-const unsigned int GL_BACK                     = 0x0405;
-const unsigned int GL_TEXTURE_2D               = 0x0DE1;
-const unsigned int GL_TEXTURE0                 = 0x84C0;
-const unsigned int GL_ACTIVE_TEXTURE           = 0x84E0;
-const unsigned int GL_TEXTURE_BINDING_2D       = 0x8069;
-const unsigned int GL_TEXTURE_MIN_FILTER       = 0x2801;
-const unsigned int GL_TEXTURE_MAG_FILTER       = 0x2800;
-const unsigned int GL_TEXTURE_WRAP_S           = 0x2802;
-const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
-const unsigned int GL_LINEAR                   = 0x2601;
-const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
-const unsigned int GL_RGBA8                    = 0x8058;
-const unsigned int GL_WRITE_ONLY               = 0x88B9;
-const unsigned int GL_COMPUTE_SHADER           = 0x91B9;
-const unsigned int GL_COMPILE_STATUS           = 0x8B81;
-const unsigned int GL_LINK_STATUS              = 0x8B82;
-const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
-const unsigned int GL_FRAMEBUFFER              = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
-const unsigned int GL_DRAW_FRAMEBUFFER         = 0x8CA9;
-const unsigned int GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
-const unsigned int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
-const unsigned int GL_COLOR_ATTACHMENT0        = 0x8CE0;
-const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
-const unsigned int GL_NEAREST                  = 0x2600;
-const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
-const unsigned int GL_NO_ERROR                 = 0;
+const unsigned int GL_TEXTURE_2D                = 0x0DE1;
+const unsigned int GL_TEXTURE0                  = 0x84C0;
+const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_WRITE_ONLY                = 0x88B9;
+const unsigned int GL_COMPUTE_SHADER            = 0x91B9;
+const unsigned int GL_COMPILE_STATUS            = 0x8B81;
+const unsigned int GL_LINK_STATUS               = 0x8B82;
+const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
+const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
+const unsigned int GL_NO_ERROR                  = 0;
 
-// Samples the input texture with GL_LINEAR filtering (set on the texture in EnsureTextures
-// below) at each output texel's center, normalized by the output image's own size -
-// GL_LINEAR does the actual bilinear interpolation; this shader just drives it. binding=0
-// matches the texture unit ApplyBilinearUpscale() below binds the input texture to;
-// binding=1 matches the image unit the output texture is bound to.
+// Samples the input texture with GL_LINEAR filtering (the shared pipeline textures are
+// created with GL_LINEAR - see post_effects.cpp's EnsurePipelineTextures) at each output
+// texel's center - GL_LINEAR does the actual bilinear interpolation; this shader just drives
+// it. binding=0 matches the texture unit ApplyBilinearUpscale() below binds srcTexture to;
+// binding=1 matches the image unit dstTexture is bound to.
 const char* kComputeShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
-    "layout(rgba8, binding = 1) uniform writeonly image2D outputImage;\n"
+    "layout(rgba16f, binding = 1) uniform writeonly image2D outputImage;\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outputImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -70,13 +44,6 @@ struct PipelineState {
     bool initTried = false;
     bool initOk = false;
     unsigned int program = 0;
-
-    bool texturesValid = false;
-    int width = 0;
-    int height = 0;
-    unsigned int inputTexture = 0;
-    unsigned int outputTexture = 0;
-    unsigned int outputFbo = 0;
 };
 
 PipelineState g_state;
@@ -117,50 +84,9 @@ bool CompileAndLink(const GlComputeApi& gl, unsigned int& outProgram) {
     return true;
 }
 
-void EnsureTextures(const GlComputeApi& gl, int width, int height) {
-    if (g_state.texturesValid && g_state.width == width && g_state.height == height) {
-        return;
-    }
-
-    if (g_state.texturesValid) {
-        unsigned int textures[2] = {g_state.inputTexture, g_state.outputTexture};
-        gl.glDeleteTextures(2, textures);
-        gl.glDeleteFramebuffers(1, &g_state.outputFbo);
-        g_state.texturesValid = false;
-    }
-
-    unsigned int textures[2] = {0, 0};
-    gl.glGenTextures(2, textures);
-    unsigned int inputTexture = textures[0];
-    unsigned int outputTexture = textures[1];
-
-    gl.glBindTexture(GL_TEXTURE_2D, inputTexture);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    gl.glBindTexture(GL_TEXTURE_2D, outputTexture);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    unsigned int fbo = 0;
-    gl.glGenFramebuffers(1, &fbo);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outputTexture, 0);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    g_state.inputTexture = inputTexture;
-    g_state.outputTexture = outputTexture;
-    g_state.outputFbo = fbo;
-    g_state.width = width;
-    g_state.height = height;
-    g_state.texturesValid = true;
-}
-
 }  // namespace
 
-void ApplyBilinearUpscale() {
+bool ApplyBilinearUpscale(unsigned int srcTexture, unsigned int dstTexture, int width, int height) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -169,7 +95,7 @@ void ApplyBilinearUpscale() {
                    "on this context, effect disabled\n");
             warned = true;
         }
-        return;
+        return false;
     }
 
     if (!g_state.initTried) {
@@ -181,84 +107,25 @@ void ApplyBilinearUpscale() {
         }
     }
     if (!g_state.initOk) {
-        return;
+        return false;
     }
 
-    int viewport[4] = {0, 0, 0, 0};
-    gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
     if (width <= 0 || height <= 0) {
-        return;
+        return false;
     }
 
-    // Save the GL state this pipeline is about to touch, so the host app's own state comes
-    // back untouched afterward. This must happen BEFORE EnsureTextures to capture the app's
-    // original FBO binding, not EnsureTextures' newly-created FBO.
-    int savedActiveTexture = 0;
-    gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
-    int savedProgram = 0;
-    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
-    int savedReadFbo = 0;
-    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    int savedDrawFbo = 0;
-    gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
-
-    EnsureTextures(gl, width, height);
-
-    // Restores the GL state saved above. Factored out so both the normal exit and the
-    // early bail-out below (on a capture failure) leave the host app's state untouched.
-    auto restoreState = [&]() {
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-        gl.glUseProgram((unsigned int)savedProgram);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
-        gl.glActiveTexture((unsigned int)savedActiveTexture);
-    };
-
-    // Force the read framebuffer to the default (live back buffer) before Capture. This is
-    // needed on every call, not just after EnsureTextures' slow (first-call/resize) path:
-    // on the common fast path (EnsureTextures returns immediately), whatever the host app
-    // had bound as its read framebuffer at swap time would otherwise still be bound here,
-    // and glReadBuffer(GL_BACK) is invalid while a non-default FBO is the read target.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-
-    // Capture: copy the current back buffer straight into the input texture, GPU-to-GPU.
-    gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
-    unsigned int captureErr = gl.glGetError();
-    if (captureErr != GL_NO_ERROR) {
-        printf("[opengl32_enh_cpp] bilinear_upscale: glGetError() = 0x%04X after capture, "
-               "skipping this frame\n", captureErr);
-        restoreState();
-        return;
-    }
-
-    // Dispatch: run the compute shader, sampling the input texture and writing the output
-    // texture as an image.
     gl.glUseProgram(g_state.program);
     gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
-    gl.glBindImageTexture(1, g_state.outputTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
+    gl.glBindImageTexture(1, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     unsigned int groupsX = (unsigned int)((width + 7) / 8);
     unsigned int groupsY = (unsigned int)((height + 7) / 8);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    // Present: blit the output texture back onto the real back buffer.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_state.outputFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] bilinear_upscale: glGetError() = 0x%04X after dispatch\n", err);
     }
-
-    restoreState();
+    return true;
 }

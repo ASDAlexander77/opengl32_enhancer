@@ -1,5 +1,7 @@
-// See dither.h. GL pipeline mirrors hdr_look.cpp's ApplyHdrLook() exactly (single texture
-// in/out, one-float UBO), just with a different shader body.
+// See dither.h. Single compute dispatch plus a one-float UBO for `strength`. No capture/blit/
+// state-save of its own - see post_effects.cpp for the shared pipeline that owns
+// srcTexture/dstTexture and the app's GL state around the whole chain of stages this is one
+// link in.
 #include <cstdio>
 
 #include "dither.h"
@@ -7,37 +9,18 @@
 
 namespace {
 
-const unsigned int GL_VIEWPORT                 = 0x0BA2;
-const unsigned int GL_BACK                     = 0x0405;
-const unsigned int GL_TEXTURE_2D               = 0x0DE1;
-const unsigned int GL_TEXTURE0                 = 0x84C0;
-const unsigned int GL_ACTIVE_TEXTURE           = 0x84E0;
-const unsigned int GL_TEXTURE_BINDING_2D       = 0x8069;
-const unsigned int GL_TEXTURE_MIN_FILTER       = 0x2801;
-const unsigned int GL_TEXTURE_MAG_FILTER       = 0x2800;
-const unsigned int GL_TEXTURE_WRAP_S           = 0x2802;
-const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
-const unsigned int GL_LINEAR                   = 0x2601;
-const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
-const unsigned int GL_RGBA8                    = 0x8058;
-const unsigned int GL_WRITE_ONLY               = 0x88B9;
-const unsigned int GL_COMPUTE_SHADER           = 0x91B9;
-const unsigned int GL_COMPILE_STATUS           = 0x8B81;
-const unsigned int GL_LINK_STATUS              = 0x8B82;
-const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
-const unsigned int GL_FRAMEBUFFER              = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
-const unsigned int GL_DRAW_FRAMEBUFFER         = 0x8CA9;
-const unsigned int GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
-const unsigned int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
-const unsigned int GL_COLOR_ATTACHMENT0        = 0x8CE0;
-const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
-const unsigned int GL_NEAREST                  = 0x2600;
-const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
-const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
-const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
-const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
-const unsigned int GL_NO_ERROR                 = 0;
+const unsigned int GL_TEXTURE_2D                = 0x0DE1;
+const unsigned int GL_TEXTURE0                  = 0x84C0;
+const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_WRITE_ONLY                = 0x88B9;
+const unsigned int GL_COMPUTE_SHADER            = 0x91B9;
+const unsigned int GL_COMPILE_STATUS            = 0x8B81;
+const unsigned int GL_LINK_STATUS               = 0x8B82;
+const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
+const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
+const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
+const unsigned int GL_DYNAMIC_DRAW              = 0x88E8;
+const unsigned int GL_NO_ERROR                  = 0;
 
 // binding=0 on inputTex (a texture-unit binding) and binding=0 on DitherConfigBlock (a
 // uniform-buffer binding point) are different GL namespaces - see hdr_look.cpp's equivalent
@@ -46,7 +29,7 @@ const char* kDitherShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
-    "layout(rgba8, binding = 1) uniform writeonly image2D outputImage;\n"
+    "layout(rgba16f, binding = 1) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform DitherConfigBlock {\n"
     "    float strength;\n"
     "};\n"
@@ -77,13 +60,6 @@ struct PipelineState {
     bool initOk = false;
     unsigned int program = 0;
     unsigned int configUbo = 0;
-
-    bool texturesValid = false;
-    int width = 0;
-    int height = 0;
-    unsigned int inputTexture = 0;
-    unsigned int outputTexture = 0;
-    unsigned int outputFbo = 0;
 };
 
 PipelineState g_state;
@@ -124,47 +100,6 @@ bool CompileAndLink(const GlComputeApi& gl, unsigned int& outProgram) {
     return true;
 }
 
-void EnsureTextures(const GlComputeApi& gl, int width, int height) {
-    if (g_state.texturesValid && g_state.width == width && g_state.height == height) {
-        return;
-    }
-
-    if (g_state.texturesValid) {
-        unsigned int textures[2] = {g_state.inputTexture, g_state.outputTexture};
-        gl.glDeleteTextures(2, textures);
-        gl.glDeleteFramebuffers(1, &g_state.outputFbo);
-        g_state.texturesValid = false;
-    }
-
-    unsigned int textures[2] = {0, 0};
-    gl.glGenTextures(2, textures);
-    unsigned int inputTexture = textures[0];
-    unsigned int outputTexture = textures[1];
-
-    gl.glBindTexture(GL_TEXTURE_2D, inputTexture);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    gl.glBindTexture(GL_TEXTURE_2D, outputTexture);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    unsigned int fbo = 0;
-    gl.glGenFramebuffers(1, &fbo);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outputTexture, 0);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    g_state.inputTexture = inputTexture;
-    g_state.outputTexture = outputTexture;
-    g_state.outputFbo = fbo;
-    g_state.width = width;
-    g_state.height = height;
-    g_state.texturesValid = true;
-}
-
 void EnsureUbo(const GlComputeApi& gl) {
     if (g_state.configUbo != 0) {
         return;
@@ -176,7 +111,7 @@ void EnsureUbo(const GlComputeApi& gl) {
 
 }  // namespace
 
-void ApplyDither(float strength) {
+bool ApplyDither(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float strength) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -185,7 +120,7 @@ void ApplyDither(float strength) {
                    "context, effect disabled\n");
             warned = true;
         }
-        return;
+        return false;
     }
 
     if (!g_state.initTried) {
@@ -197,56 +132,14 @@ void ApplyDither(float strength) {
         }
     }
     if (!g_state.initOk) {
-        return;
+        return false;
     }
 
-    int viewport[4] = {0, 0, 0, 0};
-    gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
     if (width <= 0 || height <= 0) {
-        return;
+        return false;
     }
 
-    int savedActiveTexture = 0;
-    gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
-    int savedProgram = 0;
-    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
-    int savedReadFbo = 0;
-    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    int savedDrawFbo = 0;
-    gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
-    int savedUniformBuffer = 0;
-    gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
-
-    EnsureTextures(gl, width, height);
     EnsureUbo(gl);
-
-    auto restoreState = [&]() {
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-        gl.glUseProgram((unsigned int)savedProgram);
-        gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
-        gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
-        gl.glActiveTexture((unsigned int)savedActiveTexture);
-    };
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
-    unsigned int captureErr = gl.glGetError();
-    if (captureErr != GL_NO_ERROR) {
-        printf("[opengl32_enh_cpp] dither: glGetError() = 0x%04X after capture, skipping "
-               "this frame\n", captureErr);
-        restoreState();
-        return;
-    }
 
     DitherConfigData configData{};
     configData.strength = strength;
@@ -256,21 +149,16 @@ void ApplyDither(float strength) {
 
     gl.glUseProgram(g_state.program);
     gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
-    gl.glBindImageTexture(1, g_state.outputTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
+    gl.glBindImageTexture(1, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     unsigned int groupsX = (unsigned int)((width + 7) / 8);
     unsigned int groupsY = (unsigned int)((height + 7) / 8);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_state.outputFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] dither: glGetError() = 0x%04X after dispatch\n", err);
     }
-
-    restoreState();
+    return true;
 }

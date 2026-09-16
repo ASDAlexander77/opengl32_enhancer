@@ -1,9 +1,9 @@
-// Creates a real OpenGL context, clears the back buffer to a known solid color, runs
-// ApplyBilinearUpscale() directly (not through wglSwapBuffers - this exercises the GPU
-// pipeline itself, not the dispatcher; Task 3 covers the dispatcher wiring), and reads
-// back the result to confirm the pipeline reproduced the color without a GL error. See
-// gl_loader_test.cpp for why <windows.h> is safe here and for the window/context creation
-// pattern reused below.
+// Creates a real OpenGL context, clears the back buffer to a known solid color, captures it
+// into a src RGBA16F texture (mimicking what post_effects.cpp's shared pipeline now does
+// once per frame - see post_effects.cpp's header comment), runs ApplyBilinearUpscale()
+// directly against src/dst textures, and reads back dst to confirm the pipeline reproduced
+// the color without a GL error. See gl_loader_test.cpp for why <windows.h> is safe here and
+// for the window/context creation pattern reused below.
 #include <windows.h>
 #include <cmath>
 #include <cstdio>
@@ -13,10 +13,22 @@
 
 namespace {
 
-const unsigned int GL_VIEWPORT         = 0x0BA2;
-const unsigned int GL_COLOR_BUFFER_BIT = 0x00004000;
-const unsigned int GL_RGBA             = 0x1908;
-const unsigned int GL_UNSIGNED_BYTE    = 0x1401;
+const unsigned int GL_VIEWPORT           = 0x0BA2;
+const unsigned int GL_BACK               = 0x0405;
+const unsigned int GL_COLOR_BUFFER_BIT   = 0x00004000;
+const unsigned int GL_RGBA               = 0x1908;
+const unsigned int GL_UNSIGNED_BYTE      = 0x1401;
+const unsigned int GL_TEXTURE_2D         = 0x0DE1;
+const unsigned int GL_RGBA16F            = 0x881A;
+const unsigned int GL_TEXTURE_MIN_FILTER = 0x2801;
+const unsigned int GL_TEXTURE_MAG_FILTER = 0x2800;
+const unsigned int GL_TEXTURE_WRAP_S     = 0x2802;
+const unsigned int GL_TEXTURE_WRAP_T     = 0x2803;
+const unsigned int GL_LINEAR             = 0x2601;
+const unsigned int GL_CLAMP_TO_EDGE      = 0x812F;
+const unsigned int GL_FRAMEBUFFER        = 0x8D40;
+const unsigned int GL_READ_FRAMEBUFFER   = 0x8CA8;
+const unsigned int GL_COLOR_ATTACHMENT0  = 0x8CE0;
 
 typedef void (__stdcall *PFNGLCLEARCOLORPROC)(float r, float g, float b, float a);
 typedef void (__stdcall *PFNGLCLEARPROC)(unsigned int mask);
@@ -31,6 +43,18 @@ T Resolve(const char* name) {
 bool Check(bool condition, const char* what) {
     printf("%s: %s\n", condition ? "PASS" : "FAIL", what);
     return condition;
+}
+
+unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height) {
+    unsigned int tex = 0;
+    gl.glGenTextures(1, &tex);
+    gl.glBindTexture(GL_TEXTURE_2D, tex);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16F, width, height);
+    return tex;
 }
 
 }  // namespace
@@ -92,19 +116,32 @@ int main() {
     ok &= Check(width > 0 && height > 0, "context reports a nonzero viewport");
     printf("Viewport: %dx%d\n", width, height);
 
-    // Clear to a known solid color, run the pipeline twice (the second call also exercises
-    // EnsureTextures' "same size, reuse existing textures" path), then read back.
+    // Clear to a known solid color and capture it into srcTex, mimicking post_effects.cpp's
+    // one-time-per-frame capture.
     pGlClearColor(0.8f, 0.2f, 0.1f, 1.0f);
     pGlClear(GL_COLOR_BUFFER_BIT);
-    ApplyBilinearUpscale();
-    unsigned int errAfterFirst = gl.glGetError();
-    ok &= Check(errAfterFirst == 0, "no GL error after first ApplyBilinearUpscale() call");
+    unsigned int srcTex = CreatePipelineTexture(gl, width, height);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl.glReadBuffer(GL_BACK);
+    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+    unsigned int dstTex = CreatePipelineTexture(gl, width, height);
 
-    ApplyBilinearUpscale();
+    unsigned int readFbo = 0;
+    gl.glGenFramebuffers(1, &readFbo);
+
+    // Run the pipeline twice (the second call also exercises the "already compiled" reuse
+    // path), then read back dstTex via readFbo.
+    bool wrote1 = ApplyBilinearUpscale(srcTex, dstTex, width, height);
+    unsigned int errAfterFirst = gl.glGetError();
+    ok &= Check(wrote1 && errAfterFirst == 0, "no GL error after first ApplyBilinearUpscale() call");
+
+    bool wrote2 = ApplyBilinearUpscale(srcTex, dstTex, width, height);
     unsigned int errAfterSecond = gl.glGetError();
-    ok &= Check(errAfterSecond == 0,
+    ok &= Check(wrote2 && errAfterSecond == 0,
                 "no GL error after second ApplyBilinearUpscale() call (same size, texture reuse)");
 
+    gl.glBindFramebuffer(GL_FRAMEBUFFER, readFbo);
+    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
     unsigned char pixel[4] = {0, 0, 0, 0};
     pGlReadPixels(width / 2, height / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     printf("Center pixel after bilinear pass: r=%d g=%d b=%d a=%d\n",

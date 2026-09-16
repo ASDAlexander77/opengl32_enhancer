@@ -54,7 +54,7 @@ const char* kNVScalerShaderSource =
     "    float reserved1;\n"
     "};\n"
     "layout(binding = 1) uniform sampler2D in_texture;\n"
-    "layout(rgba8, binding = 2) uniform writeonly image2D out_texture;\n"
+    "layout(rgba16f, binding = 2) uniform writeonly image2D out_texture;\n"
     "layout(binding = 3) uniform sampler2D coef_scaler;\n"
     "layout(binding = 4) uniform sampler2D coef_usm;\n"
     "#define saturate(x) clamp(x, 0.0, 1.0)\n"
@@ -338,7 +338,7 @@ const char* kNVSharpenShaderSource =
     "    float reserved1;\n"
     "};\n"
     "layout(binding = 1) uniform sampler2D in_texture;\n"
-    "layout(rgba8, binding = 2) uniform writeonly image2D out_texture;\n"
+    "layout(rgba16f, binding = 2) uniform writeonly image2D out_texture;\n"
     "#define saturate(x) clamp(x, 0.0, 1.0)\n"
     "#define lerp(a, b, x) mix(a, b, x)\n"
     "float getY(vec3 rgba) {\n"
@@ -458,20 +458,15 @@ const char* kNVSharpenShaderSource =
 
 // GL constants used here, defined by hand rather than pulling in <gl/gl.h> - see Global
 // Constraints in the plan / wrapper.cpp's header comment for why.
-const unsigned int GL_VIEWPORT                 = 0x0BA2;
-const unsigned int GL_BACK                     = 0x0405;
 const unsigned int GL_TEXTURE_2D               = 0x0DE1;
 const unsigned int GL_TEXTURE0                 = 0x84C0;
-const unsigned int GL_TEXTURE1                 = 0x84C1;
-const unsigned int GL_ACTIVE_TEXTURE           = 0x84E0;
-const unsigned int GL_TEXTURE_BINDING_2D       = 0x8069;
 const unsigned int GL_TEXTURE_MIN_FILTER       = 0x2801;
 const unsigned int GL_TEXTURE_MAG_FILTER       = 0x2800;
 const unsigned int GL_TEXTURE_WRAP_S           = 0x2802;
 const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
 const unsigned int GL_LINEAR                   = 0x2601;
 const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
-const unsigned int GL_RGBA8                    = 0x8058;
+const unsigned int GL_RGBA16F                  = 0x881A;
 const unsigned int GL_RGBA32F                  = 0x8814;
 const unsigned int GL_RGBA                     = 0x1908;
 const unsigned int GL_FLOAT                    = 0x1406;
@@ -479,21 +474,9 @@ const unsigned int GL_WRITE_ONLY               = 0x88B9;
 const unsigned int GL_COMPUTE_SHADER           = 0x91B9;
 const unsigned int GL_COMPILE_STATUS           = 0x8B81;
 const unsigned int GL_LINK_STATUS              = 0x8B82;
-const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
-const unsigned int GL_FRAMEBUFFER              = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
-const unsigned int GL_DRAW_FRAMEBUFFER         = 0x8CA9;
-const unsigned int GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
-const unsigned int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
-const unsigned int GL_COLOR_ATTACHMENT0        = 0x8CE0;
-const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
-const unsigned int GL_NEAREST                  = 0x2600;
+const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
 const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
-const unsigned int GL_SHADER_STORAGE_BARRIER_BIT = 0x00002000;
-const unsigned int GL_UNIFORM_BARRIER_BIT      = 0x00000004;
 const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
-const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
-const unsigned int GL_STATIC_DRAW              = 0x88E4;
 const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
 const unsigned int GL_NO_ERROR                 = 0;
 const unsigned int GL_UNPACK_SWAP_BYTES        = 0x0CF0;
@@ -509,12 +492,9 @@ struct NisPipelineState {
     bool initOk = false;
     unsigned int program = 0;
 
-    bool resourcesValid = false;
-    int width = 0;
-    int height = 0;
-    unsigned int inputTexture = 0;
-    unsigned int outputTexture = 0;
-    unsigned int outputFbo = 0;
+    // Static (never resized) resources: coefficient textures (NVScaler only) and the config
+    // UBO. srcTexture/dstTexture are caller-owned now - see post_effects.cpp's shared
+    // pipeline - so no generic input/output texture pair or FBO is needed here any more.
     unsigned int coefScaleTexture = 0;
     unsigned int coefUsmTexture = 0;
     unsigned int configUbo = 0;
@@ -523,10 +503,8 @@ struct NisPipelineState {
 NisPipelineState g_scalerState;
 NisPipelineState g_sharpenState;
 
-// CompileAndLink, EnsureCoefTexture, EnsureTextures, and RunNisPipeline below are
-// deliberately generic over NisVariant so ApplyNVScaler/ApplyNVSharpen share one
-// implementation - mirrors bilinear_upscale.cpp's structure, extended with the coefficient
-// textures and UBO that pipeline didn't need.
+// CompileAndLink, EnsureCoefTexture, and RunNisPipeline below are deliberately generic over
+// NisVariant so ApplyNVScaler/ApplyNVSharpen share one implementation.
 
 bool CompileAndLink(const GlComputeApi& gl, const char* source, const char* effectName, unsigned int& outProgram) {
     unsigned int shader = gl.glCreateShader(GL_COMPUTE_SHADER);
@@ -589,47 +567,6 @@ unsigned int CreateCoefTexture(const GlComputeApi& gl, const float table[64][8])
     return tex;
 }
 
-void EnsureResources(const GlComputeApi& gl, NisPipelineState& state, int width, int height) {
-    if (state.resourcesValid && state.width == width && state.height == height) {
-        return;
-    }
-
-    if (state.resourcesValid) {
-        unsigned int textures[2] = {state.inputTexture, state.outputTexture};
-        gl.glDeleteTextures(2, textures);
-        gl.glDeleteFramebuffers(1, &state.outputFbo);
-        state.resourcesValid = false;
-    }
-
-    unsigned int textures[2] = {0, 0};
-    gl.glGenTextures(2, textures);
-    unsigned int inputTexture = textures[0];
-    unsigned int outputTexture = textures[1];
-
-    gl.glBindTexture(GL_TEXTURE_2D, inputTexture);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    gl.glBindTexture(GL_TEXTURE_2D, outputTexture);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
-
-    unsigned int fbo = 0;
-    gl.glGenFramebuffers(1, &fbo);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outputTexture, 0);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    state.inputTexture = inputTexture;
-    state.outputTexture = outputTexture;
-    state.outputFbo = fbo;
-    state.width = width;
-    state.height = height;
-    state.resourcesValid = true;
-}
-
 // One-time (never resized) resources: coefficient textures (NVScaler only) and the config
 // UBO. Created lazily alongside the shader program on first successful compile.
 void EnsureStaticResources(const GlComputeApi& gl, NisPipelineState& state, NisVariant variant) {
@@ -644,7 +581,8 @@ void EnsureStaticResources(const GlComputeApi& gl, NisPipelineState& state, NisV
     }
 }
 
-void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* effectName, const char* shaderSource, float sharpness) {
+bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* effectName, const char* shaderSource,
+                     unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warnedScaler = false;
@@ -655,7 +593,7 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
                    "context, %s disabled\n", effectName);
             warned = true;
         }
-        return;
+        return false;
     }
 
     if (!state.initTried) {
@@ -667,87 +605,14 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
         }
     }
     if (!state.initOk) {
-        return;
+        return false;
     }
 
-    int viewport[4] = {0, 0, 0, 0};
-    gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
     if (width <= 0 || height <= 0) {
-        return;
+        return false;
     }
 
-    int savedActiveTexture = 0;
-    gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-
-    // Save every texture unit the dispatch-time bindings below will touch: unit 1 (in_texture,
-    // both variants) and, for NVScaler only, units 3/4 (coef_scaler/coef_usm). Unit 0 is only
-    // ever used transiently to capture the backbuffer into inputTexture, but we still save/
-    // restore it for symmetry with the pre-fix behavior.
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding0 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding0);
-
-    gl.glActiveTexture(GL_TEXTURE0 + 1);
-    int savedTextureBinding1 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding1);
-
-    int savedTextureBinding3 = 0;
-    int savedTextureBinding4 = 0;
-    if (variant == NisVariant::Scaler) {
-        gl.glActiveTexture(GL_TEXTURE0 + 3);
-        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding3);
-        gl.glActiveTexture(GL_TEXTURE0 + 4);
-        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding4);
-    }
-    gl.glActiveTexture(GL_TEXTURE0);
-
-    int savedProgram = 0;
-    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
-    int savedReadFbo = 0;
-    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    int savedDrawFbo = 0;
-    gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
-    int savedUniformBuffer = 0;
-    gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
-
-    EnsureResources(gl, state, width, height);
     EnsureStaticResources(gl, state, variant);
-
-    auto restoreState = [&]() {
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-        gl.glUseProgram((unsigned int)savedProgram);
-
-        gl.glActiveTexture(GL_TEXTURE0);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding0);
-        gl.glActiveTexture(GL_TEXTURE0 + 1);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding1);
-        if (variant == NisVariant::Scaler) {
-            gl.glActiveTexture(GL_TEXTURE0 + 3);
-            gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding3);
-            gl.glActiveTexture(GL_TEXTURE0 + 4);
-            gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding4);
-        }
-        gl.glActiveTexture((unsigned int)savedActiveTexture);
-
-        gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
-        gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
-    };
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, state.inputTexture);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
-    unsigned int captureErr = gl.glGetError();
-    if (captureErr != GL_NO_ERROR) {
-        printf("[opengl32_enh_cpp] nis_effect: glGetError() = 0x%04X after capture (%s), "
-               "skipping this frame\n", captureErr, effectName);
-        restoreState();
-        return;
-    }
 
     // Build the NISConfig for this frame's dimensions/sharpness and upload it to the UBO.
     // Same viewport used as both input and output (no real reduced-resolution pipeline
@@ -768,8 +633,7 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     if (!configOk) {
         printf("[opengl32_enh_cpp] nis_effect: %s config rejected (scale out of [0.5,1] "
                "range), skipping this frame\n", effectName);
-        restoreState();
-        return;
+        return false;
     }
 
     gl.glBindBuffer(GL_UNIFORM_BUFFER, state.configUbo);
@@ -781,8 +645,8 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     // coef_scaler=3, coef_usm=4 (NVScaler only - NVSharpen's shader doesn't declare them).
     gl.glUseProgram(state.program);
     gl.glActiveTexture(GL_TEXTURE0 + 1);
-    gl.glBindTexture(GL_TEXTURE_2D, state.inputTexture);
-    gl.glBindImageTexture(2, state.outputTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
+    gl.glBindImageTexture(2, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     if (variant == NisVariant::Scaler) {
         gl.glActiveTexture(GL_TEXTURE0 + 3);
         gl.glBindTexture(GL_TEXTURE_2D, state.coefScaleTexture);
@@ -798,26 +662,23 @@ void RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     unsigned int groupsX = ((unsigned int)width + blockWidth - 1) / blockWidth;
     unsigned int groupsY = ((unsigned int)height + blockHeight - 1) / blockHeight;
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, state.outputFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] nis_effect: glGetError() = 0x%04X after dispatch (%s)\n", err, effectName);
     }
-
-    restoreState();
+    return true;
 }
 
 }  // namespace
 
-void ApplyNVScaler(float sharpness) {
-    RunNisPipeline(g_scalerState, NisVariant::Scaler, "nvscaler", kNVScalerShaderSource, sharpness);
+bool ApplyNVScaler(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
+    return RunNisPipeline(g_scalerState, NisVariant::Scaler, "nvscaler", kNVScalerShaderSource,
+                           srcTexture, dstTexture, width, height, sharpness);
 }
 
-void ApplyNVSharpen(float sharpness) {
-    RunNisPipeline(g_sharpenState, NisVariant::Sharpen, "nvsharpen", kNVSharpenShaderSource, sharpness);
+bool ApplyNVSharpen(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
+    return RunNisPipeline(g_sharpenState, NisVariant::Sharpen, "nvsharpen", kNVSharpenShaderSource,
+                           srcTexture, dstTexture, width, height, sharpness);
 }

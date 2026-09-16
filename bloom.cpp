@@ -1,9 +1,10 @@
-// See bloom.h. GL pipeline mirrors the other effects' capture/compute/blit skeleton, extended
-// to four sequential compute dispatches sharing one UBO (re-filled before each dispatch, since
-// only one pass is ever "in flight" at a time): extract (bright-pass threshold) -> blur
-// horizontal -> blur vertical -> composite (additive blend back onto the original capture).
-// Bright-pass/blur intermediates use GL_RGBA16F (not RGBA8) so the blur accumulates without
-// 8-bit banding.
+// See bloom.h. Four sequential compute dispatches sharing one UBO (re-filled before each
+// dispatch, since only one pass is ever "in flight" at a time): extract (bright-pass
+// threshold) -> blur horizontal -> blur vertical -> composite (additive blend back onto
+// srcTexture, written to dstTexture). No capture/blit/state-save of its own - see
+// post_effects.cpp for the shared pipeline that owns srcTexture/dstTexture and the app's GL
+// state around the whole chain of stages this is one link in. Only the bright-pass/blur
+// intermediates (own, resized with width/height) belong to this file.
 #include <cstdio>
 
 #include "bloom.h"
@@ -11,38 +12,24 @@
 
 namespace {
 
-const unsigned int GL_VIEWPORT                 = 0x0BA2;
-const unsigned int GL_BACK                     = 0x0405;
-const unsigned int GL_TEXTURE_2D               = 0x0DE1;
-const unsigned int GL_TEXTURE0                 = 0x84C0;
-const unsigned int GL_ACTIVE_TEXTURE           = 0x84E0;
-const unsigned int GL_TEXTURE_BINDING_2D       = 0x8069;
-const unsigned int GL_TEXTURE_MIN_FILTER       = 0x2801;
-const unsigned int GL_TEXTURE_MAG_FILTER       = 0x2800;
-const unsigned int GL_TEXTURE_WRAP_S           = 0x2802;
-const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
-const unsigned int GL_LINEAR                   = 0x2601;
-const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
-const unsigned int GL_RGBA8                    = 0x8058;
-const unsigned int GL_RGBA16F                  = 0x881A;
-const unsigned int GL_WRITE_ONLY               = 0x88B9;
-const unsigned int GL_COMPUTE_SHADER           = 0x91B9;
-const unsigned int GL_COMPILE_STATUS           = 0x8B81;
-const unsigned int GL_LINK_STATUS              = 0x8B82;
-const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
-const unsigned int GL_FRAMEBUFFER              = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
-const unsigned int GL_DRAW_FRAMEBUFFER         = 0x8CA9;
-const unsigned int GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
-const unsigned int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
-const unsigned int GL_COLOR_ATTACHMENT0        = 0x8CE0;
-const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
-const unsigned int GL_NEAREST                  = 0x2600;
-const unsigned int GL_FRAMEBUFFER_BARRIER_BIT  = 0x00000400;
-const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
-const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
-const unsigned int GL_DYNAMIC_DRAW             = 0x88E8;
-const unsigned int GL_NO_ERROR                 = 0;
+const unsigned int GL_TEXTURE_2D                = 0x0DE1;
+const unsigned int GL_TEXTURE0                  = 0x84C0;
+const unsigned int GL_TEXTURE_MIN_FILTER        = 0x2801;
+const unsigned int GL_TEXTURE_MAG_FILTER        = 0x2800;
+const unsigned int GL_TEXTURE_WRAP_S            = 0x2802;
+const unsigned int GL_TEXTURE_WRAP_T            = 0x2803;
+const unsigned int GL_LINEAR                    = 0x2601;
+const unsigned int GL_CLAMP_TO_EDGE             = 0x812F;
+const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_WRITE_ONLY                = 0x88B9;
+const unsigned int GL_COMPUTE_SHADER            = 0x91B9;
+const unsigned int GL_COMPILE_STATUS            = 0x8B81;
+const unsigned int GL_LINK_STATUS               = 0x8B82;
+const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
+const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
+const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
+const unsigned int GL_DYNAMIC_DRAW              = 0x88E8;
+const unsigned int GL_NO_ERROR                  = 0;
 
 // Every shader below: inputTex/srcTex=binding 0 (texture unit 0), a second sampler (only the
 // composite shader has one, bloomTex)=binding 1 (texture unit 1), the write image=binding 1
@@ -102,7 +89,7 @@ const char* kCompositeShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
     "layout(binding = 1) uniform sampler2D bloomTex;\n"
-    "layout(rgba8, binding = 2) uniform writeonly image2D outputImage;\n"
+    "layout(rgba16f, binding = 2) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform BloomConfigBlock {\n"
     "    float value;\n"
     "};\n"
@@ -133,12 +120,9 @@ struct PipelineState {
     bool texturesValid = false;
     int width = 0;
     int height = 0;
-    unsigned int inputTexture = 0;
     unsigned int brightTexture = 0;
     unsigned int blurTempTexture = 0;
     unsigned int blurFinalTexture = 0;
-    unsigned int outputTexture = 0;
-    unsigned int outputFbo = 0;
 };
 
 PipelineState g_state;
@@ -179,7 +163,7 @@ bool CompileAndLink(const GlComputeApi& gl, const char* source, const char* labe
     return true;
 }
 
-unsigned int CreateWorkTexture(const GlComputeApi& gl, unsigned int internalFormat, int width, int height) {
+unsigned int CreateWorkTexture(const GlComputeApi& gl, int width, int height) {
     unsigned int texture = 0;
     gl.glGenTextures(1, &texture);
     gl.glBindTexture(GL_TEXTURE_2D, texture);
@@ -187,7 +171,7 @@ unsigned int CreateWorkTexture(const GlComputeApi& gl, unsigned int internalForm
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, width, height);
+    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16F, width, height);
     return texture;
 }
 
@@ -197,26 +181,15 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
     }
 
     if (g_state.texturesValid) {
-        unsigned int textures[5] = {g_state.inputTexture, g_state.brightTexture, g_state.blurTempTexture,
-                                     g_state.blurFinalTexture, g_state.outputTexture};
-        gl.glDeleteTextures(5, textures);
-        gl.glDeleteFramebuffers(1, &g_state.outputFbo);
+        unsigned int textures[3] = {g_state.brightTexture, g_state.blurTempTexture, g_state.blurFinalTexture};
+        gl.glDeleteTextures(3, textures);
         g_state.texturesValid = false;
     }
 
-    g_state.inputTexture = CreateWorkTexture(gl, GL_RGBA8, width, height);
-    g_state.brightTexture = CreateWorkTexture(gl, GL_RGBA16F, width, height);
-    g_state.blurTempTexture = CreateWorkTexture(gl, GL_RGBA16F, width, height);
-    g_state.blurFinalTexture = CreateWorkTexture(gl, GL_RGBA16F, width, height);
-    g_state.outputTexture = CreateWorkTexture(gl, GL_RGBA8, width, height);
+    g_state.brightTexture = CreateWorkTexture(gl, width, height);
+    g_state.blurTempTexture = CreateWorkTexture(gl, width, height);
+    g_state.blurFinalTexture = CreateWorkTexture(gl, width, height);
 
-    unsigned int fbo = 0;
-    gl.glGenFramebuffers(1, &fbo);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_state.outputTexture, 0);
-    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    g_state.outputFbo = fbo;
     g_state.width = width;
     g_state.height = height;
     g_state.texturesValid = true;
@@ -245,7 +218,7 @@ unsigned int GroupCount(int extent) {
 
 }  // namespace
 
-void ApplyBloom(float threshold, float intensity) {
+bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float threshold, float intensity) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -254,7 +227,7 @@ void ApplyBloom(float threshold, float intensity) {
                    "context, effect disabled\n");
             warned = true;
         }
-        return;
+        return false;
     }
 
     if (!g_state.initTried) {
@@ -270,76 +243,28 @@ void ApplyBloom(float threshold, float intensity) {
         }
     }
     if (!g_state.initOk) {
-        return;
+        return false;
     }
 
-    int viewport[4] = {0, 0, 0, 0};
-    gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
     if (width <= 0 || height <= 0) {
-        return;
+        return false;
     }
-
-    int savedActiveTexture = 0;
-    gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding0 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding0);
-    gl.glActiveTexture(GL_TEXTURE0 + 1);
-    int savedTextureBinding1 = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding1);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedProgram = 0;
-    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
-    int savedReadFbo = 0;
-    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    int savedDrawFbo = 0;
-    gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
-    int savedUniformBuffer = 0;
-    gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
     EnsureTextures(gl, width, height);
     EnsureUbo(gl);
 
-    auto restoreState = [&]() {
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)savedDrawFbo);
-        gl.glUseProgram((unsigned int)savedProgram);
-        gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
-        gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
-        gl.glActiveTexture(GL_TEXTURE0 + 1);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding1);
-        gl.glActiveTexture(GL_TEXTURE0);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding0);
-        gl.glActiveTexture((unsigned int)savedActiveTexture);
-    };
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
-    unsigned int captureErr = gl.glGetError();
-    if (captureErr != GL_NO_ERROR) {
-        printf("[opengl32_enh_cpp] bloom: glGetError() = 0x%04X after capture, skipping this "
-               "frame\n", captureErr);
-        restoreState();
-        return;
-    }
-
     unsigned int groupsX = GroupCount(width);
     unsigned int groupsY = GroupCount(height);
 
-    // Pass 1: extract bright pixels above `threshold` (soft-kneed) from inputTexture into
+    // Pass 1: extract bright pixels above `threshold` (soft-kneed) from srcTexture into
     // brightTexture.
     UploadConfig(gl, threshold);
     gl.glUseProgram(g_state.extractProgram);
     gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glBindImageTexture(1, g_state.brightTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
     // Pass 2: horizontal blur, brightTexture -> blurTempTexture.
     UploadConfig(gl, 1.0f);
@@ -348,7 +273,7 @@ void ApplyBloom(float threshold, float intensity) {
     gl.glBindTexture(GL_TEXTURE_2D, g_state.brightTexture);
     gl.glBindImageTexture(1, g_state.blurTempTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
     // Pass 3: vertical blur, blurTempTexture -> blurFinalTexture.
     UploadConfig(gl, 0.0f);
@@ -357,27 +282,23 @@ void ApplyBloom(float threshold, float intensity) {
     gl.glBindTexture(GL_TEXTURE_2D, g_state.blurTempTexture);
     gl.glBindImageTexture(1, g_state.blurFinalTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Pass 4: composite - inputTexture + blurFinalTexture * intensity -> outputTexture.
+    // Pass 4: composite - srcTexture + blurFinalTexture * intensity -> dstTexture.
     UploadConfig(gl, intensity);
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, g_state.inputTexture);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glActiveTexture(GL_TEXTURE0 + 1);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.blurFinalTexture);
-    gl.glBindImageTexture(2, g_state.outputTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA8);
+    gl.glBindImageTexture(2, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_state.outputFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+    gl.glActiveTexture(GL_TEXTURE0);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] bloom: glGetError() = 0x%04X after dispatch\n", err);
     }
-
-    restoreState();
+    return true;
 }
