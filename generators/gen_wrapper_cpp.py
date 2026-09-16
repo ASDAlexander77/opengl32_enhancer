@@ -150,10 +150,13 @@ typedef float GLclampf;
 typedef double GLdouble;
 typedef double GLclampd;
 
+const int MAX_PATH = 260;
+
 extern "C" {
     __declspec(dllimport) void* __stdcall LoadLibraryA(const char* lpLibFileName);
     __declspec(dllimport) void* __stdcall GetProcAddress(void* hModule, const char* lpProcName);
     __declspec(dllimport) DWORD __stdcall GetLastError(void);
+    __declspec(dllimport) UINT __stdcall GetSystemDirectoryA(char* lpBuffer, UINT uSize);
 }
 """
 
@@ -177,10 +180,27 @@ def emit_cpp(funcs):
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
     lines.append("")
+    lines.append("// Resolves the real opengl32.dll's directory via the GetSystemDirectoryA API instead")
+    lines.append('// of a hardcoded "C:\\\\Windows\\\\System32\\\\..." literal - Windows doesn\'t have to be')
+    lines.append("// installed on the C: drive or named \"Windows\". GetSystemDirectoryA itself always")
+    lines.append("// returns the textual \"...\\\\System32\" path, on WOW64 included: it's LoadLibraryA")
+    lines.append("// opening that path from this 32-bit process that gets transparently redirected to")
+    lines.append("// SysWOW64 by the OS's WOW64 file-system redirector, the same redirection a hardcoded")
+    lines.append("// System32 literal would have ridden too - so this change isn't what makes a 32-bit")
+    lines.append("// opengl32.dll get found (the redirector already did that), it's what makes the path")
+    lines.append("// come from Windows' own API instead of an assumption about where Windows lives.")
     lines.append("static void* EnsureRealOpenGL32() {")
     lines.append("    if (g_real == nullptr) {")
-    lines.append('        printf("[opengl32_enh_cpp] loading real opengl32.dll from C:\\\\Windows\\\\System32\\\\opengl32.dll ...\\n");')
-    lines.append('        g_real = LoadLibraryA("C:\\\\Windows\\\\System32\\\\opengl32.dll");')
+    lines.append("        char sysDir[MAX_PATH];")
+    lines.append("        UINT sysDirLen = GetSystemDirectoryA(sysDir, sizeof(sysDir));")
+    lines.append("        if (sysDirLen == 0 || sysDirLen >= sizeof(sysDir)) {")
+    lines.append('            printf("[opengl32_enh_cpp] FAILED to get system directory, GetLastError=%lu\\n", GetLastError());')
+    lines.append("            return nullptr;")
+    lines.append("        }")
+    lines.append("        char dllPath[MAX_PATH + 16];")
+    lines.append('        snprintf(dllPath, sizeof(dllPath), "%s\\\\opengl32.dll", sysDir);')
+    lines.append('        printf("[opengl32_enh_cpp] loading real opengl32.dll from %s ...\\n", dllPath);')
+    lines.append("        g_real = LoadLibraryA(dllPath);")
     lines.append("        if (g_real == nullptr) {")
     lines.append('            printf("[opengl32_enh_cpp] FAILED to load real opengl32.dll, GetLastError=%lu\\n", GetLastError());')
     lines.append("        } else {")

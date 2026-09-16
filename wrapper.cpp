@@ -36,18 +36,38 @@ typedef float GLclampf;
 typedef double GLdouble;
 typedef double GLclampd;
 
+const int MAX_PATH = 260;
+
 extern "C" {
     __declspec(dllimport) void* __stdcall LoadLibraryA(const char* lpLibFileName);
     __declspec(dllimport) void* __stdcall GetProcAddress(void* hModule, const char* lpProcName);
     __declspec(dllimport) DWORD __stdcall GetLastError(void);
+    __declspec(dllimport) UINT __stdcall GetSystemDirectoryA(char* lpBuffer, UINT uSize);
 }
 
 static void* g_real = nullptr;
 
+// Resolves the real opengl32.dll's directory via the GetSystemDirectoryA API instead
+// of a hardcoded "C:\\Windows\\System32\\..." literal - Windows doesn't have to be
+// installed on the C: drive or named "Windows". GetSystemDirectoryA itself always
+// returns the textual "...\\System32" path, on WOW64 included: it's LoadLibraryA
+// opening that path from this 32-bit process that gets transparently redirected to
+// SysWOW64 by the OS's WOW64 file-system redirector, the same redirection a hardcoded
+// System32 literal would have ridden too - so this change isn't what makes a 32-bit
+// opengl32.dll get found (the redirector already did that), it's what makes the path
+// come from Windows' own API instead of an assumption about where Windows lives.
 static void* EnsureRealOpenGL32() {
     if (g_real == nullptr) {
-        printf("[opengl32_enh_cpp] loading real opengl32.dll from C:\\Windows\\System32\\opengl32.dll ...\n");
-        g_real = LoadLibraryA("C:\\Windows\\System32\\opengl32.dll");
+        char sysDir[MAX_PATH];
+        UINT sysDirLen = GetSystemDirectoryA(sysDir, sizeof(sysDir));
+        if (sysDirLen == 0 || sysDirLen >= sizeof(sysDir)) {
+            printf("[opengl32_enh_cpp] FAILED to get system directory, GetLastError=%lu\n", GetLastError());
+            return nullptr;
+        }
+        char dllPath[MAX_PATH + 16];
+        snprintf(dllPath, sizeof(dllPath), "%s\\opengl32.dll", sysDir);
+        printf("[opengl32_enh_cpp] loading real opengl32.dll from %s ...\n", dllPath);
+        g_real = LoadLibraryA(dllPath);
         if (g_real == nullptr) {
             printf("[opengl32_enh_cpp] FAILED to load real opengl32.dll, GetLastError=%lu\n", GetLastError());
         } else {
