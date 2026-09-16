@@ -1,11 +1,14 @@
 #pragma once
 
-// THROWAWAY SPIKE: same idea as the (abandoned) texture-upscale spike, but WITHOUT resizing -
-// see the design discussion for why changing a texture's dimensions from under the game is
-// unsafe (the game's own UV/atlas math and mip chain both assume the size it uploaded, not
-// whatever the driver's texture object ends up being). Sharpening in place keeps width/height
-// identical, so neither of those problems applies: only the pixel content changes, never the
-// declared size. Gated behind opengl32_enhancer.ini's `textureSharpen=1` (default off).
+// Sharpens the game's own textures at upload time, in place - width/height never change, only
+// pixel content does. An earlier attempt at this also upscaled (doubled) the texture, but that
+// silently broke rendering: the game's own UV/atlas math and mip chain both assume the size it
+// uploaded, not whatever the driver's texture object ends up being, so changing dimensions out
+// from under the game corrupted textures in real games (white/mipmap-incomplete, or half-
+// visible from stale UV math). Keeping the size fixed avoids both problems entirely - see
+// docs/superpowers/specs/2026-09-15-nis-post-effects-design.md for the wider effect pipeline
+// this reuses (ApplyNVSharpen). Gated behind opengl32_enhancer.ini's `textureSharpen=1`
+// (default off).
 
 typedef void (__stdcall *RealTexImage2DFn)(unsigned int target, int level, int internalformat,
     int width, int height, int border, unsigned int format, unsigned int type, void* pixels);

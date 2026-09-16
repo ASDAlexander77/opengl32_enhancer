@@ -48,9 +48,9 @@ struct AnaxConfig {
     float taaBlend = 0.5f;                     // Taa
     float ditherStrength = 1.0f;               // Dither
 
-    // THROWAWAY SPIKE (see texture_sharpen.h): sharpens small GL_RGBA/GL_UNSIGNED_BYTE
-    // texture uploads in place (same dimensions - no resize) at load time, using the
-    // `sharpness` value above. Independent of the effect= pipeline. Off by default.
+    // Sharpens small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
+    // resize) at load time, using the `sharpness` value above (see texture_sharpen.h).
+    // Independent of the effect= pipeline. Off by default.
     bool textureSharpen = false;
 };
 

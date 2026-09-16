@@ -34,7 +34,7 @@ const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
 const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
 const unsigned int GL_NO_ERROR                  = 0;
 
-// Spike-grade heuristic, not a real classifier - see texture_sharpen.h.
+// A simple heuristic, not a real texture classifier - see texture_sharpen.h.
 const int kMaxDim = 1024;
 
 unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, int width, int height) {
