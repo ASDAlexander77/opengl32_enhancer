@@ -206,6 +206,16 @@ AnaxConfig ParseConfigFile(const char* path) {
             CopyLutPath(config, value);
         } else if (strcmp(key, "lutStrength") == 0) {
             config.lutStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.lutStrength, "lutStrength");
+        } else if (strcmp(key, "enableVignette") == 0) {
+            config.enableVignette = ParseBool(value, config.enableVignette, "enableVignette");
+        } else if (strcmp(key, "vignetteIntensity") == 0) {
+            config.vignetteIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.vignetteIntensity, "vignetteIntensity");
+        } else if (strcmp(key, "vignetteRadius") == 0) {
+            config.vignetteRadius = ParseClampedFloat(value, 0.0f, 1.0f, config.vignetteRadius, "vignetteRadius");
+        } else if (strcmp(key, "enableChromaticAberration") == 0) {
+            config.enableChromaticAberration = ParseBool(value, config.enableChromaticAberration, "enableChromaticAberration");
+        } else if (strcmp(key, "chromaticAberrationStrength") == 0) {
+            config.chromaticAberrationStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.chromaticAberrationStrength, "chromaticAberrationStrength");
         } else if (strcmp(key, "enableDither") == 0) {
             config.enableDither = ParseBool(value, config.enableDither, "enableDither");
         } else if (strcmp(key, "ditherStrength") == 0) {
@@ -217,12 +227,16 @@ AnaxConfig ParseConfigFile(const char* path) {
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%d, scale=%.3f, "
            "enableAcesToneMap=%s, acesStrength=%.3f, enableBloom=%s, bloomThreshold=%.3f, bloomIntensity=%.3f, "
            "enableSharpen=%s, sharpness=%.3f, enableLutGrading=%s, lutPath='%s', lutStrength=%.3f, "
+           "enableVignette=%s, vignetteIntensity=%.3f, vignetteRadius=%.3f, "
+           "enableChromaticAberration=%s, chromaticAberrationStrength=%.3f, "
            "enableTaa=%s, taaBlend=%.3f, enableDither=%s, ditherStrength=%.3f)\n",
            path, static_cast<int>(config.effect), config.scale,
            config.enableAcesToneMap ? "true" : "false", config.acesStrength,
            config.enableBloom ? "true" : "false", config.bloomThreshold, config.bloomIntensity,
            config.enableSharpen ? "true" : "false", config.sharpness,
            config.enableLutGrading ? "true" : "false", config.lutPath, config.lutStrength,
+           config.enableVignette ? "true" : "false", config.vignetteIntensity, config.vignetteRadius,
+           config.enableChromaticAberration ? "true" : "false", config.chromaticAberrationStrength,
            config.enableTaa ? "true" : "false", config.taaBlend,
            config.enableDither ? "true" : "false", config.ditherStrength);
     return config;

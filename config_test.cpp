@@ -50,6 +50,11 @@ int main() {
         Check(config.sharpness == 0.5f, "missing file falls back to default sharpness");
         Check(config.enableTaa == false, "missing file falls back to default enableTaa (false)");
         Check(config.taaBlend == 0.5f, "missing file falls back to default taaBlend");
+        Check(config.enableVignette == false, "missing file falls back to default enableVignette (false)");
+        Check(config.vignetteIntensity == 0.3f, "missing file falls back to default vignetteIntensity");
+        Check(config.vignetteRadius == 0.7f, "missing file falls back to default vignetteRadius");
+        Check(config.enableChromaticAberration == false, "missing file falls back to default enableChromaticAberration (false)");
+        Check(config.chromaticAberrationStrength == 0.3f, "missing file falls back to default chromaticAberrationStrength");
         Check(config.enableDither == false, "missing file falls back to default enableDither (false)");
         Check(config.ditherStrength == 1.0f, "missing file falls back to default ditherStrength");
     }
@@ -96,6 +101,11 @@ int main() {
             "sharpness=0.6\n"
             "enableTaa=true\n"
             "taaBlend=0.85\n"
+            "enableVignette=true\n"
+            "vignetteIntensity=0.25\n"
+            "vignetteRadius=0.6\n"
+            "enableChromaticAberration=true\n"
+            "chromaticAberrationStrength=0.4\n"
             "enableDither=true\n"
             "ditherStrength=0.5\n");
         AnaxConfig config = ParseConfigFile("config_test_addons.ini");
@@ -112,6 +122,11 @@ int main() {
         Check(config.sharpness == 0.6f, "parses sharpness=0.6");
         Check(config.enableTaa == true, "parses enableTaa=true");
         Check(config.taaBlend == 0.85f, "parses taaBlend=0.85");
+        Check(config.enableVignette == true, "parses enableVignette=true");
+        Check(config.vignetteIntensity == 0.25f, "parses vignetteIntensity=0.25");
+        Check(config.vignetteRadius == 0.6f, "parses vignetteRadius=0.6");
+        Check(config.enableChromaticAberration == true, "parses enableChromaticAberration=true");
+        Check(config.chromaticAberrationStrength == 0.4f, "parses chromaticAberrationStrength=0.4");
         Check(config.enableDither == true, "parses enableDither=true");
         Check(config.ditherStrength == 0.5f, "parses ditherStrength=0.5");
     }
@@ -173,6 +188,8 @@ int main() {
             "acesStrength=2.0\n"
             "bloomIntensity=5.0\n"
             "lutStrength=-2.0\n"
+            "vignetteIntensity=3.0\n"
+            "chromaticAberrationStrength=-0.5\n"
             "ditherStrength=-1.0\n");
         AnaxConfig config = ParseConfigFile("config_test_bad.ini");
         Check(config.effect == EffectKind::None, "unrecognized effect falls back to none");
@@ -182,6 +199,8 @@ int main() {
         Check(config.acesStrength == 1.0f, "out-of-range acesStrength (2.0) clamps to max 1.0");
         Check(config.bloomIntensity == 2.0f, "out-of-range bloomIntensity (5.0) clamps to max 2.0");
         Check(config.lutStrength == 0.0f, "out-of-range lutStrength (-2.0) clamps to min 0.0");
+        Check(config.vignetteIntensity == 1.0f, "out-of-range vignetteIntensity (3.0) clamps to max 1.0");
+        Check(config.chromaticAberrationStrength == 0.0f, "out-of-range chromaticAberrationStrength (-0.5) clamps to min 0.0");
         Check(config.ditherStrength == 0.0f, "out-of-range ditherStrength (-1.0) clamps to min 0.0");
     }
 

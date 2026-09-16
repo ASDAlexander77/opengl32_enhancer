@@ -21,6 +21,8 @@
 #include "hdr_look.h"
 #include "bloom.h"
 #include "lut_grading.h"
+#include "vignette.h"
+#include "chromatic_aberration.h"
 #include "taa.h"
 #include "dither.h"
 #include "gl_loader.h"
@@ -102,6 +104,7 @@ void ApplySelectedEffect() {
 
     bool anyStageEnabled = config.effect != EffectKind::None || config.enableAcesToneMap ||
         config.enableBloom || config.enableSharpen || config.enableLutGrading ||
+        config.enableVignette || config.enableChromaticAberration ||
         config.enableTaa || config.enableDither;
     if (!anyStageEnabled) {
         return;
@@ -183,9 +186,11 @@ void ApplySelectedEffect() {
     }
 
     // Everything below is an optional addon pass, each independent of the others, always
-    // applied in this fixed order: ACES tone map -> Bloom -> Sharpen -> LUT grading -> TAA ->
-    // Dither. Dither runs last (right before the final blit) so it dithers whatever the rest
-    // of the pipeline produced.
+    // applied in this fixed order: Bloom -> ACES tone map -> LUT grading -> Vignette ->
+    // Chromatic aberration -> TAA -> Sharpen -> Dither. Vignette and chromatic aberration sit
+    // after grading so the LUT grades the actual scene colors rather than colors the lens
+    // simulation already darkened/fringed. Dither runs last (right before the final blit) so
+    // it dithers whatever the rest of the pipeline produced.
     if (config.enableBloom) {
         if (ApplyBloom(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.bloomThreshold, config.bloomIntensity)) cur = 1 - cur;
     }
@@ -194,6 +199,12 @@ void ApplySelectedEffect() {
     }
     if (config.enableLutGrading) {
         if (ApplyLutGrading(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.lutPath, config.lutStrength)) cur = 1 - cur;
+    }
+    if (config.enableVignette) {
+        if (ApplyVignette(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.vignetteIntensity, config.vignetteRadius)) cur = 1 - cur;
+    }
+    if (config.enableChromaticAberration) {
+        if (ApplyChromaticAberration(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.chromaticAberrationStrength)) cur = 1 - cur;
     }
     if (config.enableTaa) {
         if (ApplyTaa(g_pipeline.tex[cur], g_pipeline.tex[1 - cur], width, height, config.taaBlend)) cur = 1 - cur;
