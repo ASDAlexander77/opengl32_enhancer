@@ -25,6 +25,7 @@ enum class EffectKind {
     Cas,
     Nr,
     LocalContrast,
+    DepthVignette,
 };
 
 // Plenty of headroom for the real stages, even if a config lists some of them twice.
@@ -62,6 +63,8 @@ struct AnaxConfig {
     float localStructureStrength = 0.3f;       // LocalContrast
     float localToneStrength = 0.3f;            // LocalContrast
     float shimmerSuppression = 0.0f;           // Taa
+    float depthVignetteIntensity = 0.3f;       // DepthVignette
+    float depthVignetteThreshold = 0.3f;       // DepthVignette
 
     // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
     // textures - see texture_filter.h. 0 (default) leaves every glTexParameter call the game

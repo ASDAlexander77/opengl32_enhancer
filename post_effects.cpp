@@ -31,6 +31,7 @@
 #include "nr.h"
 #include "local_contrast.h"
 #include "fx_indicator.h"
+#include "depth_vignette.h"
 #include "gl_loader.h"
 
 namespace {
@@ -48,6 +49,9 @@ const unsigned int GL_TEXTURE_WRAP_T           = 0x2803;
 const unsigned int GL_LINEAR                   = 0x2601;
 const unsigned int GL_CLAMP_TO_EDGE            = 0x812F;
 const unsigned int GL_RGBA16F                  = 0x881A;
+const unsigned int GL_DEPTH_COMPONENT24        = 0x81A6;
+const unsigned int GL_DEPTH_ATTACHMENT         = 0x8D00;
+const unsigned int GL_DEPTH_BUFFER_BIT         = 0x00000100;
 const unsigned int GL_CURRENT_PROGRAM          = 0x8B8D;
 const unsigned int GL_FRAMEBUFFER              = 0x8D40;
 const unsigned int GL_READ_FRAMEBUFFER         = 0x8CA8;
@@ -69,6 +73,12 @@ struct PipelineTextures {
     int height = 0;
     unsigned int tex[2] = {0, 0};
     unsigned int presentFbo = 0;   // reused, re-attached to whichever tex[] is final each frame
+    // EXPERIMENTAL (see depth_vignette.h): the default framebuffer's depth attachment, blitted
+    // here once per frame, but only when depthvignette is actually listed - see
+    // ApplySelectedEffect(). depthFbo exists purely as a blit target for depthTex; nothing ever
+    // reads from it as a framebuffer otherwise.
+    unsigned int depthTex = 0;
+    unsigned int depthFbo = 0;
 };
 
 PipelineTextures g_pipeline;
@@ -85,7 +95,22 @@ unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height
     return texture;
 }
 
-void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height) {
+// EXPERIMENTAL (see depth_vignette.h). GL_NEAREST rather than GL_LINEAR: interpolating across a
+// depth discontinuity (a near foreground edge against distant background) would blend two
+// unrelated depths into a meaningless mid-value.
+unsigned int CreateDepthTexture(const GlComputeApi& gl, int width, int height) {
+    unsigned int texture = 0;
+    gl.glGenTextures(1, &texture);
+    gl.glBindTexture(GL_TEXTURE_2D, texture);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, width, height);
+    return texture;
+}
+
+void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height, bool needDepth) {
     // A context change invalidates the cached textures and FBO. Drop the handles rather than
     // deleting them (the owning context freed them already, and glDelete* now would hit
     // unrelated objects in the current context); everything below then recreates them.
@@ -95,6 +120,12 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height) {
     }
 
     if (g_pipeline.valid && g_pipeline.width == width && g_pipeline.height == height) {
+        if (needDepth && g_pipeline.depthTex == 0) {
+            g_pipeline.depthTex = CreateDepthTexture(gl, width, height);
+            gl.glGenFramebuffers(1, &g_pipeline.depthFbo);
+            gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.depthFbo);
+            gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_pipeline.depthTex, 0);
+        }
         return;
     }
 
@@ -111,6 +142,18 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height) {
     g_pipeline.width = width;
     g_pipeline.height = height;
     g_pipeline.valid = true;
+
+    // A resize invalidates the old depth texture/FBO too (they were sized to the old
+    // width/height) - drop the stale handles so the needDepth branch just below rebuilds them
+    // against the new size.
+    g_pipeline.depthTex = 0;
+    g_pipeline.depthFbo = 0;
+    if (needDepth) {
+        g_pipeline.depthTex = CreateDepthTexture(gl, width, height);
+        gl.glGenFramebuffers(1, &g_pipeline.depthFbo);
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.depthFbo);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_pipeline.depthTex, 0);
+    }
 }
 
 }  // namespace
@@ -152,7 +195,8 @@ void ApplySelectedEffect() {
     int savedUniformBuffer = 0;
     gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
-    EnsurePipelineTextures(gl, width, height);
+    bool needDepth = HasEffectStage(config, EffectKind::DepthVignette);
+    EnsurePipelineTextures(gl, width, height, needDepth);
 
     auto restoreState = [&]() {
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
@@ -178,6 +222,29 @@ void ApplySelectedEffect() {
                "skipping this frame\n", captureErr);
         restoreState();
         return;
+    }
+
+    // EXPERIMENTAL (see depth_vignette.h): blit the default framebuffer's depth attachment
+    // into g_pipeline.depthTex, same read-framebuffer-0 reasoning as the color capture above.
+    // Only attempted when depthvignette is actually listed - everyone else pays nothing for
+    // this. A blit error (e.g. this GL context's pixel format has no depth buffer at all) is
+    // logged once and leaves depthCaptured false, which makes ApplyDepthVignette() below no-op
+    // for this frame exactly like any other stage that can't run.
+    bool depthCaptured = false;
+    if (needDepth) {
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        unsigned int depthErr = gl.glGetError();
+        depthCaptured = (depthErr == GL_NO_ERROR);
+        if (!depthCaptured) {
+            static bool warnedNoDepth = false;
+            if (!warnedNoDepth) {
+                printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X blitting depth, "
+                       "depthvignette will no-op until this changes\n", depthErr);
+                warnedNoDepth = true;
+            }
+        }
     }
 
     // Run the stages in exactly the order the config listed them - there is no hard-coded
@@ -246,6 +313,11 @@ void ApplySelectedEffect() {
             case EffectKind::LocalContrast:
                 wrote = ApplyLocalContrast(src, dst, width, height, config.localStructureStrength,
                                             config.localToneStrength);
+                break;
+            case EffectKind::DepthVignette:
+                wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, width, height,
+                                                              config.depthVignetteIntensity,
+                                                              config.depthVignetteThreshold);
                 break;
         }
         if (wrote) {

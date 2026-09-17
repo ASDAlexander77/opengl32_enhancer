@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -126,6 +126,14 @@ target_link_libraries(dither_test opengl32 gdi32 user32)
 add_executable(vignette_test vignette_test.cpp vignette.cpp gl_loader.cpp)
 target_link_libraries(vignette_test opengl32 gdi32 user32)
 
+# EXPERIMENTAL (see depth_vignette.h). Creates a real GL context, renders two real quads at
+# different NDC depths with depth testing on, blits both color and depth off the real back
+# buffer the same way post_effects.cpp does, and checks ApplyDepthVignette()'s GPU pipeline at
+# intensity=0 (must reproduce the input exactly) and a strong intensity/low threshold (the near
+# quad must stay bit-exact, the far quad must come back darker) - see depth_vignette_test.cpp.
+add_executable(depth_vignette_test depth_vignette_test.cpp depth_vignette.cpp gl_loader.cpp)
+target_link_libraries(depth_vignette_test opengl32 gdi32 user32)
+
 # Creates a real GL context, clears to a known color, and checks ApplyChromaticAberration()'s
 # GPU pipeline at strength=0 (exact passthrough) and strength=1 (flat frame must survive the
 # radial channel offsets unchanged - catches channel swaps and out-of-bounds sampling) - see
@@ -196,7 +204,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
+    vignette.cpp depth_vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
     local_contrast.cpp fx_indicator.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
@@ -253,6 +261,7 @@ foreach(test_target
     bloom_test
     dither_test
     vignette_test
+    depth_vignette_test
     chromatic_aberration_test
     smaa_test
     nr_test
