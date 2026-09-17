@@ -82,14 +82,22 @@ game's own textures in place through one stage as they're uploaded. Only
 small, uncompressed `GL_RGBA`/`GL_UNSIGNED_BYTE` uploads are handled (no
 S3TC/BC decode), and dimensions are never changed - only pixel content is.
 
+- `none` disables texture-level processing. This is the default.
 - `sharpen` reuses the same NVIDIA Image Scaling adaptive-sharpen pass as
-  the `sharpen` stage, at the `sharpness` value. Enabled by default.
+  the `sharpen` stage, at the `sharpness` value.
 - `cas` reuses the `cas` stage's Contrast Adaptive Sharpening, also at the
   `sharpness` value. Lighter than `sharpen`, which matters here because this
   runs on every eligible texture at load time.
 - `invert` reuses the same debug/demo invert pass as the `invert` stage -
   handy for spotting which draws touch which textures.
-- `none` disables texture-level processing.
+
+All three pass the source alpha channel through untouched. That matters far
+more here than it does in the `effect=` pipeline: the back buffer is opaque,
+but a game's textures use alpha as a cutout/blend mask, so a stage that wrote
+a constant alpha would turn every alpha-masked sprite, font glyph and decal
+into an opaque rectangle - on screen it looks like the texture has gained a
+solid-color background. Alpha is deliberately not sharpened either, since that
+would harden cutout edges the game blends on purpose.
 
 `fsr` is deliberately not accepted here: it keeps a scratch texture sized to
 its input and uploads arrive at many different sizes, so it would reallocate
@@ -133,7 +141,26 @@ three-file install archive as a CI artifact.
 ### Tests
 
 Most stages have a GPU-backed test (`*_test.cpp`) that creates a real GL
-context and exercises the effect's compute/shader pipeline directly - build
-and run the corresponding `*_test` target. `post_effects_test` is an
-integration test that runs the actual `opengl32_enhancer.ini` shipped in this
-repo end-to-end and dumps before/after `.ppm` images for a human to eyeball.
+context and exercises the effect's compute/shader pipeline directly.
+`post_effects_test` is an integration test that runs the actual
+`opengl32_enhancer.ini` shipped in this repo end-to-end and dumps before/after
+`.ppm` images for a human to eyeball.
+
+Every test target is registered with CTest, so building and then running
+`ctest` in the build directory runs the whole suite:
+
+```sh
+cmake --build --preset x86-release
+cd build-x86-release && ctest --output-on-failure
+```
+
+Use `ctest` rather than globbing `*_test.exe` in the build directory. A glob
+also picks up stale executables left behind by targets that have since been
+removed, which makes a deleted test look like a failing one; and it runs each
+test from whatever the current directory happens to be, whereas CTest runs
+each from its own build directory, where the fixtures it expects (the copied
+`opengl32_enhancer.ini`, `cyberpunk.cube`) actually live.
+
+The tests create their own windows and run unattended, but they do need a real
+GPU and driver present - they will not pass on a machine without working GL
+4.3 compute support.
