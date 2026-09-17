@@ -290,6 +290,44 @@ int main() {
         Check(config.ditherStrength == 0.0f, "out-of-range ditherStrength (-1.0) clamps to min 0.0");
     }
 
+    // textureEffect accepts none/sharpen/invert, defaults to none, rejects anything else, and
+    // still honors the legacy textureSharpen=1/0 spelling.
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.textureEffect == EffectKind::None, "missing file falls back to default textureEffect=none");
+    }
+    {
+        WriteFixture("config_test_texture_none.ini", "textureEffect=none\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_none.ini");
+        Check(config.textureEffect == EffectKind::None, "textureEffect=none parses to None");
+    }
+    {
+        WriteFixture("config_test_texture_sharpen.ini", "textureEffect=sharpen\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_sharpen.ini");
+        Check(config.textureEffect == EffectKind::Sharpen, "textureEffect=sharpen parses to Sharpen");
+    }
+    {
+        WriteFixture("config_test_texture_invert.ini", "textureEffect=Invert\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_invert.ini");
+        Check(config.textureEffect == EffectKind::Invert, "textureEffect=Invert parses case-insensitively to Invert");
+    }
+    {
+        WriteFixture("config_test_texture_bad.ini", "textureEffect=bloom\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_bad.ini");
+        Check(config.textureEffect == EffectKind::None,
+              "textureEffect naming a pipeline-only stage (bloom) is rejected, falls back to none");
+    }
+    {
+        WriteFixture("config_test_texture_legacy_on.ini", "textureSharpen=1\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_legacy_on.ini");
+        Check(config.textureEffect == EffectKind::Sharpen, "legacy textureSharpen=1 migrates to textureEffect=sharpen");
+    }
+    {
+        WriteFixture("config_test_texture_legacy_off.ini", "textureSharpen=0\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_legacy_off.ini");
+        Check(config.textureEffect == EffectKind::None, "legacy textureSharpen=0 migrates to textureEffect=none");
+    }
+
     if (g_failures > 0) {
         printf("\n%d check(s) FAILED\n", g_failures);
         return 1;

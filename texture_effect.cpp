@@ -50,10 +50,9 @@ unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, in
     return texture;
 }
 
-bool IsEligible(const AnaxConfig& config, unsigned int target, unsigned int format,
-                 unsigned int type, int width, int height, const void* pixels) {
-    return (config.textureEffect == EffectKind::Sharpen || config.textureEffect == EffectKind::Invert)
-        && target == GL_TEXTURE_2D
+bool IsEligible(unsigned int target, unsigned int format, unsigned int type, int width,
+                 int height, const void* pixels) {
+    return target == GL_TEXTURE_2D
         && pixels != nullptr
         && format == GL_RGBA
         && type == GL_UNSIGNED_BYTE
@@ -68,7 +67,12 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
                                void* pixels) {
     const AnaxConfig& config = GetAnaxConfig();
 
-    if (!IsEligible(config, target, format, type, width, height, pixels)) {
+    if (config.textureEffect == EffectKind::None) {
+        realFn(target, level, internalformat, width, height, border, format, type, pixels);
+        return;
+    }
+
+    if (!IsEligible(target, format, type, width, height, pixels)) {
         realFn(target, level, internalformat, width, height, border, format, type, pixels);
         return;
     }
@@ -95,9 +99,20 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, pixels);
 
     unsigned int dstTex = MakeTexture(gl, GL_RGBA16F, width, height);
-    bool applied = config.textureEffect == EffectKind::Invert
-        ? ApplyInvert(srcTex, dstTex, width, height)
-        : ApplyNVSharpen(srcTex, dstTex, width, height, config.sharpness);
+    // The None check above already means only Sharpen/Invert reach here, but switch on it
+    // explicitly rather than defaulting the else branch to sharpen, so a future third
+    // textureEffect value fails loudly instead of quietly running the wrong pass.
+    bool applied = false;
+    switch (config.textureEffect) {
+        case EffectKind::Invert:
+            applied = ApplyInvert(srcTex, dstTex, width, height);
+            break;
+        case EffectKind::Sharpen:
+            applied = ApplyNVSharpen(srcTex, dstTex, width, height, config.sharpness);
+            break;
+        default:
+            break;
+    }
 
     unsigned char* buffer = nullptr;
     bool readOk = false;
