@@ -131,11 +131,11 @@ int main() {
 
     // Run the pipeline twice (the second call also exercises the "already compiled" reuse
     // path), then read back dstTex via readFbo.
-    bool wrote1 = ApplyBilinearUpscale(srcTex, dstTex, width, height);
+    bool wrote1 = ApplyBilinearUpscale(srcTex, dstTex, width, height, 1.0f);
     unsigned int errAfterFirst = gl.glGetError();
     ok &= Check(wrote1 && errAfterFirst == 0, "no GL error after first ApplyBilinearUpscale() call");
 
-    bool wrote2 = ApplyBilinearUpscale(srcTex, dstTex, width, height);
+    bool wrote2 = ApplyBilinearUpscale(srcTex, dstTex, width, height, 1.0f);
     unsigned int errAfterSecond = gl.glGetError();
     ok &= Check(wrote2 && errAfterSecond == 0,
                 "no GL error after second ApplyBilinearUpscale() call (same size, texture reuse)");
@@ -153,6 +153,59 @@ int main() {
                         && std::abs((int)pixel[1] - 51) < 20
                         && std::abs((int)pixel[2] - 26) < 20;
     ok &= Check(colorPlausible, "bilinear pass reproduced the cleared color at scale 1.0");
+
+    // `scale` was documented for years but never actually plumbed through - every call ran 1:1.
+    // A flat color cannot show the difference (any resample of a constant is that constant), so
+    // upload a 1-texel checkerboard: at scale 1.0 it must survive exactly, and at scale 0.5 the
+    // coarser virtual grid must visibly change it. Comparing the two rules out a silently
+    // ignored parameter, which "ran without a GL error" would not.
+    {
+        const size_t texelCount = (size_t)width * (size_t)height;
+        unsigned char* checker = new unsigned char[texelCount * 4];
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                size_t i = ((size_t)y * width + x) * 4;
+                unsigned char v = ((x + y) & 1) ? 255 : 0;
+                checker[i + 0] = v; checker[i + 1] = v; checker[i + 2] = v; checker[i + 3] = 255;
+            }
+        }
+        gl.glBindTexture(GL_TEXTURE_2D, srcTex);
+        gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, checker);
+        delete[] checker;
+
+        unsigned char* atFull = new unsigned char[texelCount * 4];
+        unsigned char* atHalf = new unsigned char[texelCount * 4];
+
+        ApplyBilinearUpscale(srcTex, dstTex, width, height, 1.0f);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
+        pGlReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, atFull);
+
+        ApplyBilinearUpscale(srcTex, dstTex, width, height, 0.5f);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
+        pGlReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, atHalf);
+
+        int differing = 0;
+        for (size_t i = 0; i < texelCount; ++i) {
+            if (std::abs((int)atFull[i * 4] - (int)atHalf[i * 4]) > 8) {
+                ++differing;
+            }
+        }
+        printf("Checkerboard texels differing between scale 1.0 and scale 0.5: %d of %d\n",
+               differing, (int)texelCount);
+        ok &= Check(differing > (int)texelCount / 10,
+                    "scale is honored: scale=0.5 produces a visibly different image than scale=1.0");
+
+        // At scale 1.0 the virtual grid is the source grid, so the checkerboard must come back
+        // intact rather than softened - that is what makes 1.0 a safe default.
+        size_t probe = ((size_t)(height / 2) * width + (width / 2)) * 4;
+        unsigned char expected = (((width / 2) + (height / 2)) & 1) ? 255 : 0;
+        printf("scale=1.0 checkerboard probe: got %d, expected %d\n", atFull[probe], expected);
+        ok &= Check(std::abs((int)atFull[probe] - (int)expected) <= 8,
+                    "scale=1.0 is an exact texel-center copy (checkerboard survives)");
+
+        delete[] atFull;
+        delete[] atHalf;
+    }
 
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);

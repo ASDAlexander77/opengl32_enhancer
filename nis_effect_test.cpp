@@ -45,11 +45,19 @@ unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height
     return tex;
 }
 
-typedef bool (*ApplyFn)(unsigned int, unsigned int, int, int, float);
+// ApplyNVScaler takes a scale, ApplyNVSharpen (sharpen-only, always 1:1) does not, so the
+// shared shape here carries scale and the sharpen adapter drops it.
+typedef bool (*ApplyFn)(unsigned int, unsigned int, int, int, float, float);
+
+bool SharpenAdapter(unsigned int srcTex, unsigned int dstTex, int width, int height,
+                    float scale, float sharpness) {
+    (void)scale;
+    return ApplyNVSharpen(srcTex, dstTex, width, height, sharpness);
+}
 
 bool RunOnce(ApplyFn applyFn, const char* name, unsigned int srcTex, unsigned int dstTex,
-             int width, int height, unsigned int readFbo) {
-    bool wrote = applyFn(srcTex, dstTex, width, height, 0.5f);
+             int width, int height, unsigned int readFbo, float scale = 1.0f) {
+    bool wrote = applyFn(srcTex, dstTex, width, height, scale, 0.5f);
     const GlComputeApi& gl = GetGlComputeApi();
     unsigned int err = gl.glGetError();
     if (!wrote || err != 0) {
@@ -148,11 +156,16 @@ int main() {
 
     bool ok = true;
     ok = RunOnce(&ApplyNVScaler, "ApplyNVScaler", srcTex, dstTex, width, height, readFbo) && ok;
-    ok = RunOnce(&ApplyNVSharpen, "ApplyNVSharpen", srcTex, dstTex, width, height, readFbo) && ok;
+    ok = RunOnce(&SharpenAdapter, "ApplyNVSharpen", srcTex, dstTex, width, height, readFbo) && ok;
     // Run each a second time to exercise EnsureStaticResources' reuse (not-first-call) path,
     // same as bilinear_upscale_test.cpp does for ApplyBilinearUpscale.
     ok = RunOnce(&ApplyNVScaler, "ApplyNVScaler (second call)", srcTex, dstTex, width, height, readFbo) && ok;
-    ok = RunOnce(&ApplyNVSharpen, "ApplyNVSharpen (second call)", srcTex, dstTex, width, height, readFbo) && ok;
+
+    // scale < 1 is the path config.scale now actually drives: NVScaler treats the source as a
+    // smaller virtual grid and reconstructs full size. Previously scale was ignored entirely
+    // and every call ran 1:1, so this is the case that would have silently done nothing.
+    ok = RunOnce(&ApplyNVScaler, "ApplyNVScaler (scale=0.5)", srcTex, dstTex, width, height, readFbo, 0.5f) && ok;
+    ok = RunOnce(&SharpenAdapter, "ApplyNVSharpen (second call)", srcTex, dstTex, width, height, readFbo) && ok;
 
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);

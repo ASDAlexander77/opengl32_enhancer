@@ -595,7 +595,8 @@ void EnsureStaticResources(const GlComputeApi& gl, NisPipelineState& state, NisV
 }
 
 bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* effectName, const char* shaderSource,
-                     unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
+                     unsigned int srcTexture, unsigned int dstTexture, int width, int height,
+                     float scale, float sharpness) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warnedScaler = false;
@@ -636,14 +637,26 @@ bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
     EnsureStaticResources(gl, state, variant);
 
     // Build the NISConfig for this frame's dimensions/sharpness and upload it to the UBO.
-    // Same viewport used as both input and output (no real reduced-resolution pipeline
-    // exists yet - see the spec's "Non-goals"), so every NVScalerUpdateConfig call here
-    // passes width/height for both the input and output viewport/texture arguments.
+    //
+    // NVScaler is a real upscaler, so `scale` is honored by describing the (full-resolution)
+    // source as a smaller virtual grid: input viewport AND input texture size are both
+    // width*scale, which makes kSrcNorm map that virtual grid across the whole source texture
+    // rather than cropping to a corner of it. NIS then reconstructs to the full output size.
+    // This matches how fsr.cpp's FillEasuConstants treats `scale`, so the two upscalers are
+    // directly comparable. At scale == 1.0 this is the previous 1:1 behavior exactly.
+    //
+    // NVSharpen has no scaling stage at all - it is the sharpen-only variant - so it ignores
+    // `scale` and always runs 1:1.
+    int scaledWidth = (int)((float)width * scale);
+    int scaledHeight = (int)((float)height * scale);
+    if (scaledWidth < 1) { scaledWidth = 1; }
+    if (scaledHeight < 1) { scaledHeight = 1; }
+
     NISConfig config{};
     bool configOk;
     if (variant == NisVariant::Scaler) {
         configOk = NVScalerUpdateConfig(config, sharpness,
-            0, 0, (uint32_t)width, (uint32_t)height, (uint32_t)width, (uint32_t)height,
+            0, 0, (uint32_t)scaledWidth, (uint32_t)scaledHeight, (uint32_t)scaledWidth, (uint32_t)scaledHeight,
             0, 0, (uint32_t)width, (uint32_t)height, (uint32_t)width, (uint32_t)height,
             NISHDRMode::None);
     } else {
@@ -694,12 +707,14 @@ bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
 
 }  // namespace
 
-bool ApplyNVScaler(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
+bool ApplyNVScaler(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
+                    float scale, float sharpness) {
     return RunNisPipeline(g_scalerState, NisVariant::Scaler, "nvscaler", kNVScalerShaderSource,
-                           srcTexture, dstTexture, width, height, sharpness);
+                           srcTexture, dstTexture, width, height, scale, sharpness);
 }
 
 bool ApplyNVSharpen(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness) {
+    // NVSharpen is sharpen-only, so it always runs 1:1 - hence the fixed 1.0f scale.
     return RunNisPipeline(g_sharpenState, NisVariant::Sharpen, "nvsharpen", kNVSharpenShaderSource,
-                           srcTexture, dstTexture, width, height, sharpness);
+                           srcTexture, dstTexture, width, height, 1.0f, sharpness);
 }

@@ -195,13 +195,13 @@ void ApplySelectedEffect() {
                 wrote = ApplyInvert(src, dst, width, height);
                 break;
             case EffectKind::Bilinear:
-                wrote = ApplyBilinearUpscale(src, dst, width, height);
+                wrote = ApplyBilinearUpscale(src, dst, width, height, config.scale);
                 break;
             case EffectKind::Fsr:
                 wrote = ApplyFsr(src, dst, width, height, config.scale, config.sharpness);
                 break;
             case EffectKind::NVScaler:
-                wrote = ApplyNVScaler(src, dst, width, height, config.sharpness);
+                wrote = ApplyNVScaler(src, dst, width, height, config.scale, config.sharpness);
                 break;
             case EffectKind::AcesToneMap:
                 wrote = ApplyHdrLook(src, dst, width, height, config.acesStrength);

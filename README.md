@@ -21,8 +21,8 @@ run left to right in the order listed. Available stages:
 | Stage | Effect |
 | --- | --- |
 | `invert` | debug/demo - inverts the image |
-| `bilinear` | bilinear rescale |
-| `nvscaler` | NVIDIA Image Scaling upscaler |
+| `bilinear` | bilinear rescale (honors `scale`) |
+| `nvscaler` | NVIDIA Image Scaling upscaler (honors `scale`) |
 | `bloom` | glow on bright highlights |
 | `acestonemap` | ACES filmic tone-mapping curve |
 | `lutgrading` | 3D-LUT color grading from a `.cube` file |
@@ -30,7 +30,7 @@ run left to right in the order listed. Available stages:
 | `chromaticaberration` | lens-style edge fringing |
 | `taa` | temporal anti-aliasing |
 | `smaa` | spatial anti-aliasing (SMAA) |
-| `fsr` | AMD FidelityFX Super Resolution 1 (EASU + RCAS) |
+| `fsr` | AMD FidelityFX Super Resolution 1, EASU + RCAS (honors `scale`) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
 | `dither` | ordered dither, masks 8-bit banding |
 

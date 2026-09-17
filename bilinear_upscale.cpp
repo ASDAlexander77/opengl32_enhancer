@@ -17,16 +17,27 @@ const unsigned int GL_COMPILE_STATUS            = 0x8B81;
 const unsigned int GL_LINK_STATUS               = 0x8B82;
 const unsigned int GL_TEXTURE_FETCH_BARRIER_BIT = 0x00000008;
 const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
+const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
+const unsigned int GL_DYNAMIC_DRAW               = 0x88E8;
 const unsigned int GL_NO_ERROR                  = 0;
 
-// Samples the input texture with GL_LINEAR filtering (the shared pipeline textures are
-// created with GL_LINEAR - see post_effects.cpp's EnsurePipelineTextures) at each output
-// texel's center - GL_LINEAR does the actual bilinear interpolation; this shader just drives
-// it. binding=0 matches the texture unit ApplyBilinearUpscale() below binds srcTexture to;
-// binding=1 matches the image unit dstTexture is bound to.
+// Resamples the source as if it had been rendered at `scale` of the current resolution, then
+// bilinearly reconstructs full size. `scale` describes a virtual lower-resolution grid laid
+// over the (full-resolution) source, the same convention fsr.cpp and nis_effect.cpp use, so
+// the three upscalers are directly comparable at a given scale.
+//
+// The four virtual-grid samples are interpolated explicitly rather than leaning on GL_LINEAR:
+// hardware filtering interpolates between SOURCE texels, which at scale < 1 is not the same
+// thing as interpolating between the coarser virtual texels we are pretending were rendered.
+// At scale == 1.0 the virtual grid IS the source grid and this reduces to an exact
+// texel-center copy. binding=0 matches the texture unit ApplyBilinearUpscale() below binds
+// srcTexture to; binding=1 matches the image unit dstTexture is bound to.
 const char* kComputeShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(std140, binding = 0) uniform BilinearConfigBlock {\n"
+    "    vec4 params;\n"   // .x = scale, .yzw unused (std140 padding)
+    "};\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
     "layout(rgba16f, binding = 1) uniform writeonly image2D outputImage;\n"
     "void main() {\n"
@@ -35,10 +46,22 @@ const char* kComputeShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) {\n"
     "        return;\n"
     "    }\n"
-    "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
-    "    vec4 color = texture(inputTex, uv);\n"
+    "    vec2 vSize = max(floor(vec2(outSize) * params.x), vec2(1.0));\n"
+    "    vec2 p = ((vec2(outCoord) + vec2(0.5)) / vec2(outSize)) * vSize - vec2(0.5);\n"
+    "    vec2 base = floor(p);\n"
+    "    vec2 frac = p - base;\n"
+    "    vec4 c00 = textureLod(inputTex, (base + vec2(0.5, 0.5)) / vSize, 0.0);\n"
+    "    vec4 c10 = textureLod(inputTex, (base + vec2(1.5, 0.5)) / vSize, 0.0);\n"
+    "    vec4 c01 = textureLod(inputTex, (base + vec2(0.5, 1.5)) / vSize, 0.0);\n"
+    "    vec4 c11 = textureLod(inputTex, (base + vec2(1.5, 1.5)) / vSize, 0.0);\n"
+    "    vec4 color = mix(mix(c00, c10, frac.x), mix(c01, c11, frac.x), frac.y);\n"
     "    imageStore(outputImage, outCoord, color);\n"
     "}\n";
+
+// Matches the std140 BilinearConfigBlock above.
+struct BilinearConfigData {
+    float params[4];
+};
 
 struct PipelineState {
     bool initTried = false;
@@ -46,6 +69,7 @@ struct PipelineState {
     // The GL context these cached objects belong to - see GetGlContextGeneration().
     unsigned int generation = 0;
     unsigned int program = 0;
+    unsigned int configUbo = 0;
 };
 
 PipelineState g_state;
@@ -88,7 +112,8 @@ bool CompileAndLink(const GlComputeApi& gl, unsigned int& outProgram) {
 
 }  // namespace
 
-bool ApplyBilinearUpscale(unsigned int srcTexture, unsigned int dstTexture, int width, int height) {
+bool ApplyBilinearUpscale(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
+                           float scale) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -111,6 +136,11 @@ bool ApplyBilinearUpscale(unsigned int srcTexture, unsigned int dstTexture, int 
     if (!g_state.initTried) {
         g_state.initTried = true;
         g_state.initOk = CompileAndLink(gl, g_state.program);
+        if (g_state.initOk && g_state.configUbo == 0) {
+            gl.glGenBuffers(1, &g_state.configUbo);
+            gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
+            gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BilinearConfigData), nullptr, GL_DYNAMIC_DRAW);
+        }
         if (!g_state.initOk) {
             printf("[opengl32_enh_cpp] bilinear_upscale: shader init failed, effect disabled "
                    "until the GL context changes\n");
@@ -123,6 +153,18 @@ bool ApplyBilinearUpscale(unsigned int srcTexture, unsigned int dstTexture, int 
     if (width <= 0 || height <= 0) {
         return false;
     }
+
+    // Clamped to the documented range: above 1.0 the virtual grid would be finer than the
+    // source and invent detail that is not there, and at/below 0 the reciprocals blow up.
+    float clampedScale = scale;
+    if (clampedScale < 0.05f) { clampedScale = 0.05f; }
+    if (clampedScale > 1.0f)  { clampedScale = 1.0f; }
+
+    BilinearConfigData configData{};
+    configData.params[0] = clampedScale;
+    gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
+    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BilinearConfigData), &configData, GL_DYNAMIC_DRAW);
+    gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
 
     gl.glUseProgram(g_state.program);
     gl.glActiveTexture(GL_TEXTURE0);

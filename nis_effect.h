@@ -16,7 +16,10 @@
 // actually written (the caller must only treat dstTexture as the pipeline's new source when
 // this returns true); returns false if GL 4.3 compute support is unavailable, shader init
 // failed, or the config was rejected (scale out of [0.5,1] range).
-bool ApplyNVScaler(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float sharpness);
+// `scale` (0.5..1) is the fraction of width/height the source is treated as having been
+// rendered at, which NVScaler then reconstructs to full size; 1.0 runs 1:1.
+bool ApplyNVScaler(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
+    float scale, float sharpness);
 
 // Runs NVSharpen (NIS_SCALER=0: adaptive directional sharpen only, no resample). Same
 // calling convention and fallback behavior as ApplyNVScaler.
