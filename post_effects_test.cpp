@@ -133,11 +133,34 @@ int main() {
         return 1;
     }
 
+    // CreateWindowExA's size is the OUTER window (title bar + borders included), not the
+    // client area every GL call below actually renders into - passing width/height directly
+    // would silently under-size the real back buffer, leaving glViewport/glCopyTexSubImage2D/
+    // glReadPixels reading past its edge into undefined driver memory (NaN/garbage) for
+    // however many pixels of title bar/border got shortchanged. AdjustWindowRect asks Windows
+    // for the outer size that yields exactly this CLIENT size instead.
     const int width = 256, height = 256;
+    RECT windowRect = {0, 0, width, height};
+    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "post_effects_test", WS_OVERLAPPEDWINDOW,
-        0, 0, width, height, nullptr, nullptr, wc.hInstance, nullptr);
+        0, 0, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
+        nullptr, nullptr, wc.hInstance, nullptr);
     if (hwnd == nullptr) {
         printf("FAIL: CreateWindowExA, GetLastError=%lu\n", GetLastError());
+        return 1;
+    }
+
+    // Confirm AdjustWindowRect actually got us the client size every GL call below assumes -
+    // DPI scaling or a theme with unusual chrome could still throw this off, and a silent
+    // mismatch here means every readback past the real edge picks up undefined memory.
+    RECT clientRect = {};
+    GetClientRect(hwnd, &clientRect);
+    bool clientSizeOk = Check(clientRect.right - clientRect.left == width && clientRect.bottom - clientRect.top == height,
+                               "window client area matches the requested width/height");
+    if (!clientSizeOk) {
+        printf("FAIL: client area is %dx%d, expected %dx%d\n",
+               (int)(clientRect.right - clientRect.left), (int)(clientRect.bottom - clientRect.top),
+               width, height);
         return 1;
     }
 

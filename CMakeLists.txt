@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_sharpen.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_sharpen.cpp smaa.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -116,6 +116,12 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 add_executable(chromatic_aberration_test chromatic_aberration_test.cpp chromatic_aberration.cpp gl_loader.cpp)
 target_link_libraries(chromatic_aberration_test opengl32 gdi32 user32)
 
+# Creates a real GL context, clears to a known color, and checks ApplySmaa()'s three-pass GPU
+# pipeline (edge detection -> blending weight calculation -> neighborhood blending) runs with
+# no GL error and reproduces a flat/edgeless image exactly - see smaa_test.cpp.
+add_executable(smaa_test smaa_test.cpp smaa.cpp gl_loader.cpp)
+target_link_libraries(smaa_test opengl32 gdi32 user32)
+
 # Integration test for the CURRENT opengl32_enhancer.ini: builds a synthetic test image, blits it
 # onto a real back buffer, calls the actual ApplySelectedEffect() entry point (the same one
 # wrapper.cpp calls from wglSwapBuffers), and checks it runs with no GL error and visibly
@@ -125,7 +131,7 @@ target_link_libraries(chromatic_aberration_test opengl32 gdi32 user32)
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp)
+    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so

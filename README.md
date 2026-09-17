@@ -29,6 +29,7 @@ run left to right in the order listed. Available stages:
 | `vignette` | darkens the corners |
 | `chromaticaberration` | lens-style edge fringing |
 | `taa` | temporal anti-aliasing |
+| `smaa` | spatial anti-aliasing (SMAA) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
 | `dither` | ordered dither, masks 8-bit banding |
 
@@ -39,6 +40,24 @@ it off.
 
 A `cyberpunk.cube` LUT (teal-tinted shadows, magenta/pink highlights, boosted
 contrast/saturation) ships as the default `lutgrading` look.
+
+### `taa` vs `smaa`
+
+Both are anti-aliasing, but they fail in opposite situations, so pick based on
+which failure mode matters more for a given game - don't list both together,
+since they solve the same problem and stacking them is wasted work, not
+better antialiasing:
+
+- `taa` blends the current frame with history, with no access to the game's
+  own motion vectors (this proxy has no way to get them) - it works well on
+  static or slow-moving scenes, but can ghost or fail to smooth edges during
+  camera movement or fast motion, exactly when anti-aliasing matters most.
+- `smaa` looks at a single frame only (edge detection + morphological
+  reconstruction, hand-ported from the
+  [reference SMAA implementation](https://github.com/iryoku/smaa)), so it has
+  no motion-related artifacts at all and stays consistent during camera
+  movement - at the cost of being a purely spatial technique, generally
+  blurrier than a true motion-vector TAA would be on fine static detail.
 
 ## Texture sharpening
 

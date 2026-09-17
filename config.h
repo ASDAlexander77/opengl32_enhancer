@@ -20,9 +20,10 @@ enum class EffectKind {
     ChromaticAberration,
     Taa,
     Dither,
+    Smaa,
 };
 
-// Plenty of headroom for the 11 real stages, even if a config lists some of them twice.
+// Plenty of headroom for the 12 real stages, even if a config lists some of them twice.
 const int kMaxEffectStages = 24;
 
 struct AnaxConfig {

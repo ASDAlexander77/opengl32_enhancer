@@ -25,6 +25,7 @@
 #include "chromatic_aberration.h"
 #include "taa.h"
 #include "dither.h"
+#include "smaa.h"
 #include "gl_loader.h"
 
 namespace {
@@ -211,6 +212,9 @@ void ApplySelectedEffect() {
                 break;
             case EffectKind::Dither:
                 wrote = ApplyDither(src, dst, width, height, config.ditherStrength);
+                break;
+            case EffectKind::Smaa:
+                wrote = ApplySmaa(src, dst, width, height);
                 break;
         }
         if (wrote) {
