@@ -160,11 +160,12 @@ int main() {
         unsigned char* out = new unsigned char[(size_t)width * height * 4];
         ReadBack(gl, tex, width, height, out);
 
-        // Badge footprint (kPlateWidth=45, kPlateHeight=33, kMargin=8 - see fx_indicator.cpp):
-        // origin = (128-8-45, 8) = (75, 8).
+        // Badge footprint (kPlateWidth=45, kPlateHeight=33, kMargin=8 - see fx_indicator.cpp).
+        // GL texture/image y increases UPWARD on screen (texel (0,0) is the bottom-left), so
+        // "top-right, margin 8" is origin = (128-8-45, 64-8-33) = (75, 23).
 
-        // Point 2: far from the badge (bottom-left corner) - untouched.
-        size_t farPoint = ((size_t)(height - 2) * width + 2) * 4;
+        // Point 2: far from the badge (bottom-left corner of the texture) - untouched.
+        size_t farPoint = ((size_t)4 * width + 2) * 4;
         printf("  far point: r=%d g=%d b=%d (expected 60/120/180, untouched)\n",
                out[farPoint + 0], out[farPoint + 1], out[farPoint + 2]);
         Check(abs((int)out[farPoint + 0] - 60) <= 1 &&
@@ -172,16 +173,18 @@ int main() {
               abs((int)out[farPoint + 2] - 180) <= 1,
               "large texture: a point far from the badge is untouched");
 
-        // Point 3: inside the "F" glyph's top bar (local (7,7), global (82,15)) - white.
-        size_t glyphPoint = ((size_t)15 * width + 82) * 4;
+        // Point 3: inside the "F" glyph's top bar - which, after the row flip that corrects
+        // for GL's bottom-left texel origin, is at the HIGH end of the glyph's local y range
+        // (local (10,25), global (85,48)) - white.
+        size_t glyphPoint = ((size_t)48 * width + 85) * 4;
         printf("  glyph point: r=%d g=%d b=%d (expected near-white)\n",
                out[glyphPoint + 0], out[glyphPoint + 1], out[glyphPoint + 2]);
         Check(out[glyphPoint + 0] > 200 && out[glyphPoint + 1] > 200 && out[glyphPoint + 2] > 200,
-              "large texture: a known 'on' bit of the F glyph is drawn white");
+              "large texture: a known 'on' bit of the F glyph is drawn white, right-side up");
 
-        // Point 4: inside the plate but outside both glyphs (local (40,30), global (115,38)) -
+        // Point 4: inside the plate but outside both glyphs (local (40,5), global (115,28)) -
         // darkened toward the plate color, not the original fill.
-        size_t platePoint = ((size_t)38 * width + 115) * 4;
+        size_t platePoint = ((size_t)28 * width + 115) * 4;
         printf("  plate point: r=%d g=%d b=%d (expected darker than 60/120/180)\n",
                out[platePoint + 0], out[platePoint + 1], out[platePoint + 2]);
         Check(out[platePoint + 0] < 40 && out[platePoint + 1] < 70 && out[platePoint + 2] < 100,

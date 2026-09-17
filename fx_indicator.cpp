@@ -67,7 +67,12 @@ const char* kShaderSource =
     "    if (!isBorder) {\n"
     "        int ly = local.y - textOriginY;\n"
     "        if (ly >= 0 && ly < GLYPH_H * SCALE) {\n"
-    "            int row = ly / SCALE;\n"
+    // GL image/texture y increases UPWARD on screen (texel (0,0) is the bottom-left - see
+    // fx_indicator.cpp's header comment), but F_ROWS/X_ROWS are written with row 0 as the
+    // glyph's visual TOP. Without this flip, increasing ly (moving up-screen within the
+    // glyph) would walk the rows top-to-bottom in ARRAY order but bottom-to-top on SCREEN,
+    // drawing every glyph upside down.
+    "            int row = GLYPH_H - 1 - (ly / SCALE);\n"
     "            int lxF = local.x - glyphOriginF;\n"
     "            int lxX = local.x - glyphOriginX;\n"
     "            if (lxF >= 0 && lxF < GLYPH_W * SCALE) {\n"
@@ -189,9 +194,12 @@ void DrawFxIndicator(unsigned int texture, int width, int height) {
         return;
     }
 
+    // GL image/texture y increases UPWARD on screen (texel (0,0) is the bottom-left), so
+    // "kMargin from the TOP" means the plate's origin (its bottom-left texel) sits kMargin
+    // below the texture's top edge, not at kMargin itself - that would be the BOTTOM margin.
     FxIndicatorConfigData configData{};
     configData.originX = (float)(width - kMargin - kPlateWidth);
-    configData.originY = (float)kMargin;
+    configData.originY = (float)(height - kMargin - kPlateHeight);
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(FxIndicatorConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
