@@ -23,9 +23,11 @@ enum class EffectKind {
     Smaa,
     Fsr,
     Cas,
+    Nr,
+    LocalContrast,
 };
 
-// Plenty of headroom for the 12 real stages, even if a config lists some of them twice.
+// Plenty of headroom for the real stages, even if a config lists some of them twice.
 const int kMaxEffectStages = 24;
 
 struct AnaxConfig {
@@ -52,13 +54,22 @@ struct AnaxConfig {
     float ditherStrength = 1.0f;               // Dither
     bool fsrDenoise = false;                   // Fsr
     float fsrFilmGrain = 0.0f;                 // Fsr
+    float nrIntensity = 0.5f;                  // Nr
+    int nrPasses = 1;                          // Nr
+    float nrColorStrength = 1.0f;              // Nr
+    float nrTonePreservation = 0.0f;           // Nr
+    float nrGrainPreservation = 0.0f;          // Nr
+    float localStructureStrength = 0.3f;       // LocalContrast
+    float localToneStrength = 0.3f;            // LocalContrast
+    float shimmerSuppression = 0.0f;           // Taa
 
     // Runs small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
-    // resize) at load time through a single stage (see texture_effect.h). `sharpen` uses the
-    // `sharpness` value above; `invert` is a debug/demo aid for spotting which draws touch
+    // resize) at load time through a single stage (see texture_effect.h). `sharpen`/`cas` use
+    // the `sharpness` value above; `invert` is a debug/demo aid for spotting which draws touch
     // which textures. Independent of the effect= pipeline. EffectKind::None disables it
-    // (default). Only EffectKind::Sharpen and EffectKind::Invert are accepted here - anything
-    // else falls back to None.
+    // (default). Only EffectKind::Sharpen, EffectKind::Cas and EffectKind::Invert are accepted
+    // here - anything else (including Nr and LocalContrast, both multi-pass) falls back to
+    // None. See texture_effect.h for why.
     EffectKind textureEffect = EffectKind::None;
 };
 

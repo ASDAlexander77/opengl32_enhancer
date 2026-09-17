@@ -51,6 +51,7 @@ const char* kTaaShaderSource =
     "layout(std140, binding = 0) uniform TaaConfigBlock {\n"
     "    float blend;\n"
     "    int historyValid;\n"
+    "    float shimmerSuppression;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outputImage);\n"
@@ -76,7 +77,13 @@ const char* kTaaShaderSource =
     "    }\n"
     "    vec4 historyColor = texture(historyTex, uv);\n"
     "    vec3 clampedHistory = clamp(historyColor.rgb, neighborMin, neighborMax);\n"
-    "    vec3 result = mix(currentColor.rgb, clampedHistory, blend);\n"
+    // Shimmer suppression: only kicks in where the current frame and the (already-clamped)
+    // history nearly agree - i.e. nothing is actually moving here - so it can't add ghosting
+    // to real motion or edges, only quiet flicker in already-static content.
+    "    float diff = length(currentColor.rgb - clampedHistory);\n"
+    "    float stillness = 1.0 - smoothstep(0.0, 0.05, diff);\n"
+    "    float effectiveBlend = mix(blend, max(blend, 0.95), stillness * shimmerSuppression);\n"
+    "    vec3 result = mix(currentColor.rgb, clampedHistory, effectiveBlend);\n"
     "    vec4 out4 = vec4(result, currentColor.a);\n"
     "    imageStore(outputImage, outCoord, out4);\n"
     "    imageStore(historyImage, outCoord, out4);\n"
@@ -85,7 +92,8 @@ const char* kTaaShaderSource =
 struct TaaConfigData {
     float blend;
     int32_t historyValid;
-    int32_t pad[2];
+    float shimmerSuppression;
+    int32_t pad;
 };
 
 struct TaaState {
@@ -187,7 +195,8 @@ void EnsureUbo(const GlComputeApi& gl, TaaState& state) {
 
 }  // namespace
 
-bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend) {
+bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend,
+              float shimmerSuppression) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -232,6 +241,7 @@ bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int h
     TaaConfigData configData{};
     configData.blend = blend;
     configData.historyValid = g_state.historyValid ? 1 : 0;
+    configData.shimmerSuppression = shimmerSuppression;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(TaaConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);

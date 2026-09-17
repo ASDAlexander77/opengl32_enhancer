@@ -18,6 +18,13 @@
 // nearly every call; its EASU pass is a near no-op at identical dimensions anyway, and baking
 // its film grain permanently into an asset would be wrong. `cas` covers the same intent in one
 // pass with no scratch texture.
+//
+// Also NOT offered: `nr` and `localcontrast`. Both are multi-pass (nr: up to 4 filter passes
+// plus a combine pass; localcontrast: two blur radii, 5 passes total), each with its own set of
+// owned intermediate textures sized to the upload - the same width/height churn problem `fsr`
+// has, just worse per texture. They're also solving a different problem: NR is for a whole
+// rendered frame's sampling/shader noise, and local contrast is a whole-scene look - neither is
+// about a single asset's own texel data the way `sharpen`/`cas`/`invert` are.
 
 typedef void (__stdcall *RealTexImage2DFn)(unsigned int target, int level, int internalformat,
     int width, int height, int border, unsigned int format, unsigned int type, void* pixels);

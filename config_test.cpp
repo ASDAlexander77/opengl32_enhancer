@@ -313,6 +313,55 @@ int main() {
         Check(config.fsrFilmGrain == 1.0f, "out-of-range fsrFilmGrain (5.0) clamps to max 1.0");
     }
 
+    // nr and localcontrast parse like every other stage/parameter, including nrPasses' int
+    // clamp (ParseClampedInt, not the float path everything else here uses).
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.nrIntensity == 0.5f, "missing file falls back to default nrIntensity=0.5");
+        Check(config.nrPasses == 1, "missing file falls back to default nrPasses=1");
+        Check(config.nrColorStrength == 1.0f, "missing file falls back to default nrColorStrength=1.0");
+        Check(config.nrTonePreservation == 0.0f, "missing file falls back to default nrTonePreservation=0");
+        Check(config.nrGrainPreservation == 0.0f, "missing file falls back to default nrGrainPreservation=0");
+        Check(config.localStructureStrength == 0.3f, "missing file falls back to default localStructureStrength=0.3");
+        Check(config.localToneStrength == 0.3f, "missing file falls back to default localToneStrength=0.3");
+        Check(config.shimmerSuppression == 0.0f, "missing file falls back to default shimmerSuppression=0");
+    }
+    {
+        WriteFixture("config_test_nr_localcontrast.ini",
+            "effect=nr, localcontrast\n"
+            "nrIntensity=0.8\n"
+            "nrPasses=3\n"
+            "nrColorStrength=0.6\n"
+            "nrTonePreservation=0.25\n"
+            "nrGrainPreservation=0.4\n"
+            "localStructureStrength=1.2\n"
+            "localToneStrength=0.9\n"
+            "shimmerSuppression=0.7\n");
+        AnaxConfig config = ParseConfigFile("config_test_nr_localcontrast.ini");
+        const EffectKind expected[] = {EffectKind::Nr, EffectKind::LocalContrast};
+        CheckStages(config, expected, 2, "effect=nr, localcontrast parses both new stages in order");
+        Check(config.nrIntensity == 0.8f, "parses nrIntensity=0.8");
+        Check(config.nrPasses == 3, "parses nrPasses=3");
+        Check(config.nrColorStrength == 0.6f, "parses nrColorStrength=0.6");
+        Check(config.nrTonePreservation == 0.25f, "parses nrTonePreservation=0.25");
+        Check(config.nrGrainPreservation == 0.4f, "parses nrGrainPreservation=0.4");
+        Check(config.localStructureStrength == 1.2f, "parses localStructureStrength=1.2");
+        Check(config.localToneStrength == 0.9f, "parses localToneStrength=0.9");
+        Check(config.shimmerSuppression == 0.7f, "parses shimmerSuppression=0.7");
+    }
+    {
+        WriteFixture("config_test_nr_clamp.ini", "nrPasses=99\nnrIntensity=-5.0\nlocalToneStrength=9.0\n");
+        AnaxConfig config = ParseConfigFile("config_test_nr_clamp.ini");
+        Check(config.nrPasses == 4, "out-of-range nrPasses (99) clamps to max 4");
+        Check(config.nrIntensity == 0.0f, "out-of-range nrIntensity (-5.0) clamps to min 0.0");
+        Check(config.localToneStrength == 2.0f, "out-of-range localToneStrength (9.0) clamps to max 2.0");
+    }
+    {
+        WriteFixture("config_test_nr_passes_not_int.ini", "nrPasses=abc\n");
+        AnaxConfig config = ParseConfigFile("config_test_nr_passes_not_int.ini");
+        Check(config.nrPasses == 1, "unparseable nrPasses falls back to default 1");
+    }
+
     // textureEffect accepts none/sharpen/invert, defaults to none, rejects anything else, and
     // still honors the legacy textureSharpen=1/0 spelling.
     {
@@ -346,6 +395,21 @@ int main() {
         AnaxConfig config = ParseConfigFile("config_test_texture_fsr.ini");
         Check(config.textureEffect == EffectKind::None,
               "textureEffect=fsr is rejected, falls back to none");
+    }
+    {
+        // nr and localcontrast are both multi-pass with their own owned intermediate textures
+        // sized to the upload - same width/height churn problem as fsr, worse. See
+        // texture_effect.h.
+        WriteFixture("config_test_texture_nr.ini", "textureEffect=nr\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_nr.ini");
+        Check(config.textureEffect == EffectKind::None,
+              "textureEffect=nr is rejected, falls back to none");
+    }
+    {
+        WriteFixture("config_test_texture_localcontrast.ini", "textureEffect=localcontrast\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_localcontrast.ini");
+        Check(config.textureEffect == EffectKind::None,
+              "textureEffect=localcontrast is rejected, falls back to none");
     }
     {
         WriteFixture("config_test_texture_bad.ini", "textureEffect=bloom\n");

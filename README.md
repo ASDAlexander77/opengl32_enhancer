@@ -2,9 +2,10 @@
 
 [![Build](https://github.com/ASDAlexander77/opengl32_enhancer/actions/workflows/build.yml/badge.svg)](https://github.com/ASDAlexander77/opengl32_enhancer/actions/workflows/build.yml)
 
-**Add FSR 1 upscaling, SMAA/TAA anti-aliasing, CAS sharpening, bloom, ACES
-tone mapping and LUT color grading to old OpenGL games — by dropping one DLL
-into the game folder. No source code, no patching, no launcher.**
+**Add FSR 1 upscaling, SMAA/TAA anti-aliasing, CAS sharpening, noise
+reduction, local contrast, bloom, ACES tone mapping and LUT color grading to
+old OpenGL games — by dropping one DLL into the game folder. No source code,
+no patching, no launcher.**
 
 It is a drop-in `opengl32.dll` proxy: the DLL exports every function the real
 `opengl32.dll` does and forwards each call to the system OpenGL library, while
@@ -24,6 +25,8 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Ordering](#ordering)
   - [Choosing an anti-aliasing stage: TAA vs SMAA](#choosing-an-anti-aliasing-stage-taa-vs-smaa)
   - [Choosing a sharpener: sharpen vs FSR vs CAS](#choosing-a-sharpener-sharpen-vs-fsr-vs-cas)
+  - [Noise reduction: nr](#noise-reduction-nr)
+  - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Example configurations](#example-configurations)
 - [Texture effects](#texture-effects)
 - [How it works](#how-it-works)
@@ -80,6 +83,8 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `smaa` | Spatial anti-aliasing (SMAA) |
 | `cas` | AMD FidelityFX Contrast Adaptive Sharpening (sharpen-only) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
+| `nr` | Edge-aware (bilateral) noise reduction |
+| `localcontrast` | Local tone/structure boost ("clarity"/"texture") |
 | `dither` | Ordered dither, masks 8-bit banding |
 | `invert` | Debug/demo — inverts the image |
 
@@ -102,6 +107,10 @@ cases:
 - **Anti-aliasing before sharpening.** Sharpening after AA recovers detail the
   AA softened; sharpening before it just resharpens edges the AA then
   re-smooths.
+- **Noise reduction before sharpening AND before local contrast.** Put `nr`
+  early in the chain: sharpening noisy source just resharpens the noise `nr`
+  is about to remove, and boosting local contrast (`localcontrast`) on
+  still-noisy source makes the noise more visible, not less.
 
 `dither` belongs last, so it dithers the finished image immediately before it
 reaches the 8-bit back buffer.
@@ -136,6 +145,35 @@ Three stages sharpen. Stacking them just double-sharpens, so pick one:
 Note that `fsr` both reconstructs and sharpens, so listing it alongside
 `sharpen` or `cas` double-sharpens too.
 
+### Noise reduction: `nr`
+
+An edge-aware (bilateral) spatial denoiser — it treats nearby pixels with a
+similar brightness as "the same surface" and smooths between them, while
+mostly leaving real edges alone. Useful on grainy/noisy rendering (software
+dithering, low-precision shading, upscaled or emulator output) that a plain
+blur would just as happily smear across genuine detail.
+
+| Parameter | What it does |
+| --- | --- |
+| `nrIntensity` | How large a brightness difference still counts as "the same surface". Low = subtle, high = aggressive |
+| `nrPasses` | How many times the filter runs in sequence (1–4) — compounds the smoothing independently of `nrIntensity` |
+| `nrColorStrength` | How much of the filtered *color* to keep. Most real denoisers hit color harder than brightness by default, since color noise reads as far uglier at the same magnitude |
+| `nrTonePreservation` | Protects *brightness/detail* specifically — 1.0 leaves luma untouched regardless of the other settings, denoising color only |
+| `nrGrainPreservation` | Re-adds back some of the real detail the filter removed, so NR can smooth without flattening a deliberately grainy look |
+
+### Local contrast: `localcontrast`
+
+The "clarity"/"texture" pair familiar from photo editors: boosts brightness
+detail by unsharp-masking against two different blur radii, so the two
+controls act at genuinely different, independent spatial scales.
+
+| Parameter | What it does |
+| --- | --- |
+| `localStructureStrength` | Boosts fine detail/micro-texture (small blur radius) |
+| `localToneStrength` | Boosts broad midtone separation — the classic "clarity" look (large blur radius) |
+
+Both default to a modest `0.3`; `0` for either disables that layer.
+
 ### Example configurations
 
 **Sharper image, minimal stylization** — a good first thing to try:
@@ -153,6 +191,19 @@ effect=fsr, dither
 scale=0.75
 sharpness=0.75
 fsrDenoise=1
+```
+
+**Clean up noisy/grainy source, then add some punch:**
+
+```ini
+effect=nr, localcontrast, dither
+nrIntensity=0.6
+nrPasses=2
+nrColorStrength=1.0
+nrTonePreservation=0.2
+localStructureStrength=0.4
+localToneStrength=0.4
+ditherStrength=0.7
 ```
 
 **Full cinematic look** — reconstruction, glow, tone mapping, grading and lens
@@ -207,10 +258,13 @@ opaque rectangle — on screen, it looks like the texture has gained a
 solid-color background. Alpha is deliberately not sharpened either, since that
 would harden cutout edges the game blends on purpose.
 
-`fsr` is deliberately rejected here. It keeps a scratch texture sized to its
-input, and uploads arrive at many different sizes, so it would reallocate on
-nearly every texture — and its EASU pass is a near no-op at identical
-dimensions anyway. Use `cas` instead.
+`fsr`, `nr` and `localcontrast` are all deliberately rejected here — every one
+of them is multi-pass with its own owned intermediate texture(s) sized to the
+upload, so all three would reallocate on nearly every texture at many
+different sizes (`fsr`'s EASU pass is also a near no-op at identical
+dimensions anyway). Use `cas` for texture-level sharpening; `nr` and
+`localcontrast` are whole-frame/whole-scene effects, not really about a single
+asset's own texel data in the first place.
 
 Older config files may still say `textureSharpen=1`/`0`; it is read as an
 alias for `textureEffect=sharpen`/`none`.

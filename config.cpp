@@ -113,6 +113,8 @@ const StageName kStageNames[] = {
     {EffectKind::Smaa,                "smaa"},
     {EffectKind::Fsr,                 "fsr"},
     {EffectKind::Cas,                 "cas"},
+    {EffectKind::Nr,                  "nr"},
+    {EffectKind::LocalContrast,       "localcontrast"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
 
@@ -221,6 +223,22 @@ float ParseClampedFloat(const char* value, float minValue, float maxValue, float
         return clamped;
     }
     return parsed;
+}
+
+int ParseClampedInt(const char* value, int minValue, int maxValue, int fallback, const char* key) {
+    char* end = nullptr;
+    long parsed = strtol(value, &end, 10);
+    if (end == value) {
+        printf("[opengl32_enh_cpp] config: '%s' value '%s' is not an integer, using default %d\n", key, value, fallback);
+        return fallback;
+    }
+    if (parsed < minValue || parsed > maxValue) {
+        int clamped = parsed < minValue ? minValue : maxValue;
+        printf("[opengl32_enh_cpp] config: '%s' value %ld out of range [%d, %d], clamping to %d\n",
+               key, parsed, minValue, maxValue, clamped);
+        return clamped;
+    }
+    return (int)parsed;
 }
 
 // One legacy enableXxx=true/false key that a config file set. Collected while parsing and
@@ -412,6 +430,22 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.fsrFilmGrain = ParseClampedFloat(value, 0.0f, 1.0f, config.fsrFilmGrain, "fsrFilmGrain");
         } else if (strcmp(key, "ditherStrength") == 0) {
             config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
+        } else if (strcmp(key, "nrIntensity") == 0) {
+            config.nrIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.nrIntensity, "nrIntensity");
+        } else if (strcmp(key, "nrPasses") == 0) {
+            config.nrPasses = ParseClampedInt(value, 1, 4, config.nrPasses, "nrPasses");
+        } else if (strcmp(key, "nrColorStrength") == 0) {
+            config.nrColorStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.nrColorStrength, "nrColorStrength");
+        } else if (strcmp(key, "nrTonePreservation") == 0) {
+            config.nrTonePreservation = ParseClampedFloat(value, 0.0f, 1.0f, config.nrTonePreservation, "nrTonePreservation");
+        } else if (strcmp(key, "nrGrainPreservation") == 0) {
+            config.nrGrainPreservation = ParseClampedFloat(value, 0.0f, 1.0f, config.nrGrainPreservation, "nrGrainPreservation");
+        } else if (strcmp(key, "localStructureStrength") == 0) {
+            config.localStructureStrength = ParseClampedFloat(value, 0.0f, 2.0f, config.localStructureStrength, "localStructureStrength");
+        } else if (strcmp(key, "localToneStrength") == 0) {
+            config.localToneStrength = ParseClampedFloat(value, 0.0f, 2.0f, config.localToneStrength, "localToneStrength");
+        } else if (strcmp(key, "shimmerSuppression") == 0) {
+            config.shimmerSuppression = ParseClampedFloat(value, 0.0f, 1.0f, config.shimmerSuppression, "shimmerSuppression");
         } else if (strcmp(key, "textureSharpen") == 0) {
             // Pre-textureEffect spelling: textureSharpen=1/0 meant sharpen/off.
             bool on = ParseBool(value, config.textureEffect == EffectKind::Sharpen, "textureSharpen");
@@ -439,13 +473,18 @@ AnaxConfig ParseConfigFile(const char* path) {
            "bloomThreshold=%.3f, bloomIntensity=%.3f, sharpness=%.3f, lutPath='%s', lutStrength=%.3f, "
            "vignetteIntensity=%.3f, vignetteRadius=%.3f, chromaticAberrationStrength=%.3f, "
            "taaBlend=%.3f, ditherStrength=%.3f, fsrDenoise=%s, fsrFilmGrain=%.3f, "
-           "textureEffect=%s)\n",
+           "nrIntensity=%.3f, nrPasses=%d, nrColorStrength=%.3f, nrTonePreservation=%.3f, "
+           "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
+           "shimmerSuppression=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
            config.vignetteIntensity, config.vignetteRadius, config.chromaticAberrationStrength,
            config.taaBlend, config.ditherStrength, config.fsrDenoise ? "true" : "false",
-           config.fsrFilmGrain, EffectNameFor(config.textureEffect));
+           config.fsrFilmGrain,
+           config.nrIntensity, config.nrPasses, config.nrColorStrength, config.nrTonePreservation,
+           config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
+           config.shimmerSuppression, EffectNameFor(config.textureEffect));
     return config;
 }
 

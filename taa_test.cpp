@@ -114,7 +114,9 @@ int main() {
     gl.glGenFramebuffers(1, &readFbo);
 
     for (int call = 1; call <= 4; ++call) {
-        bool wrote = ApplyTaa(srcTex, dstTex, width, height, 0.85f);
+        // shimmerSuppression=0.0 here - the existing history/clamp behavior this loop checks
+        // must be unaffected when the feature is off.
+        bool wrote = ApplyTaa(srcTex, dstTex, width, height, 0.85f, 0.0f);
         unsigned int err = gl.glGetError();
         if (!wrote || err != 0) {
             printf("FAIL: call %d left glGetError() = 0x%04X (wrote=%d)\n", call, err, wrote ? 1 : 0);
@@ -133,6 +135,34 @@ int main() {
             printf("PASS: call %d reproduced the cleared color\n", call);
         }
         ok = callOk && ok;
+    }
+
+    // shimmerSuppression=1.0 on a perfectly static scene: current and clamped history already
+    // agree everywhere, so stillness=1.0 and the effective blend rises toward 0.95 - but since
+    // there's no actual difference to blend between, the output must still reproduce the same
+    // color, not drift toward some other value. This is what would catch a sign error or a
+    // stillness computation that's inverted (kicking in on MOTION instead of stillness).
+    {
+        bool wrote = ApplyTaa(srcTex, dstTex, width, height, 0.85f, 1.0f);
+        unsigned int err = gl.glGetError();
+        if (!wrote || err != 0) {
+            printf("FAIL: shimmerSuppression=1.0 call left glGetError() = 0x%04X (wrote=%d)\n", err, wrote ? 1 : 0);
+            ok = false;
+        } else {
+            gl.glBindFramebuffer(GL_FRAMEBUFFER, readFbo);
+            gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
+            unsigned char pixel[4] = {0, 0, 0, 0};
+            gl.glReadPixels(64, 64, 1, 1, 0x1908 /* GL_RGBA */, 0x1401 /* GL_UNSIGNED_BYTE */, pixel);
+            printf("Center pixel after shimmerSuppression=1.0 call: r=%d g=%d b=%d a=%d\n",
+                   pixel[0], pixel[1], pixel[2], pixel[3]);
+            bool callOk = CheckClose(pixel[0], 204, 2, "r", 5);
+            callOk = CheckClose(pixel[1], 51, 2, "g", 5) && callOk;
+            callOk = CheckClose(pixel[2], 25, 2, "b", 5) && callOk;
+            if (callOk) {
+                printf("PASS: shimmerSuppression=1.0 on a static scene still reproduced the cleared color\n");
+            }
+            ok = callOk && ok;
+        }
     }
 
     wglMakeCurrent(nullptr, nullptr);

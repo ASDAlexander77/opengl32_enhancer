@@ -28,6 +28,8 @@
 #include "smaa.h"
 #include "fsr.h"
 #include "cas.h"
+#include "nr.h"
+#include "local_contrast.h"
 #include "gl_loader.h"
 
 namespace {
@@ -227,13 +229,22 @@ void ApplySelectedEffect() {
                 wrote = ApplyChromaticAberration(src, dst, width, height, config.chromaticAberrationStrength);
                 break;
             case EffectKind::Taa:
-                wrote = ApplyTaa(src, dst, width, height, config.taaBlend);
+                wrote = ApplyTaa(src, dst, width, height, config.taaBlend, config.shimmerSuppression);
                 break;
             case EffectKind::Dither:
                 wrote = ApplyDither(src, dst, width, height, config.ditherStrength);
                 break;
             case EffectKind::Smaa:
                 wrote = ApplySmaa(src, dst, width, height);
+                break;
+            case EffectKind::Nr:
+                wrote = ApplyNr(src, dst, width, height, config.nrIntensity, config.nrPasses,
+                                 config.nrColorStrength, config.nrTonePreservation,
+                                 config.nrGrainPreservation);
+                break;
+            case EffectKind::LocalContrast:
+                wrote = ApplyLocalContrast(src, dst, width, height, config.localStructureStrength,
+                                            config.localToneStrength);
                 break;
         }
         if (wrote) {
