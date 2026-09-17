@@ -1,14 +1,15 @@
-// See texture_sharpen.h. Reuses the existing NVSharpen compute-shader effect (see
-// nis_effect.h) at texture-upload time: upload the game's own pixels into a scratch RGBA8
-// texture, run ApplyNVSharpen into an RGBA16F texture of the SAME dimensions, read the result
-// back to RGBA8, and hand THAT to the real glTexImage2D instead of what the game gave us -
-// width/height never change, unlike the abandoned upscale spike.
+// See texture_effect.h. Reuses the existing NVSharpen/Invert compute-shader effects (see
+// nis_effect.h, pixel_invert.h) at texture-upload time: upload the game's own pixels into a
+// scratch RGBA8 texture, run the selected effect into an RGBA16F texture of the SAME
+// dimensions, read the result back to RGBA8, and hand THAT to the real glTexImage2D instead of
+// what the game gave us - width/height never change, unlike the abandoned upscale spike.
 #include <cstdio>
 
-#include "texture_sharpen.h"
+#include "texture_effect.h"
 #include "config.h"
 #include "gl_loader.h"
 #include "nis_effect.h"
+#include "pixel_invert.h"
 
 namespace {
 
@@ -34,7 +35,7 @@ const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
 const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
 const unsigned int GL_NO_ERROR                  = 0;
 
-// A simple heuristic, not a real texture classifier - see texture_sharpen.h.
+// A simple heuristic, not a real texture classifier - see texture_effect.h.
 const int kMaxDim = 1024;
 
 unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, int width, int height) {
@@ -51,7 +52,7 @@ unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, in
 
 bool IsEligible(const AnaxConfig& config, unsigned int target, unsigned int format,
                  unsigned int type, int width, int height, const void* pixels) {
-    return config.textureSharpen
+    return (config.textureEffect == EffectKind::Sharpen || config.textureEffect == EffectKind::Invert)
         && target == GL_TEXTURE_2D
         && pixels != nullptr
         && format == GL_RGBA
@@ -62,9 +63,9 @@ bool IsEligible(const AnaxConfig& config, unsigned int target, unsigned int form
 
 }  // namespace
 
-void SharpenTextureUpload(RealTexImage2DFn realFn, unsigned int target, int level, int internalformat,
-                           int width, int height, int border, unsigned int format, unsigned int type,
-                           void* pixels) {
+void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int level, int internalformat,
+                               int width, int height, int border, unsigned int format, unsigned int type,
+                               void* pixels) {
     const AnaxConfig& config = GetAnaxConfig();
 
     if (!IsEligible(config, target, format, type, width, height, pixels)) {
@@ -94,11 +95,13 @@ void SharpenTextureUpload(RealTexImage2DFn realFn, unsigned int target, int leve
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, pixels);
 
     unsigned int dstTex = MakeTexture(gl, GL_RGBA16F, width, height);
-    bool sharpened = ApplyNVSharpen(srcTex, dstTex, width, height, config.sharpness);
+    bool applied = config.textureEffect == EffectKind::Invert
+        ? ApplyInvert(srcTex, dstTex, width, height)
+        : ApplyNVSharpen(srcTex, dstTex, width, height, config.sharpness);
 
     unsigned char* buffer = nullptr;
     bool readOk = false;
-    if (sharpened) {
+    if (applied) {
         unsigned int fbo = 0;
         gl.glGenFramebuffers(1, &fbo);
         gl.glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -109,7 +112,7 @@ void SharpenTextureUpload(RealTexImage2DFn realFn, unsigned int target, int leve
         gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
         readOk = gl.glGetError() == GL_NO_ERROR;
         if (!readOk) {
-            printf("[opengl32_enh_cpp] texture_sharpen: glGetError() after readback, "
+            printf("[opengl32_enh_cpp] texture_effect: glGetError() after readback, "
                    "falling back to the original %dx%d upload\n", width, height);
         }
 

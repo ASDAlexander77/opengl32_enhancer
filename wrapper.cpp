@@ -12,7 +12,7 @@
 #include <cstdio>
 #include "pixel_invert.h"
 #include "post_effects.h"
-#include "texture_sharpen.h"
+#include "texture_effect.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -4907,7 +4907,7 @@ extern "C" __declspec(dllexport) void __stdcall glTexImage2D(GLenum target, GLin
             printf("[opengl32_enh_cpp]   glTexImage2D: resolved OK\n");
         }
     }
-    SharpenTextureUpload(__proc_glTexImage2D, target, level, internalformat, width, height, border, format, type, pixels);
+    ApplyTextureEffectUpload(__proc_glTexImage2D, target, level, internalformat, width, height, border, format, type, pixels);
 }
 
 typedef void (__stdcall *__pfn_glTexParameterf)(GLenum, GLenum, GLfloat);

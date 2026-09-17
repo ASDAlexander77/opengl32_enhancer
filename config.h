@@ -49,10 +49,13 @@ struct AnaxConfig {
     float taaBlend = 0.5f;                     // Taa
     float ditherStrength = 1.0f;               // Dither
 
-    // Sharpens small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
-    // resize) at load time, using the `sharpness` value above (see texture_sharpen.h).
-    // Independent of the effect= pipeline. Off by default.
-    bool textureSharpen = false;
+    // Runs small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
+    // resize) at load time through a single stage (see texture_effect.h). `sharpen` uses the
+    // `sharpness` value above; `invert` is a debug/demo aid for spotting which draws touch
+    // which textures. Independent of the effect= pipeline. EffectKind::None disables it
+    // (default). Only EffectKind::Sharpen and EffectKind::Invert are accepted here - anything
+    // else falls back to None.
+    EffectKind textureEffect = EffectKind::None;
 };
 
 // True if `stage` appears anywhere in config.stages. Order-insensitive, so this answers "is

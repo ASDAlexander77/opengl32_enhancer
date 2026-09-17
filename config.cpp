@@ -407,7 +407,19 @@ AnaxConfig ParseConfigFile(const char* path) {
         } else if (strcmp(key, "ditherStrength") == 0) {
             config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
         } else if (strcmp(key, "textureSharpen") == 0) {
-            config.textureSharpen = ParseBool(value, config.textureSharpen, "textureSharpen");
+            // Pre-textureEffect spelling: textureSharpen=1/0 meant sharpen/off.
+            bool on = ParseBool(value, config.textureEffect == EffectKind::Sharpen, "textureSharpen");
+            printf("[opengl32_enh_cpp] config: 'textureSharpen' is now 'textureEffect=sharpen/none', treating as such\n");
+            config.textureEffect = on ? EffectKind::Sharpen : EffectKind::None;
+        } else if (strcmp(key, "textureEffect") == 0) {
+            EffectKind kind;
+            if (!ParseStageName(value, kind) ||
+                (kind != EffectKind::None && kind != EffectKind::Sharpen && kind != EffectKind::Invert)) {
+                printf("[opengl32_enh_cpp] config: 'textureEffect' value '%s' is not one of "
+                       "none/sharpen/invert, keeping default\n", value);
+            } else {
+                config.textureEffect = kind;
+            }
         }
     }
     fclose(f);
@@ -419,12 +431,12 @@ AnaxConfig ParseConfigFile(const char* path) {
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%s; scale=%.3f, acesStrength=%.3f, "
            "bloomThreshold=%.3f, bloomIntensity=%.3f, sharpness=%.3f, lutPath='%s', lutStrength=%.3f, "
            "vignetteIntensity=%.3f, vignetteRadius=%.3f, chromaticAberrationStrength=%.3f, "
-           "taaBlend=%.3f, ditherStrength=%.3f, textureSharpen=%s)\n",
+           "taaBlend=%.3f, ditherStrength=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
            config.vignetteIntensity, config.vignetteRadius, config.chromaticAberrationStrength,
-           config.taaBlend, config.ditherStrength, config.textureSharpen ? "true" : "false");
+           config.taaBlend, config.ditherStrength, EffectNameFor(config.textureEffect));
     return config;
 }
 

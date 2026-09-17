@@ -179,7 +179,7 @@ int main() {
         }
         unsigned int edgeSrcTex = CreatePipelineTexture(gl, width, height);
         // CreatePipelineTexture leaves the RGBA16F texture allocated but empty - upload via an
-        // RGBA8 staging texture + blit, same conversion path texture_sharpen.cpp already uses.
+        // RGBA8 staging texture + blit, same conversion path texture_effect.cpp already uses.
         unsigned int stagingTex = 0;
         gl.glGenTextures(1, &stagingTex);
         gl.glBindTexture(GL_TEXTURE_2D, stagingTex);

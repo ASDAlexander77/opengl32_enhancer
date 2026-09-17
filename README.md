@@ -59,15 +59,22 @@ better antialiasing:
   movement - at the cost of being a purely spatial technique, generally
   blurrier than a true motion-vector TAA would be on fine static detail.
 
-## Texture sharpening
+## Texture effects
 
 Independent of the `effect=` pipeline above (which only touches the final
-composited frame), `textureSharpen=1` in `opengl32_enhancer.ini` sharpens the
-game's own textures in place as they're uploaded - reusing the same
-NVIDIA Image Scaling adaptive-sharpen pass as the `sharpen` stage, at the
-`sharpness` value. Only small, uncompressed `GL_RGBA`/`GL_UNSIGNED_BYTE`
-uploads are handled (no S3TC/BC decode), and dimensions are never changed -
-only pixel content is. Enabled by default; set it to `0` to disable.
+composited frame), `textureEffect=` in `opengl32_enhancer.ini` runs the
+game's own textures in place through one stage as they're uploaded. Only
+small, uncompressed `GL_RGBA`/`GL_UNSIGNED_BYTE` uploads are handled (no
+S3TC/BC decode), and dimensions are never changed - only pixel content is.
+
+- `sharpen` reuses the same NVIDIA Image Scaling adaptive-sharpen pass as
+  the `sharpen` stage, at the `sharpness` value. Enabled by default.
+- `invert` reuses the same debug/demo invert pass as the `invert` stage -
+  handy for spotting which draws touch which textures.
+- `none` disables texture-level processing.
+
+(Older config files may still say `textureSharpen=1`/`0` - it's read as an
+alias for `textureEffect=sharpen`/`none`.)
 
 ## Installing into a game
 
