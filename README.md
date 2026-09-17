@@ -30,6 +30,7 @@ run left to right in the order listed. Available stages:
 | `chromaticaberration` | lens-style edge fringing |
 | `taa` | temporal anti-aliasing |
 | `smaa` | spatial anti-aliasing (SMAA) |
+| `fsr` | AMD FidelityFX Super Resolution 1 (EASU + RCAS) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
 | `dither` | ordered dither, masks 8-bit banding |
 

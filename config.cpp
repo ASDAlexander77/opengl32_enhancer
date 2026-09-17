@@ -111,6 +111,7 @@ const StageName kStageNames[] = {
     {EffectKind::Taa,                 "taa"},
     {EffectKind::Dither,              "dither"},
     {EffectKind::Smaa,                "smaa"},
+    {EffectKind::Fsr,                 "fsr"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
 

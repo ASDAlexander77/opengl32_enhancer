@@ -21,6 +21,7 @@ enum class EffectKind {
     Taa,
     Dither,
     Smaa,
+    Fsr,
 };
 
 // Plenty of headroom for the 12 real stages, even if a config lists some of them twice.
@@ -36,7 +37,7 @@ struct AnaxConfig {
 
     // Per-stage parameters. These are read only by the stages that use them, so leaving a
     // parameter set for a stage that isn't listed is harmless.
-    float scale = 1.0f;                        // Bilinear, NVScaler
+    float scale = 1.0f;                        // Fsr
     float acesStrength = 0.5f;                 // AcesToneMap
     float bloomThreshold = 0.8f;               // Bloom
     float bloomIntensity = 0.5f;               // Bloom

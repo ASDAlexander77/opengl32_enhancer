@@ -26,6 +26,7 @@
 #include "taa.h"
 #include "dither.h"
 #include "smaa.h"
+#include "fsr.h"
 #include "gl_loader.h"
 
 namespace {
@@ -195,6 +196,9 @@ void ApplySelectedEffect() {
                 break;
             case EffectKind::Bilinear:
                 wrote = ApplyBilinearUpscale(src, dst, width, height);
+                break;
+            case EffectKind::Fsr:
+                wrote = ApplyFsr(src, dst, width, height, config.scale, config.sharpness);
                 break;
             case EffectKind::NVScaler:
                 wrote = ApplyNVScaler(src, dst, width, height, config.sharpness);
