@@ -165,12 +165,29 @@ add_custom_command(TARGET post_effects_test POST_BUILD
 # authoritative way to run them. Without this, ctest reports "No tests were found!!!" and the
 # only way to run the suite is to glob *_test.exe in the build directory - which also picks up
 # stale executables left behind by targets that have since been removed, making deleted tests
-# look like failing ones. Tests that need a GL context create their own window, so they run
-# unattended, but they do need a real GPU/driver present.
+# look like failing ones.
+#
+# Tests are split by what they need to run, via the "gpu" CTest label:
+#
+#   - Unlabeled tests need nothing but Windows. They run anywhere, CI included.
+#   - Tests labeled "gpu" create a real GL context and dispatch compute shaders, so they need a
+#     GPU/driver exposing GL 4.3 compute. They still create their own windows and run
+#     unattended, but on a machine without that support (a GitHub Actions runner falls back to
+#     Microsoft's GDI Generic OpenGL 1.1) they fail rather than skip - GetGlComputeApi() cannot
+#     resolve the entry points, which is exactly the failure they exist to detect on real
+#     hardware. Select them with `ctest -L gpu`, or exclude them with `ctest -LE gpu`.
 enable_testing()
+
+# No GPU required: config_test is pure INI parsing, and ${WRAPPER_NAME_CXX}_test only loads the
+# proxy DLL and calls through it (its GL calls are made with no current context on purpose).
 foreach(test_target
     ${WRAPPER_NAME_CXX}_test
-    config_test
+    config_test)
+    add_test(NAME ${test_target} COMMAND ${test_target}
+             WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
+endforeach()
+
+foreach(test_target
     gl_loader_test
     gl_context_change_test
     cas_test
@@ -188,4 +205,5 @@ foreach(test_target
     post_effects_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
+    set_tests_properties(${test_target} PROPERTIES LABELS gpu)
 endforeach()

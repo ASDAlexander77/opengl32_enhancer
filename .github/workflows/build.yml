@@ -26,8 +26,20 @@ jobs:
       - name: Configure (x86)
         run: cmake -S . -B build -A Win32
 
+      # No --target, so this builds the test executables as well as the DLL. Compiling them is
+      # worth it on its own: it type-checks every test against the current headers, which is
+      # what catches a signature change that was applied to the DLL sources but not to a test.
       - name: Build
-        run: cmake --build build --config Release --target opengl32_enh32
+        run: cmake --build build --config Release
+
+      # GitHub's windows runners have no GPU - OpenGL falls back to Microsoft's GDI Generic
+      # 1.1 implementation, which has no compute shaders at all - so the tests labeled "gpu"
+      # cannot pass here and are excluded. They are not skippable in a meaningful sense: a
+      # missing GL 4.3 is precisely the failure they exist to catch on real hardware, so
+      # teaching them to pass without a GPU would make them worthless. Run them locally
+      # (`ctest -L gpu`) before releasing anything that touches a shader.
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -LE gpu
 
       - name: Stage archive contents
         shell: pwsh
