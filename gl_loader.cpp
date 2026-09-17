@@ -32,6 +32,28 @@ HMODULE GetRealOpenGL32Module() {
     return real;
 }
 
+typedef void* (__stdcall *PFNWGLGETCURRENTCONTEXTPROC)(void);
+
+PFNWGLGETCURRENTCONTEXTPROC GetRealWglGetCurrentContext() {
+    static PFNWGLGETCURRENTCONTEXTPROC fn = [] {
+        HMODULE real = GetRealOpenGL32Module();
+        auto result = real ? reinterpret_cast<PFNWGLGETCURRENTCONTEXTPROC>(
+                                 GetProcAddress(real, "wglGetCurrentContext"))
+                           : nullptr;
+        if (result == nullptr) {
+            printf("[opengl32_enh_cpp] gl_loader: FAILED to resolve wglGetCurrentContext - "
+                   "GL context changes will not be detected\n");
+        }
+        return result;
+    }();
+    return fn;
+}
+
+// The context the resolved entry points and every module's cached GL objects belong to, and a
+// counter bumped each time it changes. See GetGlContextGeneration() in gl_loader.h.
+void* g_lastContext = nullptr;
+unsigned int g_contextGeneration = 0;
+
 PFNWGLGETPROCADDRESSPROC GetRealWglGetProcAddress() {
     static PFNWGLGETPROCADDRESSPROC fn = [] {
         HMODULE real = GetRealOpenGL32Module();
@@ -136,10 +158,31 @@ const GlComputeApi& GetGlComputeApi() {
     // in this codebase, this is only ever called from the single render thread inside the
     // wglSwapBuffers-family hooks, so no locking is needed. Only a successful resolution is
     // cached - a failed attempt (e.g. called before any GL context is current) is retried on
-    // every subsequent call instead of latching failure for the rest of the process.
+    // every subsequent call instead of latching failure for the rest of the process. A context
+    // change also discards the cached table (see below).
     static GlComputeApi api;
+
+    // Every effect calls this before touching GL, so it's the one chokepoint where a context
+    // switch can be caught. Entry points resolved via wglGetProcAddress are only valid for the
+    // context that resolved them, so re-resolve; bumping the generation additionally tells
+    // every module its cached GL objects belong to a context that is no longer current.
+    PFNWGLGETCURRENTCONTEXTPROC wglGetCurrentContext = GetRealWglGetCurrentContext();
+    void* currentContext = wglGetCurrentContext ? wglGetCurrentContext() : nullptr;
+    if (currentContext != g_lastContext) {
+        if (g_lastContext != nullptr) {
+            printf("[opengl32_enh_cpp] gl_loader: GL context changed, rebuilding cached state\n");
+        }
+        g_lastContext = currentContext;
+        ++g_contextGeneration;
+        api = GlComputeApi{};
+    }
+
     if (!api.loaded) {
         LoadGlComputeApi(api);
     }
     return api;
+}
+
+unsigned int GetGlContextGeneration() {
+    return g_contextGeneration;
 }

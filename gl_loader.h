@@ -121,9 +121,26 @@ struct GlComputeApi {
 bool LoadGlComputeApi(GlComputeApi& api);
 
 // Cached wrapper around LoadGlComputeApi(): once resolution succeeds, the result is cached
-// for the rest of the process and returned as-is on every subsequent call. Until then (e.g.
+// until the GL context changes and returned as-is on every subsequent call. Until then (e.g.
 // if called before any GL context is current), each call re-attempts resolution from
 // scratch and re-logs any failures - a failed attempt is never cached, so a later call made
-// once a capable context is current can still succeed. Not synchronized; assumes all calls
-// come from the single render thread (see gl_loader.cpp).
+// once a capable context is current can still succeed. Also detects context switches and
+// re-resolves against the new context. Not synchronized; assumes all calls come from the
+// single render thread (see gl_loader.cpp).
 const GlComputeApi& GetGlComputeApi();
+
+// Incremented every time GetGlComputeApi() observes a different current GL context. GL objects
+// (programs, textures, FBOs, buffers) belong to the context that created them, so any module
+// caching them in a global must record the generation it built under and rebuild when it no
+// longer matches:
+//
+//     if (g_state.generation != GetGlContextGeneration()) {
+//         g_state = PipelineState{};
+//         g_state.generation = GetGlContextGeneration();
+//     }
+//
+// Note the stale handles are dropped, NOT deleted: the context that owned them is typically
+// already destroyed (which frees them anyway), and issuing glDelete* against whatever context
+// is current now would target unrelated objects. Call GetGlComputeApi() first, since that is
+// what detects the change and advances this counter.
+unsigned int GetGlContextGeneration();

@@ -25,7 +25,9 @@ const unsigned int GL_LINEAR                    = 0x2601;
 const unsigned int GL_CLAMP_TO_EDGE             = 0x812F;
 const unsigned int GL_RGBA8                     = 0x8058;
 const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_RGB                       = 0x1907;
 const unsigned int GL_RGBA                      = 0x1908;
+const unsigned int GL_RGB8                      = 0x8051;
 const unsigned int GL_UNSIGNED_BYTE             = 0x1401;
 const unsigned int GL_FRAMEBUFFER               = 0x8D40;
 const unsigned int GL_READ_FRAMEBUFFER          = 0x8CA8;
@@ -34,9 +36,50 @@ const unsigned int GL_READ_FRAMEBUFFER_BINDING  = 0x8CAA;
 const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
 const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
 const unsigned int GL_NO_ERROR                  = 0;
+const unsigned int GL_PIXEL_PACK_BUFFER         = 0x88EB;
+const unsigned int GL_PIXEL_PACK_BUFFER_BINDING = 0x88ED;
+const unsigned int GL_PIXEL_UNPACK_BUFFER_BINDING = 0x88EF;
 
 // A simple heuristic, not a real texture classifier - see texture_effect.h.
 const int kMaxDim = 1024;
+
+// GL_PACK_*/GL_UNPACK_* pixel-store parameters, in a fixed shared order so saving, forcing and
+// restoring can all run the same loop. Both the readback below and the substitute upload move
+// a TIGHTLY-PACKED buffer, but these are global context state the app may have left on
+// non-default values (a non-zero GL_UNPACK_ROW_LENGTH is common when a game uploads a
+// sub-rectangle of a larger image) - applying those to our own buffer reads or writes at the
+// wrong stride, which corrupts the texture and can run past the end of the allocation.
+const unsigned int kPackPnames[6] = {
+    0x0D00,  // GL_PACK_SWAP_BYTES
+    0x0D01,  // GL_PACK_LSB_FIRST
+    0x0D02,  // GL_PACK_ROW_LENGTH
+    0x0D03,  // GL_PACK_SKIP_ROWS
+    0x0D04,  // GL_PACK_SKIP_PIXELS
+    0x0D05,  // GL_PACK_ALIGNMENT
+};
+const unsigned int kUnpackPnames[6] = {
+    0x0CF0,  // GL_UNPACK_SWAP_BYTES
+    0x0CF1,  // GL_UNPACK_LSB_FIRST
+    0x0CF2,  // GL_UNPACK_ROW_LENGTH
+    0x0CF3,  // GL_UNPACK_SKIP_ROWS
+    0x0CF4,  // GL_UNPACK_SKIP_PIXELS
+    0x0CF5,  // GL_UNPACK_ALIGNMENT
+};
+// Same order as the pname tables: no swapping, no skipping, rows exactly `width` wide, and
+// alignment 1 so an odd width never gets row padding.
+const int kTightPixelStore[6] = {0, 0, 0, 0, 0, 1};
+
+void SavePixelStore(const GlComputeApi& gl, const unsigned int (&pnames)[6], int (&out)[6]) {
+    for (int i = 0; i < 6; ++i) {
+        gl.glGetIntegerv(pnames[i], &out[i]);
+    }
+}
+
+void SetPixelStore(const GlComputeApi& gl, const unsigned int (&pnames)[6], const int (&values)[6]) {
+    for (int i = 0; i < 6; ++i) {
+        gl.glPixelStorei(pnames[i], values[i]);
+    }
+}
 
 unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, int width, int height) {
     unsigned int texture = 0;
@@ -50,9 +93,29 @@ unsigned int MakeTexture(const GlComputeApi& gl, unsigned int internalFormat, in
     return texture;
 }
 
-bool IsEligible(unsigned int target, unsigned int format, unsigned int type, int width,
-                 int height, const void* pixels) {
+// `internalformat` decides how the driver STORES what we hand back, so it has to be one where
+// an RGBA8 round-trip preserves the app's intent. GL 1.x apps still pass the legacy
+// component-count spellings (Anachronox uploads with internalformat 1), and a single- or
+// two-channel format would keep only part of a sharpened RGB result. Anything sized, compressed
+// or depth/stencil is likewise not ours to reinterpret, so allow-list rather than deny-list.
+bool IsSupportedInternalFormat(int internalformat) {
+    switch (internalformat) {
+        case 3:                  // legacy "3 components", i.e. RGB
+        case 4:                  // legacy "4 components", i.e. RGBA
+        case (int)GL_RGB:
+        case (int)GL_RGBA:
+        case (int)GL_RGB8:
+        case (int)GL_RGBA8:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsEligible(unsigned int target, int internalformat, unsigned int format, unsigned int type,
+                 int width, int height, const void* pixels) {
     return target == GL_TEXTURE_2D
+        && IsSupportedInternalFormat(internalformat)
         && pixels != nullptr
         && format == GL_RGBA
         && type == GL_UNSIGNED_BYTE
@@ -72,13 +135,24 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
         return;
     }
 
-    if (!IsEligible(target, format, type, width, height, pixels)) {
+    if (!IsEligible(target, internalformat, format, type, width, height, pixels)) {
         realFn(target, level, internalformat, width, height, border, format, type, pixels);
         return;
     }
 
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
+        realFn(target, level, internalformat, width, height, border, format, type, pixels);
+        return;
+    }
+
+    // With a buffer bound to GL_PIXEL_UNPACK_BUFFER, `pixels` is an offset into THAT buffer,
+    // not a client pointer: reading the app's texels from it would dereference an offset as an
+    // address, and substituting our own heap pointer would have the driver read it as an
+    // offset. Neither is recoverable here, so hand this upload straight through.
+    int unpackBufferBinding = 0;
+    gl.glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBufferBinding);
+    if (unpackBufferBinding != 0) {
         realFn(target, level, internalformat, width, height, border, format, type, pixels);
         return;
     }
@@ -124,8 +198,18 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
         gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
 
         buffer = new unsigned char[(size_t)width * (size_t)height * 4];
+        int savedPack[6];
+        SavePixelStore(gl, kPackPnames, savedPack);
+        SetPixelStore(gl, kPackPnames, kTightPixelStore);
+        // A bound GL_PIXEL_PACK_BUFFER would send the readback into that buffer and treat our
+        // heap pointer as an offset into it, so unbind it for the duration.
+        int savedPackBuffer = 0;
+        gl.glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &savedPackBuffer);
+        gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
         readOk = gl.glGetError() == GL_NO_ERROR;
+        gl.glBindBuffer(GL_PIXEL_PACK_BUFFER, (unsigned int)savedPackBuffer);
+        SetPixelStore(gl, kPackPnames, savedPack);
         if (!readOk) {
             printf("[opengl32_enh_cpp] texture_effect: glGetError() after readback, "
                    "falling back to the original %dx%d upload\n", width, height);
@@ -146,8 +230,17 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
 
     if (readOk) {
+        // Our readback buffer is tightly packed, so this upload needs tight GL_UNPACK_* state
+        // rather than whatever the app set for ITS buffer - then put the app's values straight
+        // back, since the next glTexImage2D we don't intercept must still see them.
+        int savedUnpack[6];
+        SavePixelStore(gl, kUnpackPnames, savedUnpack);
+        SetPixelStore(gl, kUnpackPnames, kTightPixelStore);
         realFn(target, level, internalformat, width, height, border, format, type, buffer);
+        SetPixelStore(gl, kUnpackPnames, savedUnpack);
     } else {
+        // Falling back to the app's own pointer, which its own GL_UNPACK_* state describes -
+        // leave that state alone.
         realFn(target, level, internalformat, width, height, border, format, type, pixels);
     }
     delete[] buffer;

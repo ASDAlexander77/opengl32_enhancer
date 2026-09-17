@@ -416,6 +416,8 @@ struct SmaaConfigData {
 struct SmaaState {
     bool initTried = false;
     bool initOk = false;
+    // The GL context these cached objects belong to - see GetGlContextGeneration().
+    unsigned int generation = 0;
     unsigned int edgeProgram = 0;
     unsigned int blendProgram = 0;
     unsigned int neighborProgram = 0;
@@ -562,6 +564,14 @@ bool ApplySmaa(unsigned int srcTexture, unsigned int dstTexture, int width, int 
             warned = true;
         }
         return false;
+    }
+
+    // Cached programs/textures belong to the GL context that built them. If that context is
+    // gone, drop the handles rather than deleting them (the owning context freed them already,
+    // and glDelete* now would hit unrelated objects) and rebuild against the current one.
+    if (g_state.generation != GetGlContextGeneration()) {
+        g_state = SmaaState{};
+        g_state.generation = GetGlContextGeneration();
     }
 
     if (!g_state.initTried) {

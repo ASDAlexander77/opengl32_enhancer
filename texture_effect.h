@@ -18,10 +18,12 @@ typedef void (__stdcall *RealTexImage2DFn)(unsigned int target, int level, int i
 
 // Called from wrapper.cpp's generated glTexImage2D in place of forwarding straight through.
 // If the config's textureEffect is Sharpen or Invert and this upload looks like a plausible
-// small color texture (GL_TEXTURE_2D, GL_RGBA/GL_UNSIGNED_BYTE, real pixel data, at or under
-// the size cap), runs it through that same GPU pass used for the back buffer and calls realFn
-// with the SAME width/height but the transformed pixels. Every other case - feature off, wrong
-// format/target, a render-target allocation (pixels == nullptr), an oversized texture, or no
-// GL 4.3 compute support - calls realFn with the original arguments, unchanged.
+// small color texture (GL_TEXTURE_2D, GL_RGBA/GL_UNSIGNED_BYTE, an RGB/RGBA internalformat -
+// including the legacy component-count spellings 3 and 4 - real pixel data, at or under the
+// size cap), runs it through that same GPU pass used for the back buffer and calls realFn with
+// the SAME width/height but the transformed pixels. Every other case - feature off, wrong
+// format/target/internalformat, a render-target allocation (pixels == nullptr), an oversized
+// texture, a bound GL_PIXEL_UNPACK_BUFFER (which makes `pixels` an offset rather than a
+// pointer), or no GL 4.3 compute support - calls realFn with the original arguments, unchanged.
 void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int level, int internalformat,
     int width, int height, int border, unsigned int format, unsigned int type, void* pixels);

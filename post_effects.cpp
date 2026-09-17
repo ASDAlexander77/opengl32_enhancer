@@ -58,6 +58,8 @@ const unsigned int GL_NO_ERROR                 = 0;
 
 struct PipelineTextures {
     bool valid = false;
+    // The GL context these cached objects belong to - see GetGlContextGeneration().
+    unsigned int generation = 0;
     int width = 0;
     int height = 0;
     unsigned int tex[2] = {0, 0};
@@ -79,6 +81,14 @@ unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height
 }
 
 void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height) {
+    // A context change invalidates the cached textures and FBO. Drop the handles rather than
+    // deleting them (the owning context freed them already, and glDelete* now would hit
+    // unrelated objects in the current context); everything below then recreates them.
+    if (g_pipeline.generation != GetGlContextGeneration()) {
+        g_pipeline = PipelineTextures{};
+        g_pipeline.generation = GetGlContextGeneration();
+    }
+
     if (g_pipeline.valid && g_pipeline.width == width && g_pipeline.height == height) {
         return;
     }

@@ -64,6 +64,8 @@ struct VignetteConfigData {
 struct PipelineState {
     bool initTried = false;
     bool initOk = false;
+    // The GL context these cached objects belong to - see GetGlContextGeneration().
+    unsigned int generation = 0;
     unsigned int program = 0;
     unsigned int configUbo = 0;
 };
@@ -130,12 +132,20 @@ bool ApplyVignette(unsigned int srcTexture, unsigned int dstTexture, int width, 
         return false;
     }
 
+    // Cached programs/textures belong to the GL context that built them. If that context is
+    // gone, drop the handles rather than deleting them (the owning context freed them already,
+    // and glDelete* now would hit unrelated objects) and rebuild against the current one.
+    if (g_state.generation != GetGlContextGeneration()) {
+        g_state = PipelineState{};
+        g_state.generation = GetGlContextGeneration();
+    }
+
     if (!g_state.initTried) {
         g_state.initTried = true;
         g_state.initOk = CompileAndLink(gl, g_state.program);
         if (!g_state.initOk) {
-            printf("[opengl32_enh_cpp] vignette: shader init failed, effect disabled for the "
-                   "rest of this process\n");
+            printf("[opengl32_enh_cpp] vignette: shader init failed, effect disabled "
+                   "until the GL context changes\n");
         }
     }
     if (!g_state.initOk) {

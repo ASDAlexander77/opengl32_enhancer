@@ -58,6 +58,12 @@ add_executable(config_test config_test.cpp config.cpp)
 add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
 target_link_libraries(gl_loader_test opengl32 gdi32 user32)
 
+# Runs an effect, destroys the GL context, creates a new one and runs the effect again -
+# checks cached GL objects are rebuilt rather than reused across contexts (the failure a
+# vid_restart / video mode change would otherwise cause) - see gl_context_change_test.cpp.
+add_executable(gl_context_change_test gl_context_change_test.cpp pixel_invert.cpp gl_loader.cpp)
+target_link_libraries(gl_context_change_test opengl32 gdi32 user32)
+
 # Creates a real GL context, clears to a known color, and checks ApplyBilinearUpscale()'s
 # GPU pipeline (capture -> compute dispatch -> blit) reproduces it without a GL error - see
 # bilinear_upscale_test.cpp.

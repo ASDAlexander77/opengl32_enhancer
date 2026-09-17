@@ -490,6 +490,8 @@ enum class NisVariant { Scaler, Sharpen };
 struct NisPipelineState {
     bool initTried = false;
     bool initOk = false;
+    // The GL context these cached objects belong to - see GetGlContextGeneration().
+    unsigned int generation = 0;
     unsigned int program = 0;
 
     // Static (never resized) resources: coefficient textures (NVScaler only) and the config
@@ -557,6 +559,13 @@ unsigned int CreateCoefTexture(const GlComputeApi& gl, const float table[64][8])
     // Force known GL_UNPACK_* pixel-store state before this one-shot upload: the host app may
     // have left non-default values (e.g. GL_UNPACK_ROW_LENGTH) set, which would silently
     // corrupt the read of this tightly-packed 2x64 table (and could read past its end).
+    // These are global context state, so they must be put back afterwards - leaving our values
+    // behind would corrupt the app's own subsequent texture uploads.
+    int savedRowLength = 0, savedSkipPixels = 0, savedSkipRows = 0, savedSwapBytes = 0;
+    gl.glGetIntegerv(GL_UNPACK_ROW_LENGTH, &savedRowLength);
+    gl.glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &savedSkipPixels);
+    gl.glGetIntegerv(GL_UNPACK_SKIP_ROWS, &savedSkipRows);
+    gl.glGetIntegerv(GL_UNPACK_SWAP_BYTES, &savedSwapBytes);
     gl.glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     gl.glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
@@ -564,6 +573,10 @@ unsigned int CreateCoefTexture(const GlComputeApi& gl, const float table[64][8])
     // table[phase] is 8 floats = 2 vec4 texels (x=[0..3], y=[4..7]); upload directly, the
     // float layout already matches RGBA32F row-major with width=2.
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 64, GL_RGBA, GL_FLOAT, table);
+    gl.glPixelStorei(GL_UNPACK_ROW_LENGTH, savedRowLength);
+    gl.glPixelStorei(GL_UNPACK_SKIP_PIXELS, savedSkipPixels);
+    gl.glPixelStorei(GL_UNPACK_SKIP_ROWS, savedSkipRows);
+    gl.glPixelStorei(GL_UNPACK_SWAP_BYTES, savedSwapBytes);
     return tex;
 }
 
@@ -596,12 +609,20 @@ bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
         return false;
     }
 
+    // Cached program/coefficient textures/UBO belong to the GL context that built them. If that
+    // context is gone, drop the handles rather than deleting them (the owning context freed them
+    // already, and glDelete* now would hit unrelated objects) and rebuild against the current one.
+    if (state.generation != GetGlContextGeneration()) {
+        state = NisPipelineState{};
+        state.generation = GetGlContextGeneration();
+    }
+
     if (!state.initTried) {
         state.initTried = true;
         state.initOk = CompileAndLink(gl, shaderSource, effectName, state.program);
         if (!state.initOk) {
-            printf("[opengl32_enh_cpp] nis_effect: %s shader init failed, effect disabled for "
-                   "the rest of this process\n", effectName);
+            printf("[opengl32_enh_cpp] nis_effect: %s shader init failed, effect disabled "
+                   "until the GL context changes\n", effectName);
         }
     }
     if (!state.initOk) {
