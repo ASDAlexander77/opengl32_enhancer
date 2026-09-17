@@ -27,6 +27,7 @@
 #include "dither.h"
 #include "smaa.h"
 #include "fsr.h"
+#include "cas.h"
 #include "gl_loader.h"
 
 namespace {
@@ -197,8 +198,12 @@ void ApplySelectedEffect() {
             case EffectKind::Bilinear:
                 wrote = ApplyBilinearUpscale(src, dst, width, height, config.scale);
                 break;
+            case EffectKind::Cas:
+                wrote = ApplyCas(src, dst, width, height, config.sharpness);
+                break;
             case EffectKind::Fsr:
-                wrote = ApplyFsr(src, dst, width, height, config.scale, config.sharpness);
+                wrote = ApplyFsr(src, dst, width, height, config.scale, config.sharpness,
+                                 config.fsrDenoise, config.fsrFilmGrain);
                 break;
             case EffectKind::NVScaler:
                 wrote = ApplyNVScaler(src, dst, width, height, config.scale, config.sharpness);

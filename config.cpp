@@ -112,6 +112,7 @@ const StageName kStageNames[] = {
     {EffectKind::Dither,              "dither"},
     {EffectKind::Smaa,                "smaa"},
     {EffectKind::Fsr,                 "fsr"},
+    {EffectKind::Cas,                 "cas"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
 
@@ -405,6 +406,10 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.vignetteRadius = ParseClampedFloat(value, 0.0f, 1.0f, config.vignetteRadius, "vignetteRadius");
         } else if (strcmp(key, "chromaticAberrationStrength") == 0) {
             config.chromaticAberrationStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.chromaticAberrationStrength, "chromaticAberrationStrength");
+        } else if (strcmp(key, "fsrDenoise") == 0) {
+            config.fsrDenoise = ParseBool(value, config.fsrDenoise, "fsrDenoise");
+        } else if (strcmp(key, "fsrFilmGrain") == 0) {
+            config.fsrFilmGrain = ParseClampedFloat(value, 0.0f, 1.0f, config.fsrFilmGrain, "fsrFilmGrain");
         } else if (strcmp(key, "ditherStrength") == 0) {
             config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
         } else if (strcmp(key, "textureSharpen") == 0) {
@@ -437,7 +442,8 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
            config.vignetteIntensity, config.vignetteRadius, config.chromaticAberrationStrength,
-           config.taaBlend, config.ditherStrength, EffectNameFor(config.textureEffect));
+           config.taaBlend, config.ditherStrength, config.fsrDenoise ? "true" : "false",
+           config.fsrFilmGrain, EffectNameFor(config.textureEffect));
     return config;
 }
 

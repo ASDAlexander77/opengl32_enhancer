@@ -31,6 +31,7 @@ run left to right in the order listed. Available stages:
 | `taa` | temporal anti-aliasing |
 | `smaa` | spatial anti-aliasing (SMAA) |
 | `fsr` | AMD FidelityFX Super Resolution 1, EASU + RCAS (honors `scale`) |
+| `cas` | AMD FidelityFX Contrast Adaptive Sharpening (sharpen-only) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
 | `dither` | ordered dither, masks 8-bit banding |
 
@@ -59,6 +60,19 @@ better antialiasing:
   no motion-related artifacts at all and stays consistent during camera
   movement - at the cost of being a purely spatial technique, generally
   blurrier than a true motion-vector TAA would be on fine static detail.
+
+### Picking a sharpener
+
+Three stages sharpen, and stacking them just double-sharpens - pick one:
+
+- `sharpen` (NVIDIA Image Scaling's NVSharpen) is the heaviest: a full
+  USM-style filter with its own coefficient tables and a large neighborhood.
+- `fsr`'s RCAS is limiter-driven - it refuses to sharpen anywhere doing so
+  would clip, which is very safe but means it declines to touch
+  already-saturated edges at all.
+- `cas` is the lightest: one 3x3 neighborhood and a simple cross filter. It
+  sharpens more uniformly across the image than RCAS and costs less than
+  NVSharpen.
 
 ## Texture effects
 

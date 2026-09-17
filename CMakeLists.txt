@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp smaa.cpp fsr.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp smaa.cpp fsr.cpp cas.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -57,6 +57,11 @@ add_executable(config_test config_test.cpp config.cpp)
 # entry point it needs - see gl_loader_test.cpp.
 add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
 target_link_libraries(gl_loader_test opengl32 gdi32 user32)
+
+# Creates a real GL context and checks ApplyCas() reproduces a flat image and sharpens a
+# mid-contrast edge - see cas_test.cpp.
+add_executable(cas_test cas_test.cpp cas.cpp gl_loader.cpp)
+target_link_libraries(cas_test opengl32 gdi32 user32)
 
 # Creates a real GL context and checks ApplyFsr()'s two passes (EASU then RCAS) reproduce a
 # flat image, respond near a hard edge, and survive the reduced-scale upscale path - see
@@ -143,7 +148,7 @@ target_link_libraries(smaa_test opengl32 gdi32 user32)
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp)
+    vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so

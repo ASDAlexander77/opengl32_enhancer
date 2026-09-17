@@ -290,6 +290,29 @@ int main() {
         Check(config.ditherStrength == 0.0f, "out-of-range ditherStrength (-1.0) clamps to min 0.0");
     }
 
+    // The FSR extras parse, clamp and default like every other per-stage parameter.
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.fsrDenoise == false, "missing file falls back to default fsrDenoise=false");
+        Check(config.fsrFilmGrain == 0.0f, "missing file falls back to default fsrFilmGrain=0");
+    }
+    {
+        WriteFixture("config_test_fsr_extras.ini",
+            "effect=fsr, cas\n"
+            "fsrDenoise=1\n"
+            "fsrFilmGrain=0.4\n");
+        AnaxConfig config = ParseConfigFile("config_test_fsr_extras.ini");
+        const EffectKind expected[] = {EffectKind::Fsr, EffectKind::Cas};
+        CheckStages(config, expected, 2, "effect=fsr, cas parses both new stages in order");
+        Check(config.fsrDenoise, "parses fsrDenoise=1");
+        Check(config.fsrFilmGrain == 0.4f, "parses fsrFilmGrain=0.4");
+    }
+    {
+        WriteFixture("config_test_fsr_clamp.ini", "fsrFilmGrain=5.0\n");
+        AnaxConfig config = ParseConfigFile("config_test_fsr_clamp.ini");
+        Check(config.fsrFilmGrain == 1.0f, "out-of-range fsrFilmGrain (5.0) clamps to max 1.0");
+    }
+
     // textureEffect accepts none/sharpen/invert, defaults to none, rejects anything else, and
     // still honors the legacy textureSharpen=1/0 spelling.
     {

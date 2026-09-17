@@ -136,7 +136,7 @@ int main() {
         UploadRgba(gl, srcTex, width, height, flat);
         delete[] flat;
 
-        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 1.0f, 0.75f);
+        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 1.0f, 0.75f, false, 0.0f);
         Check(wrote, "flat image: ApplyFsr() reported it wrote dstTexture");
 
         unsigned char* out = new unsigned char[texelCount * 4];
@@ -182,7 +182,7 @@ int main() {
         }
         UploadRgba(gl, srcTex, width, height, edge);
 
-        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 1.0f, 1.0f);
+        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 1.0f, 1.0f, false, 0.0f);
         Check(wrote, "edge image: ApplyFsr() reported it wrote dstTexture");
 
         unsigned char* out = new unsigned char[texelCount * 4];
@@ -231,7 +231,7 @@ int main() {
         UploadRgba(gl, srcTex, width, height, flat);
         delete[] flat;
 
-        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 0.5f, 0.5f);
+        bool wrote = ApplyFsr(srcTex, dstTex, width, height, 0.5f, 0.5f, false, 0.0f);
         unsigned int err = gl.glGetError();
         Check(wrote && err == GL_NO_ERROR, "scale=0.5: EASU upscaling path ran with no GL error");
 
@@ -243,6 +243,97 @@ int main() {
               "scale=0.5: a flat image survives the upscale path intact");
         delete[] out;
 
+        gl.glDeleteTextures(1, &srcTex);
+        gl.glDeleteTextures(1, &dstTex);
+    }
+
+    // --- 4. Denoise must reduce sharpening on noisy input. ---
+    {
+        unsigned int srcTex = MakeTexture(gl, width, height);
+        unsigned int dstTex = MakeTexture(gl, width, height);
+
+        // Per-texel pseudo-random noise around mid grey: exactly the "isolated pixel, not a
+        // real edge" case FSR_RCAS_DENOISE exists to stop RCAS amplifying.
+        unsigned char* noisy = new unsigned char[texelCount * 4];
+        unsigned int seed = 12345u;
+        for (size_t i = 0; i < texelCount; ++i) {
+            seed = seed * 1664525u + 1013904223u;
+            int v = 128 + (int)((seed >> 24) % 61u) - 30;
+            noisy[i * 4 + 0] = (unsigned char)v;
+            noisy[i * 4 + 1] = (unsigned char)v;
+            noisy[i * 4 + 2] = (unsigned char)v;
+            noisy[i * 4 + 3] = 255;
+        }
+        UploadRgba(gl, srcTex, width, height, noisy);
+
+        unsigned char* plain = new unsigned char[texelCount * 4];
+        unsigned char* denoised = new unsigned char[texelCount * 4];
+
+        ApplyFsr(srcTex, dstTex, width, height, 1.0f, 1.0f, false, 0.0f);
+        ReadBack(gl, dstTex, width, height, plain);
+        ApplyFsr(srcTex, dstTex, width, height, 1.0f, 1.0f, true, 0.0f);
+        ReadBack(gl, dstTex, width, height, denoised);
+
+        // "Sharpened harder" means further from the input, so sum the absolute deviation.
+        long plainDev = 0;
+        long denoisedDev = 0;
+        for (size_t i = 0; i < texelCount; ++i) {
+            plainDev += abs((int)plain[i * 4] - (int)noisy[i * 4]);
+            denoisedDev += abs((int)denoised[i * 4] - (int)noisy[i * 4]);
+        }
+        printf("  noisy input deviation from source: denoise off = %ld, denoise on = %ld\n",
+               plainDev, denoisedDev);
+        Check(denoisedDev < plainDev,
+              "denoise on sharpens noisy input less than denoise off");
+
+        delete[] noisy;
+        delete[] plain;
+        delete[] denoised;
+        gl.glDeleteTextures(1, &srcTex);
+        gl.glDeleteTextures(1, &dstTex);
+    }
+
+    // --- 5. Film grain must alter the image, and vary frame to frame. ---
+    {
+        unsigned int srcTex = MakeTexture(gl, width, height);
+        unsigned int dstTex = MakeTexture(gl, width, height);
+
+        // Mid grey: the LFGA weight min(1-c, c) peaks here, so grain is most visible.
+        unsigned char* flat = new unsigned char[texelCount * 4];
+        for (size_t i = 0; i < texelCount; ++i) {
+            flat[i * 4 + 0] = 128; flat[i * 4 + 1] = 128;
+            flat[i * 4 + 2] = 128; flat[i * 4 + 3] = 255;
+        }
+        UploadRgba(gl, srcTex, width, height, flat);
+        delete[] flat;
+
+        unsigned char* noGrain = new unsigned char[texelCount * 4];
+        unsigned char* grainA = new unsigned char[texelCount * 4];
+        unsigned char* grainB = new unsigned char[texelCount * 4];
+
+        ApplyFsr(srcTex, dstTex, width, height, 1.0f, 0.75f, false, 0.0f);
+        ReadBack(gl, dstTex, width, height, noGrain);
+        ApplyFsr(srcTex, dstTex, width, height, 1.0f, 0.75f, false, 0.8f);
+        ReadBack(gl, dstTex, width, height, grainA);
+        ApplyFsr(srcTex, dstTex, width, height, 1.0f, 0.75f, false, 0.8f);
+        ReadBack(gl, dstTex, width, height, grainB);
+
+        int differsFromClean = 0;
+        int differsBetweenFrames = 0;
+        for (size_t i = 0; i < texelCount; ++i) {
+            if (abs((int)grainA[i * 4] - (int)noGrain[i * 4]) > 2) { ++differsFromClean; }
+            if (abs((int)grainA[i * 4] - (int)grainB[i * 4]) > 2) { ++differsBetweenFrames; }
+        }
+        printf("  grain: %d of %d texels differ from ungrained, %d differ between frames\n",
+               differsFromClean, (int)texelCount, differsBetweenFrames);
+        Check(differsFromClean > (int)texelCount / 4,
+              "film grain visibly alters a flat mid-grey image");
+        Check(differsBetweenFrames > (int)texelCount / 4,
+              "film grain varies frame to frame rather than sitting still");
+
+        delete[] noGrain;
+        delete[] grainA;
+        delete[] grainB;
         gl.glDeleteTextures(1, &srcTex);
         gl.glDeleteTextures(1, &dstTex);
     }

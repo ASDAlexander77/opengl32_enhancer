@@ -15,8 +15,12 @@
 //     texel centers. Identical results, and it avoids depending on textureGather's component
 //     ordering, which is what the reference's elaborate a/b/r/g swizzle comments are working
 //     around.
-//   - No input transform / denoise hook (FsrRcasInputF, FSR_RCAS_DENOISE): the pipeline hands
-//     stages linear-ish RGBA16F and there is no noise source to suppress here.
+//   - No input transform hook (FsrRcasInputF): the pipeline hands stages linear-ish RGBA16F,
+//     so there is no colorspace conversion to run per tap. The optional FSR_RCAS_DENOISE path
+//     IS ported, as a runtime branch rather than a #define, since this shader is compiled once
+//     and the config can change between runs.
+//   - The film grain helper (FsrLfgaF) is ported too; the reference leaves the grain source to
+//     the caller, so a small temporal hash stands in for a grain texture.
 //
 // The EASU pass writes into a scratch texture which the RCAS pass then reads, so the caller's
 // srcTexture is never written and dstTexture is written exactly once.
@@ -58,7 +62,7 @@ const char* kFsrCommonSource =
     "    vec4 con1;\n"
     "    vec4 con2;\n"
     "    vec4 con3;\n"
-    "    vec4 rcasParams;\n"   // .x = attenuation, .yzw unused (std140 padding)
+    "    vec4 rcasParams;\n"   // .x = RCAS attenuation, .y = denoise 0/1, .z = grain amount, .w = frame
     "};\n"
     // Luma times 2, the reference's "simplest multi-channel approximate luma possible".
     "float fsrLuma(vec3 c) {\n"
@@ -196,7 +200,8 @@ const char* kEasuBodySource =
     "    imageStore(outImage, ip, vec4(pix, 1.0));\n"
     "}\n";
 
-// Pass 2: RCAS - see FsrRcasF in the reference. 3x3 cross, no denoise, no input transform.
+// Pass 2: RCAS - see FsrRcasF in the reference. 3x3 cross, optional denoise, no input
+// transform, with FsrLfgaF film grain folded into the same pass.
 const char* kRcasShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
@@ -205,6 +210,14 @@ const char* kRcasShaderSource =
 
 const char* kRcasBodySource =
     "#define FSR_RCAS_LIMIT (0.25 - (1.0 / 16.0))\n"
+    // Hash-based grain in [0,1). The frame index is folded in so the grain changes every frame
+    // rather than sitting as a fixed pattern over the image - the reference notes grain must be
+    // temporally varying and non-biased to stay energy preserving.
+    "float fsrGrain(vec2 p, float frame) {\n"
+    "    vec3 p3 = fract(vec3(p.x, p.y, p.x) * 0.1031 + frame * 0.07);\n"
+    "    p3 += dot(p3, p3.yzx + 33.33);\n"
+    "    return fract((p3.x + p3.y) * p3.z);\n"
+    "}\n"
     "vec3 fsrRcasLoad(ivec2 p, ivec2 maxCoord) {\n"
     "    return texelFetch(easuTex, clamp(p, ivec2(0), maxCoord), 0).rgb;\n"
     "}\n"
@@ -226,6 +239,16 @@ const char* kRcasBodySource =
     "    float eL = fsrLuma(e);\n"
     "    float fL = fsrLuma(f);\n"
     "    float hL = fsrLuma(h);\n"
+    // Noise detection (the reference's FSR_RCAS_DENOISE path): how far the center luma sits
+    // from its neighbours' average, normalized by the local luma range. Near 1 the pixel looks
+    // like isolated noise rather than a real edge, and scaling the lobe by it keeps RCAS from
+    // amplifying that noise. Off by default, matching the reference, since it costs a little
+    // sharpness on genuinely detailed input.
+    "    float nz = 0.25 * bL + 0.25 * dL + 0.25 * fL + 0.25 * hL - eL;\n"
+    "    float nzRange = max(max(max(bL, dL), max(eL, fL)), hL)\n"
+    "                  - min(min(min(bL, dL), min(eL, fL)), hL);\n"
+    "    nz = clamp(abs(nz) / max(nzRange, 1.0 / 32768.0), 0.0, 1.0);\n"
+    "    nz = -0.5 * nz + 1.0;\n"
     // Min/max of the ring, per channel.
     "    vec3 mn4 = min(min(min(b, d), f), h);\n"
     "    vec3 mx4 = max(max(max(b, d), f), h);\n"
@@ -236,7 +259,17 @@ const char* kRcasBodySource =
     "    vec3 lobeRGB = max(-hitMin, hitMax);\n"
     "    float lobe = max(-FSR_RCAS_LIMIT,\n"
     "                     min(max(max(lobeRGB.r, lobeRGB.g), lobeRGB.b), 0.0)) * rcasParams.x;\n"
+    "    lobe *= mix(1.0, nz, rcasParams.y);\n"
     "    vec3 pix = (lobe * b + lobe * d + lobe * h + lobe * f + e) / (4.0 * lobe + 1.0);\n"
+    // Film grain (the reference's FsrLfgaF). Applied AFTER reconstruction on purpose: FSR's
+    // own guidance is that grain present before upscaling gets resampled into mush, so a game
+    // wanting grain should re-add it here. The weight min(1-c, c) is what makes it energy
+    // preserving - grain fades out as a channel approaches either limit, so it tints neither
+    // blacks nor highlights.
+    "    if (rcasParams.z > 0.0) {\n"
+    "        float grain = fsrGrain(vec2(sp), rcasParams.w) - 0.5;\n"
+    "        pix += (vec3(grain) * rcasParams.z) * min(vec3(1.0) - pix, pix);\n"
+    "    }\n"
     "    imageStore(outImage, sp, vec4(pix, 1.0));\n"
     "}\n";
 
@@ -257,6 +290,10 @@ struct FsrState {
     unsigned int easuProgram = 0;
     unsigned int rcasProgram = 0;
     unsigned int configUbo = 0;
+
+    // Advances once per invocation so the film grain varies over time instead of sitting
+    // still on the image. Wraps harmlessly - the shader only uses it to perturb a hash.
+    unsigned int frame = 0;
 
     bool scratchValid = false;
     int width = 0;
@@ -359,7 +396,7 @@ void FillEasuConstants(FsrConfigData& data, float inputW, float inputH, float ou
 }  // namespace
 
 bool ApplyFsr(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
-               float scale, float sharpness) {
+               float scale, float sharpness, bool denoise, float filmGrain) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -424,6 +461,12 @@ bool ApplyFsr(unsigned int srcTexture, unsigned int dstTexture, int width, int h
     // exp2(-stops) exactly as the reference does.
     float stops = (1.0f - sharpness) * 2.0f;
     configData.rcasParams[0] = std::exp2(-stops);
+    configData.rcasParams[1] = denoise ? 1.0f : 0.0f;
+    configData.rcasParams[2] = (filmGrain < 0.0f) ? 0.0f : ((filmGrain > 1.0f) ? 1.0f : filmGrain);
+    // Only the grain hash consumes this, and only the fractional mixing matters, so the
+    // modulo just keeps it in a range float can represent exactly.
+    g_state.frame = (g_state.frame + 1u) % 4096u;
+    configData.rcasParams[3] = (float)g_state.frame;
 
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(FsrConfigData), &configData, GL_DYNAMIC_DRAW);

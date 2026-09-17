@@ -22,6 +22,7 @@ enum class EffectKind {
     Dither,
     Smaa,
     Fsr,
+    Cas,
 };
 
 // Plenty of headroom for the 12 real stages, even if a config lists some of them twice.
@@ -37,7 +38,7 @@ struct AnaxConfig {
 
     // Per-stage parameters. These are read only by the stages that use them, so leaving a
     // parameter set for a stage that isn't listed is harmless.
-    float scale = 1.0f;                        // Fsr
+    float scale = 1.0f;                        // Bilinear, NVScaler, Fsr
     float acesStrength = 0.5f;                 // AcesToneMap
     float bloomThreshold = 0.8f;               // Bloom
     float bloomIntensity = 0.5f;               // Bloom
@@ -49,6 +50,8 @@ struct AnaxConfig {
     float chromaticAberrationStrength = 0.3f;  // ChromaticAberration
     float taaBlend = 0.5f;                     // Taa
     float ditherStrength = 1.0f;               // Dither
+    bool fsrDenoise = false;                   // Fsr
+    float fsrFilmGrain = 0.0f;                 // Fsr
 
     // Runs small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
     // resize) at load time through a single stage (see texture_effect.h). `sharpen` uses the
