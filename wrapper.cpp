@@ -13,6 +13,7 @@
 #include "pixel_invert.h"
 #include "post_effects.h"
 #include "texture_effect.h"
+#include "texture_filter.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -4923,7 +4924,7 @@ extern "C" __declspec(dllexport) void __stdcall glTexParameterf(GLenum target, G
             printf("[opengl32_enh_cpp]   glTexParameterf: resolved OK\n");
         }
     }
-    __proc_glTexParameterf(target, pname, param);
+    ApplyTextureFilterOverrideF(__proc_glTexParameterf, target, pname, param);
 }
 
 typedef void (__stdcall *__pfn_glTexParameterfv)(GLenum, GLenum, void*);
@@ -4955,7 +4956,7 @@ extern "C" __declspec(dllexport) void __stdcall glTexParameteri(GLenum target, G
             printf("[opengl32_enh_cpp]   glTexParameteri: resolved OK\n");
         }
     }
-    __proc_glTexParameteri(target, pname, param);
+    ApplyTextureFilterOverride(__proc_glTexParameteri, target, pname, param);
 }
 
 typedef void (__stdcall *__pfn_glTexParameteriv)(GLenum, GLenum, void*);

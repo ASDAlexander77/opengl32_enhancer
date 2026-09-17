@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -161,6 +161,32 @@ target_link_libraries(local_contrast_test opengl32 gdi32 user32)
 add_executable(fx_indicator_test fx_indicator_test.cpp fx_indicator.cpp gl_loader.cpp)
 target_link_libraries(fx_indicator_test opengl32 gdi32 user32)
 
+# Creates a real GL context, a real texture, and checks ApplyTextureFilterOverride[F]() only
+# upgrades GL_TEXTURE_MIN_FILTER calls that request a mipmap-capable mode on GL_TEXTURE_2D
+# (both the int and float entry points), forces trilinear + the configured anisotropy on those,
+# leaves every other glTexParameter call byte-for-byte unchanged (wrong pname, non-mipmap
+# filter, wrong target), and is a true no-op end to end when anisotropy=0 - see
+# texture_filter_test.cpp.
+add_executable(texture_filter_test texture_filter_test.cpp texture_filter.cpp config.cpp gl_loader.cpp)
+target_link_libraries(texture_filter_test opengl32 gdi32 user32)
+# texture_filter_test resolves opengl32_enhancer.ini next to its own .exe, same as
+# post_effects_test - but this needs a fixed, known anisotropy value rather than whatever the
+# project's real shipped ini currently says, so it copies its own small fixture instead (see
+# texture_filter_test.ini) renamed to the filename config.cpp actually looks for. That file
+# gets its own RUNTIME_OUTPUT_DIRECTORY, separate from every other target's shared build
+# directory: two targets both writing a same-named opengl32_enhancer.ini into one directory is
+# a real Ninja hazard (POST_BUILD steps between unrelated targets aren't ordered), not a
+# theoretical one - post_effects_test's own copy of the REAL shipped ini silently won that race
+# in a release build during development here, and this test read the wrong config as a result.
+set_target_properties(texture_filter_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/texture_filter_test_dir
+)
+add_custom_command(TARGET texture_filter_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_SOURCE_DIR}/texture_filter_test.ini
+        $<TARGET_FILE_DIR:texture_filter_test>/opengl32_enhancer.ini
+)
+
 # Integration test for the CURRENT opengl32_enhancer.ini: builds a synthetic test image, blits it
 # onto a real back buffer, calls the actual ApplySelectedEffect() entry point (the same one
 # wrapper.cpp calls from wglSwapBuffers), and checks it runs with no GL error and visibly
@@ -175,8 +201,12 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
-# the test reads the actual shipped config, not a fixture; re-run the test (no rebuild needed)
-# after editing opengl32_enhancer.ini to see the new pipeline exercised.
+# the test reads the actual shipped config, not a fixture. With the Ninja generator this project
+# uses, that copy is chained after the link step (see the generated build.ninja), so it only
+# re-runs when post_effects_test itself actually relinks - editing ONLY opengl32_enhancer.ini
+# and re-running the already-built .exe reads a stale copy. `cmake --build ... --target
+# post_effects_test` after touching any of its own source files (or a full reconfigure) is what
+# actually refreshes it.
 add_custom_command(TARGET post_effects_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/opengl32_enhancer.ini
@@ -228,6 +258,7 @@ foreach(test_target
     nr_test
     local_contrast_test
     fx_indicator_test
+    texture_filter_test
     post_effects_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)

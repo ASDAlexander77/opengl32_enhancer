@@ -448,6 +448,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.shimmerSuppression = ParseClampedFloat(value, 0.0f, 1.0f, config.shimmerSuppression, "shimmerSuppression");
         } else if (strcmp(key, "fxIndicator") == 0) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
+        } else if (strcmp(key, "anisotropy") == 0) {
+            config.anisotropy = ParseClampedFloat(value, 0.0f, 16.0f, config.anisotropy, "anisotropy");
         } else if (strcmp(key, "textureSharpen") == 0) {
             // Pre-textureEffect spelling: textureSharpen=1/0 meant sharpen/off.
             bool on = ParseBool(value, config.textureEffect == EffectKind::Sharpen, "textureSharpen");
@@ -477,7 +479,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "taaBlend=%.3f, ditherStrength=%.3f, fsrDenoise=%s, fsrFilmGrain=%.3f, "
            "nrIntensity=%.3f, nrPasses=%d, nrColorStrength=%.3f, nrTonePreservation=%.3f, "
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
-           "shimmerSuppression=%.3f, fxIndicator=%s, textureEffect=%s)\n",
+           "shimmerSuppression=%.3f, fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
@@ -486,7 +488,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.fsrFilmGrain,
            config.nrIntensity, config.nrPasses, config.nrColorStrength, config.nrTonePreservation,
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
-           config.shimmerSuppression, config.fxIndicator ? "true" : "false",
+           config.shimmerSuppression, config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));
     return config;
 }

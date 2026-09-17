@@ -177,6 +177,7 @@ def emit_cpp(funcs):
     lines.append('#include "pixel_invert.h"')
     lines.append('#include "post_effects.h"')
     lines.append('#include "texture_effect.h"')
+    lines.append('#include "texture_filter.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -239,6 +240,14 @@ def emit_cpp(funcs):
             # the transformed ones, same width/height either way), so this skips the default
             # passthrough line below.
             lines.append(f"    ApplyTextureEffectUpload({cache_var}, {params_call});")
+        elif name == "glTexParameteri":
+            # See texture_filter.h: decides whether to upgrade this call (forced trilinear +
+            # anisotropic filtering) and calls cache_var itself either way, so this skips the
+            # default passthrough line below.
+            lines.append(f"    ApplyTextureFilterOverride({cache_var}, {params_call});")
+        elif name == "glTexParameterf":
+            # Float-parameter twin of the above - see texture_filter.h.
+            lines.append(f"    ApplyTextureFilterOverrideF({cache_var}, {params_call});")
         elif ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:

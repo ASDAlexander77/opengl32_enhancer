@@ -30,6 +30,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Example configurations](#example-configurations)
 - [Texture effects](#texture-effects)
+- [Anisotropic filtering](#anisotropic-filtering)
 - [How it works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
 - [Building from source](#building-from-source)
@@ -285,6 +286,31 @@ asset's own texel data in the first place.
 Older config files may still say `textureSharpen=1`/`0`; it is read as an
 alias for `textureEffect=sharpen`/`none`.
 
+## Anisotropic filtering
+
+`anisotropy` (0..16, default 8 in the shipped ini) fixes the classic id Tech
+2-era "blurry floor a few feet ahead" look. Anisotropic filtering didn't
+widely exist when these renderers were written, so their world/model textures
+only ever request `GL_LINEAR_MIPMAP_NEAREST` ("bilinear mip," not true
+trilinear) and never anisotropic filtering at all.
+
+This is a separate mechanism from `effect=`/`textureEffect=` — it intercepts
+`glTexParameter*` calls rather than the composited frame or a texture upload.
+Whenever the **game itself** sets a mipmap-capable `GL_TEXTURE_MIN_FILTER` on
+a 2D texture, that's the engine's own per-texture signal "this one uses
+mip-mapping" — it gets upgraded to full trilinear plus the configured level of
+anisotropic filtering (capped to whatever the GPU/driver actually supports).
+2D/UI/HUD/font elements are conventionally uploaded with a *non*-mipmap min
+filter specifically so they stay pixel-exact, and those are left completely
+untouched — texture size and upload order aren't reliable ways to tell the
+two apart, but this signal is.
+
+`0` disables the feature entirely (every `glTexParameter*` call forwarded
+exactly as the game made it). There's essentially no reason to use less than
+the hardware maximum (usually 16): the visual cost of *not* using anisotropic
+filtering is far more noticeable than its performance cost on anything made
+in the last decade-plus.
+
 ## How it works
 
 1. Windows resolves `opengl32.dll` next to the game's `.exe` before the copy
@@ -298,7 +324,8 @@ alias for `textureEffect=sharpen`/`none`.
    finished frame is captured into a texture and run through the configured
    chain of GL 4.3 compute shaders, then blitted back.
 4. `glTexImage2D` is intercepted separately for the optional
-   [texture effects](#texture-effects).
+   [texture effects](#texture-effects), and `glTexParameteri`/`glTexParameterf`
+   for [anisotropic filtering](#anisotropic-filtering).
 
 Exports are emitted under their true undecorated names through a `.def` file,
 since `__declspec(dllexport)` alone would apply `__stdcall`'s `@N` decoration

@@ -63,6 +63,12 @@ struct AnaxConfig {
     float localToneStrength = 0.3f;            // LocalContrast
     float shimmerSuppression = 0.0f;           // Taa
 
+    // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
+    // textures - see texture_filter.h. 0 (default) leaves every glTexParameter call the game
+    // makes completely untouched; 1..16 is the anisotropy level to request (capped at runtime
+    // to whatever the GPU/driver actually supports). Independent of the effect= pipeline.
+    float anisotropy = 0.0f;
+
     // Draws a small "FX" badge in a corner of the frame whenever the effect= pipeline actually
     // runs, so you can tell "the pipeline ran but nothing looked different" apart from "the
     // proxy isn't loaded/configured at all" without checking the log - see fx_indicator.h.

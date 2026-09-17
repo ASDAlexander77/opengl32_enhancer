@@ -326,6 +326,7 @@ int main() {
         Check(config.localToneStrength == 0.3f, "missing file falls back to default localToneStrength=0.3");
         Check(config.shimmerSuppression == 0.0f, "missing file falls back to default shimmerSuppression=0");
         Check(config.fxIndicator == true, "missing file falls back to default fxIndicator=true");
+        Check(config.anisotropy == 0.0f, "missing file falls back to default anisotropy=0 (off)");
     }
     {
         WriteFixture("config_test_nr_localcontrast.ini",
@@ -338,7 +339,8 @@ int main() {
             "localStructureStrength=1.2\n"
             "localToneStrength=0.9\n"
             "shimmerSuppression=0.7\n"
-            "fxIndicator=0\n");
+            "fxIndicator=0\n"
+            "anisotropy=8\n");
         AnaxConfig config = ParseConfigFile("config_test_nr_localcontrast.ini");
         const EffectKind expected[] = {EffectKind::Nr, EffectKind::LocalContrast};
         CheckStages(config, expected, 2, "effect=nr, localcontrast parses both new stages in order");
@@ -351,6 +353,12 @@ int main() {
         Check(config.localToneStrength == 0.9f, "parses localToneStrength=0.9");
         Check(config.shimmerSuppression == 0.7f, "parses shimmerSuppression=0.7");
         Check(config.fxIndicator == false, "parses fxIndicator=0");
+        Check(config.anisotropy == 8.0f, "parses anisotropy=8");
+    }
+    {
+        WriteFixture("config_test_anisotropy_clamp.ini", "anisotropy=99\n");
+        AnaxConfig config = ParseConfigFile("config_test_anisotropy_clamp.ini");
+        Check(config.anisotropy == 16.0f, "out-of-range anisotropy (99) clamps to max 16");
     }
     {
         WriteFixture("config_test_nr_clamp.ini", "nrPasses=99\nnrIntensity=-5.0\nlocalToneStrength=9.0\n");
