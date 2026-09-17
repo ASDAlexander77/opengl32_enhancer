@@ -72,6 +72,14 @@ struct AnaxConfig {
     float ssaoIntensity = 0.5f;                // Ssao
     float ssaoBias = 0.5f;                     // Ssao
 
+    // Writes the current frame (color + depth + the captured projection) to frameDumpPath when
+    // this virtual-key code is pressed, for the standalone config editor to load and tune
+    // against - see frame_dump.h. 0 disables the feature and the per-frame key poll with it.
+    // Independent of the effect= pipeline: a dump captures the game's frame BEFORE any stage
+    // runs, so it works with effect=none and always yields unprocessed source.
+    int frameDumpKey = 0x7A;                   // VK_F11
+    char frameDumpPath[256] = "opengl32_enhancer_frame.dump";
+
     // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
     // textures - see texture_filter.h. 0 (default) leaves every glTexParameter call the game
     // makes completely untouched; 1..16 is the anisotropy level to request (capped at runtime
@@ -114,3 +122,11 @@ AnaxConfig ParseConfigFile(const char* path);
 // Reads opengl32_enhancer.ini from the same directory as this DLL, once, and caches the result
 // for the rest of the process lifetime (later calls are cheap and return the same object).
 const AnaxConfig& GetAnaxConfig();
+
+// The same cached object, writable. This exists for the standalone config editor (see
+// config_editor.cpp), which edits settings live and re-runs the pipeline to show the result:
+// post_effects.cpp re-reads the config at the top of every ApplySelectedEffect() call, so an
+// edit here is visible on the very next frame with no reload step. Inside the DLL nothing writes
+// through this - the game's config is read once from the ini and left alone - so callers there
+// should keep using GetAnaxConfig() and let the compiler enforce that.
+AnaxConfig& GetMutableAnaxConfig();

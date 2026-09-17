@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -52,6 +52,21 @@ add_dependencies(${WRAPPER_NAME_CXX}_test ${WRAPPER_NAME_CXX})
 
 # Exercises config.cpp's INI parsing directly (no DLL/GL involved) - see config_test.cpp.
 add_executable(config_test config_test.cpp config.cpp)
+
+# Checks config_writer.cpp rewrites the REAL shipped ini in place without destroying the inline
+# documentation that file mostly consists of - see config_writer_test.cpp. No GL involved.
+add_executable(config_writer_test config_writer_test.cpp config_writer.cpp config.cpp)
+# Its own directory for the same reason texture_filter_test and config_editor have one: it needs
+# a copy of the real opengl32_enhancer.ini next to its .exe, and two targets writing that
+# filename into the shared build directory is an unordered race with the Ninja generator.
+set_target_properties(config_writer_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/config_writer_test_dir
+)
+add_custom_command(TARGET config_writer_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/opengl32_enhancer.ini
+        $<TARGET_FILE_DIR:config_writer_test>
+)
 
 # Creates a real GL context and checks gl_loader.cpp resolves every GL 4.3 compute-shader
 # entry point it needs - see gl_loader_test.cpp.
@@ -211,8 +226,9 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp chromatic_aberration.cpp taa.cpp
-    dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+    vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp
+    chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
+    local_contrast.cpp fx_indicator.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -227,6 +243,45 @@ add_custom_command(TARGET post_effects_test POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/opengl32_enhancer.ini
         ${CMAKE_CURRENT_SOURCE_DIR}/cyberpunk.cube
         $<TARGET_FILE_DIR:post_effects_test>
+)
+
+# Standalone config editor - see config_editor.cpp. Renders a scene, runs the real
+# ApplySelectedEffect() pipeline over it and puts an ImGui UI beside the result, so settings can
+# be tuned and saved without launching the game. Links the same stage sources as
+# ${WRAPPER_NAME_CXX} plus vendored ImGui; NOT registered with CTest, since it is an interactive
+# tool rather than something that can pass or fail unattended.
+add_executable(config_editor WIN32
+    config_editor.cpp editor_scene.cpp config_writer.cpp
+    post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp frame_dump.cpp
+    pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp
+    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+    third_party/imgui/backends/imgui_impl_win32.cpp
+    third_party/imgui/backends/imgui_impl_opengl3.cpp)
+target_include_directories(config_editor PRIVATE third_party/imgui)
+target_link_libraries(config_editor opengl32 gdi32 user32 dwmapi imm32)
+# WIN32 above makes this a GUI app (no console window of its own), but the whole codebase
+# reports through printf - so give it a console back. Without this, every diagnostic from the
+# config parser, the GL loader and the stages themselves would go nowhere.
+set_target_properties(config_editor PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+# Its own output directory, for exactly the reason texture_filter_test has one: two targets
+# copying a same-named opengl32_enhancer.ini into one build directory is an unordered race with
+# the Ninja generator, and post_effects_test already claims that filename in the shared dir.
+set_target_properties(config_editor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/config_editor_dir
+)
+# Seeds the editor's own directory with the real shipped ini and LUT so it runs out of the box.
+# Point it at another ini (the game's, say) by passing the path as argv[1] or editing the path
+# field in the UI - it saves wherever that says, not necessarily to this copy.
+add_custom_command(TARGET config_editor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/opengl32_enhancer.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/cyberpunk.cube
+        $<TARGET_FILE_DIR:config_editor>
 )
 
 # Register every test target above with CTest, so `ctest` in the build directory is the one
@@ -250,7 +305,8 @@ enable_testing()
 # proxy DLL and calls through it (its GL calls are made with no current context on purpose).
 foreach(test_target
     ${WRAPPER_NAME_CXX}_test
-    config_test)
+    config_test
+    config_writer_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()

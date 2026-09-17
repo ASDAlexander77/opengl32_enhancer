@@ -194,13 +194,13 @@ void ParseEffectList(AnaxConfig& config, char* value) {
     }
 }
 
-void CopyLutPath(AnaxConfig& config, const char* value) {
-    if (strlen(value) >= sizeof(config.lutPath)) {
-        printf("[opengl32_enh_cpp] config: 'lutPath' value '%s' is too long (max %zu chars), ignoring\n",
-               value, sizeof(config.lutPath) - 1);
+void CopyStringValue(char* dest, size_t destSize, const char* value, const char* key) {
+    if (strlen(value) >= destSize) {
+        printf("[opengl32_enh_cpp] config: '%s' value '%s' is too long (max %zu chars), ignoring\n",
+               key, value, destSize - 1);
         return;
     }
-    strcpy(config.lutPath, value);
+    strcpy(dest, value);
 }
 
 bool ParseBool(const char* value, bool fallback, const char* key) {
@@ -227,9 +227,12 @@ float ParseClampedFloat(const char* value, float minValue, float maxValue, float
     return parsed;
 }
 
-int ParseClampedInt(const char* value, int minValue, int maxValue, int fallback, const char* key) {
+// base is strtol's: 10 for ordinary counts, 0 for values conventionally written in hex (a
+// virtual-key code), where it accepts a 0x prefix and plain decimal alike.
+int ParseClampedInt(const char* value, int minValue, int maxValue, int fallback, const char* key,
+                     int base = 10) {
     char* end = nullptr;
-    long parsed = strtol(value, &end, 10);
+    long parsed = strtol(value, &end, base);
     if (end == value) {
         printf("[opengl32_enh_cpp] config: '%s' value '%s' is not an integer, using default %d\n", key, value, fallback);
         return fallback;
@@ -417,7 +420,7 @@ AnaxConfig ParseConfigFile(const char* path) {
             printf("[opengl32_enh_cpp] config: 'hdrStrength' is now 'acesStrength', treating as such\n");
             config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "hdrStrength");
         } else if (strcmp(key, "lutPath") == 0) {
-            CopyLutPath(config, value);
+            CopyStringValue(config.lutPath, sizeof(config.lutPath), value, "lutPath");
         } else if (strcmp(key, "lutStrength") == 0) {
             config.lutStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.lutStrength, "lutStrength");
         } else if (strcmp(key, "vignetteIntensity") == 0) {
@@ -461,6 +464,12 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.ssaoIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.ssaoIntensity, "ssaoIntensity");
         } else if (strcmp(key, "ssaoBias") == 0) {
             config.ssaoBias = ParseClampedFloat(value, 0.0f, 16.0f, config.ssaoBias, "ssaoBias");
+        } else if (strcmp(key, "frameDumpKey") == 0) {
+            // A Windows virtual-key code, so the sensible way to write it in an ini is hex
+            // (0x7A = F11). strtol with base 0 accepts both that and plain decimal.
+            config.frameDumpKey = ParseClampedInt(value, 0, 0xFE, config.frameDumpKey, "frameDumpKey", 0);
+        } else if (strcmp(key, "frameDumpPath") == 0) {
+            CopyStringValue(config.frameDumpPath, sizeof(config.frameDumpPath), value, "frameDumpPath");
         } else if (strcmp(key, "fxIndicator") == 0) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
         } else if (strcmp(key, "anisotropy") == 0) {
@@ -496,6 +505,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
+           "frameDumpKey=0x%02X, frameDumpPath='%s', "
            "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
@@ -507,12 +517,17 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
            config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
+           config.frameDumpKey, config.frameDumpPath,
            config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));
     return config;
 }
 
-const AnaxConfig& GetAnaxConfig() {
-    static const AnaxConfig config = LoadConfig();
+AnaxConfig& GetMutableAnaxConfig() {
+    static AnaxConfig config = LoadConfig();
     return config;
+}
+
+const AnaxConfig& GetAnaxConfig() {
+    return GetMutableAnaxConfig();
 }

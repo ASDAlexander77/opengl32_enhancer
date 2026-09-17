@@ -344,6 +344,42 @@ the hardware maximum (usually 16): the visual cost of *not* using anisotropic
 filtering is far more noticeable than its performance cost on anything made
 in the last decade-plus.
 
+## Tuning settings: the config editor
+
+Getting `effect=` and its parameters right by editing the ini, relaunching the game, loading a
+save and walking to somewhere representative is a slow loop. `config_editor.exe` collapses it:
+it renders a scene, runs **the real `ApplySelectedEffect()` pipeline** over it — the same code
+the DLL runs in-game, not a preview that approximates it — and puts an ImGui panel beside the
+result. Stages can be toggled, reordered and retuned live, then saved back to the ini.
+
+It is a separate application rather than an in-game overlay on purpose. An overlay would mean
+subclassing the game's window procedure from inside its process and fighting it for mouse and
+keyboard input — a lot of risk, in someone else's address space, to move a slider. The editor
+owns its own window, message loop and GL context, so none of that applies.
+
+```sh
+cmake --build --preset x86-release --target config_editor
+build-x86-release/config_editor_dir/config_editor.exe [path/to/opengl32_enhancer.ini]
+```
+
+With no argument it edits the copy of the ini sitting next to it; pass a path (the game's own
+ini, say) to edit that instead. **Save writes values in place** — the surrounding comments,
+which are the actual reference for what every setting does, are preserved rather than
+regenerated away.
+
+### Tuning against a real game frame
+
+The editor's built-in scene is a synthetic room built at Quake II's scale, which is enough for
+most settings. But the ones that are hardest to get right are exactly the ones it cannot model
+honestly: `ssaoRadius` is denominated in the game's own world units, and `bloomThreshold`
+depends on the actual brightness distribution of the game's art.
+
+So the DLL can hand the editor a real frame. In-game, press `frameDumpKey` (F11 by default) to
+write the current frame — color, depth and the captured projection — next to the game's `.exe`.
+Load that file in the editor and every stage, `ssao` included, runs against genuine game content
+with genuine depth. The dump is taken before any stage runs, so it works with `effect=none` too
+and always yields unprocessed source.
+
 ## How it works
 
 1. Windows resolves `opengl32.dll` next to the game's `.exe` before the copy
@@ -444,6 +480,10 @@ reference implementations:
   [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling).
 - **SMAA** (`smaa`) — from the
   [reference SMAA implementation](https://github.com/iryoku/smaa).
+
+[Dear ImGui](https://github.com/ocornut/imgui) (v1.91.5, MIT) is vendored under
+`third_party/imgui` and used only by `config_editor.exe` — the shipped `opengl32.dll` does not
+link it.
 
 Each ported source file carries the original copyright and license notice in
 its header, along with notes on every deliberate deviation from the reference.

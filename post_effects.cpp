@@ -12,6 +12,7 @@
 // this pipeline runs between the capture and the final blit, one outer save/restore here
 // covers every stage - individual ApplyX functions don't need (and don't do) their own.
 #include <cstdio>
+#include <cstdlib>
 
 #include "post_effects.h"
 #include "config.h"
@@ -34,7 +35,18 @@
 #include "depth_vignette.h"
 #include "ssao.h"
 #include "projection_capture.h"
+#include "frame_dump.h"
 #include "gl_loader.h"
+
+// Same no-<windows.h> discipline as the rest of this DLL (see config.cpp's equivalent block and
+// wrapper.cpp's header comment): <windows.h> declares dllimport wgl*/gl* names that collide with
+// wrapper.cpp's dllexport definitions of the same names. GetAsyncKeyState reads the keyboard
+// without needing a message pump or a window hook, which is exactly why the frame dump is on a
+// polled hotkey rather than a WndProc subclass - nothing about this DLL's relationship with the
+// host process changes.
+extern "C" {
+    __declspec(dllimport) short __stdcall GetAsyncKeyState(int vKey);
+}
 
 namespace {
 
@@ -65,6 +77,10 @@ const unsigned int GL_COLOR_BUFFER_BIT         = 0x00004000;
 const unsigned int GL_NEAREST                  = 0x2600;
 const unsigned int GL_UNIFORM_BUFFER           = 0x8A11;
 const unsigned int GL_UNIFORM_BUFFER_BINDING   = 0x8A28;
+const unsigned int GL_RGBA                     = 0x1908;
+const unsigned int GL_UNSIGNED_BYTE            = 0x1401;
+const unsigned int GL_DEPTH_COMPONENT          = 0x1902;
+const unsigned int GL_FLOAT                    = 0x1406;
 const unsigned int GL_NO_ERROR                 = 0;
 
 struct PipelineTextures {
@@ -158,12 +174,75 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height, bool 
     }
 }
 
+// True on the frame the dump hotkey transitions from up to down. Polling edge-triggers here
+// rather than firing while held, since a held key would otherwise rewrite the dump every frame
+// for as long as it is down.
+bool ConsumeFrameDumpRequest(int frameDumpKey) {
+    static bool wasDown = false;
+    if (frameDumpKey == 0) {
+        wasDown = false;
+        return false;
+    }
+    bool isDown = (GetAsyncKeyState(frameDumpKey) & 0x8000) != 0;
+    bool pressed = isDown && !wasDown;
+    wasDown = isDown;
+    return pressed;
+}
+
+// Reads the game's finished frame straight off the default framebuffer - color and depth both -
+// and writes it out for the config editor. Deliberately reads the DEFAULT framebuffer rather
+// than the pipeline's captured textures: this must be the unprocessed frame the game drew, and
+// reading depth from framebuffer 0 also means a dump needs no depth texture and therefore works
+// regardless of whether any depth-consuming stage is listed.
+void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) {
+    int savedReadFbo = 0;
+    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl.glReadBuffer(GL_BACK);
+
+    size_t texelCount = (size_t)width * (size_t)height;
+    unsigned char* color = (unsigned char*)malloc(texelCount * 4);
+    float* depth = (float*)malloc(texelCount * sizeof(float));
+    if (color == nullptr || depth == nullptr) {
+        printf("[opengl32_enh_cpp] frame_dump: out of memory for a %dx%d dump\n", width, height);
+        free(color);
+        free(depth);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
+        return;
+    }
+
+    gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, color);
+    gl.glReadPixels(0, 0, width, height, GL_DEPTH_COMPONENT, GL_FLOAT, depth);
+    unsigned int err = gl.glGetError();
+
+    ProjectionParams projection;
+    bool hasProjection = GetCapturedProjection(projection);
+
+    if (err != GL_NO_ERROR) {
+        printf("[opengl32_enh_cpp] frame_dump: glGetError() = 0x%04X reading the frame back, "
+               "not writing a dump\n", err);
+    } else {
+        if (!hasProjection) {
+            printf("[opengl32_enh_cpp] frame_dump: no projection captured yet - dumping anyway, "
+                   "but ssao cannot be tuned against this frame (see projection_capture.h)\n");
+        }
+        WriteFrameDump(path, width, height, hasProjection, projection, color, depth);
+    }
+
+    free(color);
+    free(depth);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
+}
+
 }  // namespace
 
 void ApplySelectedEffect() {
     const AnaxConfig& config = GetAnaxConfig();
 
-    if (config.stageCount == 0) {
+    // Nothing to do at all, and - importantly - don't touch GetGlComputeApi() in that case: it
+    // re-attempts resolution and re-logs failures on every call until it succeeds, which would
+    // turn "effects are off on an old GPU" into per-frame log spam.
+    if (config.stageCount == 0 && config.frameDumpKey == 0) {
         return;
     }
 
@@ -180,6 +259,16 @@ void ApplySelectedEffect() {
     int width = viewport[2];
     int height = viewport[3];
     if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    // Before the pipeline runs, so the dump is the game's own unprocessed frame - which is what
+    // the editor needs in order to apply stages to it itself.
+    if (ConsumeFrameDumpRequest(config.frameDumpKey)) {
+        DumpFrame(gl, width, height, config.frameDumpPath);
+    }
+
+    if (config.stageCount == 0) {
         return;
     }
 
