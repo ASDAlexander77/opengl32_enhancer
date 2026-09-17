@@ -79,7 +79,14 @@ const char* kCasShaderSource =
     "    float w = amp.g * params.x;\n"
     "    float rcpWeight = 1.0 / (1.0 + 4.0 * w);\n"
     "    vec3 pix = clamp((b * w + d * w + f * w + h * w + e) * rcpWeight, vec3(0.0), vec3(1.0));\n"
-    "    imageStore(outImage, sp, vec4(pix, 1.0));\n"
+    // Alpha is passed through, not filtered. CAS is an RGB sharpener, and the reference runs on
+    // an opaque back buffer where alpha is meaningless - but textureEffect=cas runs this over the
+    // game's own textures, where alpha is the cutout/blend mask. Writing a constant 1.0 there
+    // makes every masked sprite, glyph and decal opaque, which reads on screen as the texture
+    // having gained a solid-color background. Sharpening alpha instead would be just as wrong: it
+    // would harden cutout edges the game blends deliberately.
+    "    float srcA = texelFetch(srcTex, sp, 0).a;\n"
+    "    imageStore(outImage, sp, vec4(pix, srcA));\n"
     "}\n";
 
 // Matches the std140 CasConfigBlock above.

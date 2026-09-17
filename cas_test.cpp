@@ -203,6 +203,51 @@ int main() {
         gl.glDeleteTextures(1, &dstTex);
     }
 
+    // --- 3. Alpha is passed through untouched. ---
+    // CAS sharpens RGB only, but it must not invent an alpha channel: textureEffect=cas runs on
+    // the game's own textures, where alpha is the cutout/blend mask. Writing a constant 1.0 here
+    // turns every alpha-masked sprite, font glyph and decal into an opaque rectangle - it reads
+    // on screen as the texture having gained a solid-color background.
+    {
+        unsigned int srcTex = MakeTexture(gl, width, height);
+        unsigned int dstTex = MakeTexture(gl, width, height);
+
+        // A cutout mask: transparent left half, opaque right half, plus a mid value so a
+        // saturating or rounding bug is visible too. The RGB is a real edge, so CAS has actual
+        // work to do and cannot pass alpha through merely by copying the texel.
+        unsigned char* masked = new unsigned char[texelCount * 4];
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                size_t i = ((size_t)y * width + x) * 4;
+                unsigned char v = (x < width / 2) ? 64 : 192;
+                masked[i + 0] = v; masked[i + 1] = v; masked[i + 2] = v;
+                masked[i + 3] = (x < width / 4) ? 0 : ((x < width / 2) ? 128 : 255);
+            }
+        }
+        UploadRgba(gl, srcTex, width, height, masked);
+        delete[] masked;
+
+        bool wrote = ApplyCas(srcTex, dstTex, width, height, 0.75f);
+        Check(wrote, "alpha image: ApplyCas() reported it wrote dstTexture");
+
+        unsigned char* out = new unsigned char[texelCount * 4];
+        ReadBack(gl, dstTex, width, height, out);
+        Check(gl.glGetError() == GL_NO_ERROR, "alpha image: no GL error after CAS and readback");
+
+        int row = height / 2;
+        size_t clear = ((size_t)row * width + 4) * 4;
+        size_t half  = ((size_t)row * width + (width / 4 + 4)) * 4;
+        size_t solid = ((size_t)row * width + (width - 5)) * 4;
+        printf("  alpha: transparent=%d (expected 0), half=%d (expected ~128), opaque=%d "
+               "(expected 255)\n", out[clear + 3], out[half + 3], out[solid + 3]);
+        Check(out[clear + 3] == 0 && abs((int)out[half + 3] - 128) <= 2 && out[solid + 3] == 255,
+              "alpha image: CAS preserved the source alpha channel");
+        delete[] out;
+
+        gl.glDeleteTextures(1, &srcTex);
+        gl.glDeleteTextures(1, &dstTex);
+    }
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);

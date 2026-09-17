@@ -43,6 +43,14 @@ int main() {
     // opengl32_enh32_x64 in the "default"/x64 preset's build/ dir, a sibling of this
     // build-x86/ dir). A 32-bit process must not be able to load it - proves the
     // bitness-mismatch failure this whole x86 build exists to avoid.
+    //
+    // That x64 build is currently disabled outright (CMakeLists.txt stops with
+    // "64bit: Unsupported for now"), so build/ usually does not exist at all and this control
+    // has nothing to load. Treat that as SKIPPED rather than failed: a missing fixture is not
+    // evidence the proxy is broken, and failing on it would make this test permanently red for
+    // everyone, training people to ignore it. Re-enable the x64 build and it starts asserting
+    // again by itself. ERROR_MOD_NOT_FOUND (126) / ERROR_PATH_NOT_FOUND (3) mean "not built";
+    // any other non-193 error is a genuine surprise and still fails.
     printf("\nLoading a 64-bit DLL from this 32-bit process (expected to fail)...\n");
     void* mod64 = LoadLibraryA("..\\build\\opengl32_enh32_x64.dll");
     if (mod64) {
@@ -50,11 +58,17 @@ int main() {
         return 1;
     }
     unsigned long err64 = GetLastError();
-    printf("LoadLibraryA of the 64-bit DLL failed as expected, GetLastError=%lu", err64);
     if (err64 == 193) {
-        printf(" (ERROR_BAD_EXE_FORMAT - confirms the bitness mismatch)\n");
+        printf("LoadLibraryA of the 64-bit DLL failed as expected, GetLastError=193"
+               " (ERROR_BAD_EXE_FORMAT - confirms the bitness mismatch)\n");
+    } else if (err64 == 126 || err64 == 3) {
+        printf("SKIPPED: no x64 build to test against (GetLastError=%lu). The x64 target is\n"
+               "disabled in CMakeLists.txt, so ..\\build\\opengl32_enh32_x64.dll was never\n"
+               "produced. Re-enable it to restore this negative control.\n", err64);
     } else {
-        printf(" (expected 193/ERROR_BAD_EXE_FORMAT - got a different error, check the path/build)\n");
+        printf("LoadLibraryA of the 64-bit DLL failed with GetLastError=%lu, which is neither\n"
+               "193 (ERROR_BAD_EXE_FORMAT, the expected bitness mismatch) nor a missing-file\n"
+               "error - check the path/build.\n", err64);
         return 1;
     }
 

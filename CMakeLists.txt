@@ -160,3 +160,32 @@ add_custom_command(TARGET post_effects_test POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/cyberpunk.cube
         $<TARGET_FILE_DIR:post_effects_test>
 )
+
+# Register every test target above with CTest, so `ctest` in the build directory is the one
+# authoritative way to run them. Without this, ctest reports "No tests were found!!!" and the
+# only way to run the suite is to glob *_test.exe in the build directory - which also picks up
+# stale executables left behind by targets that have since been removed, making deleted tests
+# look like failing ones. Tests that need a GL context create their own window, so they run
+# unattended, but they do need a real GPU/driver present.
+enable_testing()
+foreach(test_target
+    ${WRAPPER_NAME_CXX}_test
+    config_test
+    gl_loader_test
+    gl_context_change_test
+    cas_test
+    fsr_test
+    bilinear_upscale_test
+    nis_effect_test
+    hdr_look_test
+    taa_test
+    lut_grading_test
+    bloom_test
+    dither_test
+    vignette_test
+    chromatic_aberration_test
+    smaa_test
+    post_effects_test)
+    add_test(NAME ${test_target} COMMAND ${test_target}
+             WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
+endforeach()
