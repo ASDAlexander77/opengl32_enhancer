@@ -335,6 +335,19 @@ int main() {
         Check(config.textureEffect == EffectKind::Invert, "textureEffect=Invert parses case-insensitively to Invert");
     }
     {
+        WriteFixture("config_test_texture_cas.ini", "textureEffect=cas\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_cas.ini");
+        Check(config.textureEffect == EffectKind::Cas, "textureEffect=cas parses to Cas");
+    }
+    {
+        // fsr is a real stage name, but not one this hook accepts - it would reallocate its
+        // scratch texture per upload size. See texture_effect.h.
+        WriteFixture("config_test_texture_fsr.ini", "textureEffect=fsr\n");
+        AnaxConfig config = ParseConfigFile("config_test_texture_fsr.ini");
+        Check(config.textureEffect == EffectKind::None,
+              "textureEffect=fsr is rejected, falls back to none");
+    }
+    {
         WriteFixture("config_test_texture_bad.ini", "textureEffect=bloom\n");
         AnaxConfig config = ParseConfigFile("config_test_texture_bad.ini");
         Check(config.textureEffect == EffectKind::None,

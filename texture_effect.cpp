@@ -1,5 +1,5 @@
-// See texture_effect.h. Reuses the existing NVSharpen/Invert compute-shader effects (see
-// nis_effect.h, pixel_invert.h) at texture-upload time: upload the game's own pixels into a
+// See texture_effect.h. Reuses the existing NVSharpen/CAS/Invert compute-shader effects (see
+// nis_effect.h, cas.h, pixel_invert.h) at texture-upload time: upload the game's own pixels into a
 // scratch RGBA8 texture, run the selected effect into an RGBA16F texture of the SAME
 // dimensions, read the result back to RGBA8, and hand THAT to the real glTexImage2D instead of
 // what the game gave us - width/height never change, unlike the abandoned upscale spike.
@@ -10,6 +10,7 @@
 #include "gl_loader.h"
 #include "nis_effect.h"
 #include "pixel_invert.h"
+#include "cas.h"
 
 namespace {
 
@@ -183,6 +184,9 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
             break;
         case EffectKind::Sharpen:
             applied = ApplyNVSharpen(srcTex, dstTex, width, height, config.sharpness);
+            break;
+        case EffectKind::Cas:
+            applied = ApplyCas(srcTex, dstTex, width, height, config.sharpness);
             break;
         default:
             break;

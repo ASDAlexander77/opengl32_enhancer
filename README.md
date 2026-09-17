@@ -84,9 +84,17 @@ S3TC/BC decode), and dimensions are never changed - only pixel content is.
 
 - `sharpen` reuses the same NVIDIA Image Scaling adaptive-sharpen pass as
   the `sharpen` stage, at the `sharpness` value. Enabled by default.
+- `cas` reuses the `cas` stage's Contrast Adaptive Sharpening, also at the
+  `sharpness` value. Lighter than `sharpen`, which matters here because this
+  runs on every eligible texture at load time.
 - `invert` reuses the same debug/demo invert pass as the `invert` stage -
   handy for spotting which draws touch which textures.
 - `none` disables texture-level processing.
+
+`fsr` is deliberately not accepted here: it keeps a scratch texture sized to
+its input and uploads arrive at many different sizes, so it would reallocate
+on nearly every texture, and its EASU pass is a near no-op at identical
+dimensions. Use `cas` instead.
 
 (Older config files may still say `textureSharpen=1`/`0` - it's read as an
 alias for `textureEffect=sharpen`/`none`.)

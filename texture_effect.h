@@ -8,16 +8,22 @@
 // real games (white/mipmap-incomplete, or half-visible from stale UV math). Keeping the size
 // fixed avoids both problems entirely - see
 // docs/superpowers/specs/2026-09-15-nis-post-effects-design.md for the wider effect pipeline
-// this reuses (ApplyNVSharpen/ApplyInvert). Gated behind opengl32_enhancer.ini's
-// `textureEffect=sharpen` or `textureEffect=invert` (default `none`, off) - `invert` exists
-// as a debug/demo aid for spotting which draws touch which textures, same as the `invert`
+// this reuses (ApplyNVSharpen/ApplyCas/ApplyInvert). Gated behind opengl32_enhancer.ini's
+// `textureEffect=sharpen`, `=cas` or `=invert` (default `none`, off). `invert` exists as a
+// debug/demo aid for spotting which draws touch which textures, same as the `invert`
 // post-process stage.
+//
+// Deliberately NOT offered here: `fsr`. It caches a scratch texture keyed on width/height, and
+// uploads arrive at many different sizes, so it would destroy and recreate that texture on
+// nearly every call; its EASU pass is a near no-op at identical dimensions anyway, and baking
+// its film grain permanently into an asset would be wrong. `cas` covers the same intent in one
+// pass with no scratch texture.
 
 typedef void (__stdcall *RealTexImage2DFn)(unsigned int target, int level, int internalformat,
     int width, int height, int border, unsigned int format, unsigned int type, void* pixels);
 
 // Called from wrapper.cpp's generated glTexImage2D in place of forwarding straight through.
-// If the config's textureEffect is Sharpen or Invert and this upload looks like a plausible
+// If the config's textureEffect is Sharpen, Cas or Invert and this upload looks like a plausible
 // small color texture (GL_TEXTURE_2D, GL_RGBA/GL_UNSIGNED_BYTE, an RGB/RGBA internalformat -
 // including the legacy component-count spellings 3 and 4 - real pixel data, at or under the
 // size cap), runs it through that same GPU pass used for the back buffer and calls realFn with

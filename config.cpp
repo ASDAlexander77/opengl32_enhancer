@@ -420,9 +420,10 @@ AnaxConfig ParseConfigFile(const char* path) {
         } else if (strcmp(key, "textureEffect") == 0) {
             EffectKind kind;
             if (!ParseStageName(value, kind) ||
-                (kind != EffectKind::None && kind != EffectKind::Sharpen && kind != EffectKind::Invert)) {
+                (kind != EffectKind::None && kind != EffectKind::Sharpen &&
+                 kind != EffectKind::Cas && kind != EffectKind::Invert)) {
                 printf("[opengl32_enh_cpp] config: 'textureEffect' value '%s' is not one of "
-                       "none/sharpen/invert, keeping default\n", value);
+                       "none/sharpen/cas/invert, keeping default\n", value);
             } else {
                 config.textureEffect = kind;
             }
@@ -437,7 +438,8 @@ AnaxConfig ParseConfigFile(const char* path) {
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%s; scale=%.3f, acesStrength=%.3f, "
            "bloomThreshold=%.3f, bloomIntensity=%.3f, sharpness=%.3f, lutPath='%s', lutStrength=%.3f, "
            "vignetteIntensity=%.3f, vignetteRadius=%.3f, chromaticAberrationStrength=%.3f, "
-           "taaBlend=%.3f, ditherStrength=%.3f, textureEffect=%s)\n",
+           "taaBlend=%.3f, ditherStrength=%.3f, fsrDenoise=%s, fsrFilmGrain=%.3f, "
+           "textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
