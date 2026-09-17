@@ -30,6 +30,7 @@
 #include "cas.h"
 #include "nr.h"
 #include "local_contrast.h"
+#include "fx_indicator.h"
 #include "gl_loader.h"
 
 namespace {
@@ -250,6 +251,14 @@ void ApplySelectedEffect() {
         if (wrote) {
             cur = 1 - cur;
         }
+    }
+
+    // Draws directly on top of the final texture, unconditionally - not a stage, doesn't
+    // participate in the src/dst chain above. Reaching this point already means
+    // config.stageCount > 0 and the frame was captured/processed, which is exactly what the
+    // badge is meant to confirm happened.
+    if (config.fxIndicator) {
+        DrawFxIndicator(g_pipeline.tex[cur], width, height);
     }
 
     // Present: blit whichever texture ended up final back onto the real back buffer.

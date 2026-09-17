@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -153,6 +153,14 @@ target_link_libraries(nr_test opengl32 gdi32 user32)
 add_executable(local_contrast_test local_contrast_test.cpp local_contrast.cpp gl_loader.cpp)
 target_link_libraries(local_contrast_test opengl32 gdi32 user32)
 
+# Creates a real GL context, fills a texture with a known flat color, and checks
+# DrawFxIndicator() draws its badge only within its own corner footprint (a point far from it
+# stays exactly the fill color; a known "on" bit of the "F" glyph comes back white; the plate
+# darkens a non-glyph point inside its footprint) and leaves a too-small texture untouched -
+# see fx_indicator_test.cpp.
+add_executable(fx_indicator_test fx_indicator_test.cpp fx_indicator.cpp gl_loader.cpp)
+target_link_libraries(fx_indicator_test opengl32 gdi32 user32)
+
 # Integration test for the CURRENT opengl32_enhancer.ini: builds a synthetic test image, blits it
 # onto a real back buffer, calls the actual ApplySelectedEffect() entry point (the same one
 # wrapper.cpp calls from wglSwapBuffers), and checks it runs with no GL error and visibly
@@ -163,7 +171,7 @@ target_link_libraries(local_contrast_test opengl32 gdi32 user32)
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp)
+    local_contrast.cpp fx_indicator.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -219,6 +227,7 @@ foreach(test_target
     smaa_test
     nr_test
     local_contrast_test
+    fx_indicator_test
     post_effects_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)

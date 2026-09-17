@@ -22,6 +22,7 @@ ENB, built specifically for 32-bit OpenGL titles.
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
 - [Effects](#effects)
+  - [The "FX" badge](#the-fx-badge)
   - [Ordering](#ordering)
   - [Choosing an anti-aliasing stage: TAA vs SMAA](#choosing-an-anti-aliasing-stage-taa-vs-smaa)
   - [Choosing a sharpener: sharpen vs FSR vs CAS](#choosing-a-sharpener-sharpen-vs-fsr-vs-cas)
@@ -94,6 +95,16 @@ value it controls.
 
 A `cyberpunk.cube` LUT — teal-tinted shadows, magenta/pink highlights, boosted
 contrast and saturation — ships as the default `lutgrading` look.
+
+### The "FX" badge
+
+Whenever `effect=` lists at least one stage, a small "FX" badge is drawn in
+the frame's top-right corner — a quick way to tell "the pipeline ran but the
+result looks the same" apart from "the pipeline never ran at all" (wrong ini
+path next to the game's `.exe`, the DLL wasn't picked up, or the GPU/driver
+can't do GL 4.3 compute), without needing to check the console log. It's on by
+default; once you've confirmed things are working, turn it off with
+`fxIndicator=0`.
 
 ### Ordering
 

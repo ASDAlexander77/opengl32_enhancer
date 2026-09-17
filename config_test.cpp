@@ -325,6 +325,7 @@ int main() {
         Check(config.localStructureStrength == 0.3f, "missing file falls back to default localStructureStrength=0.3");
         Check(config.localToneStrength == 0.3f, "missing file falls back to default localToneStrength=0.3");
         Check(config.shimmerSuppression == 0.0f, "missing file falls back to default shimmerSuppression=0");
+        Check(config.fxIndicator == true, "missing file falls back to default fxIndicator=true");
     }
     {
         WriteFixture("config_test_nr_localcontrast.ini",
@@ -336,7 +337,8 @@ int main() {
             "nrGrainPreservation=0.4\n"
             "localStructureStrength=1.2\n"
             "localToneStrength=0.9\n"
-            "shimmerSuppression=0.7\n");
+            "shimmerSuppression=0.7\n"
+            "fxIndicator=0\n");
         AnaxConfig config = ParseConfigFile("config_test_nr_localcontrast.ini");
         const EffectKind expected[] = {EffectKind::Nr, EffectKind::LocalContrast};
         CheckStages(config, expected, 2, "effect=nr, localcontrast parses both new stages in order");
@@ -348,6 +350,7 @@ int main() {
         Check(config.localStructureStrength == 1.2f, "parses localStructureStrength=1.2");
         Check(config.localToneStrength == 0.9f, "parses localToneStrength=0.9");
         Check(config.shimmerSuppression == 0.7f, "parses shimmerSuppression=0.7");
+        Check(config.fxIndicator == false, "parses fxIndicator=0");
     }
     {
         WriteFixture("config_test_nr_clamp.ini", "nrPasses=99\nnrIntensity=-5.0\nlocalToneStrength=9.0\n");

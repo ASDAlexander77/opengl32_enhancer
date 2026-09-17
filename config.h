@@ -63,6 +63,13 @@ struct AnaxConfig {
     float localToneStrength = 0.3f;            // LocalContrast
     float shimmerSuppression = 0.0f;           // Taa
 
+    // Draws a small "FX" badge in a corner of the frame whenever the effect= pipeline actually
+    // runs, so you can tell "the pipeline ran but nothing looked different" apart from "the
+    // proxy isn't loaded/configured at all" without checking the log - see fx_indicator.h.
+    // Independent of the effect= pipeline's own stages; on by default precisely because its
+    // job is to catch the case where you forgot to check whether it's working.
+    bool fxIndicator = true;
+
     // Runs small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
     // resize) at load time through a single stage (see texture_effect.h). `sharpen`/`cas` use
     // the `sharpness` value above; `invert` is a debug/demo aid for spotting which draws touch
