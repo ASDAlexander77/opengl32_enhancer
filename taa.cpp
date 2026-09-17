@@ -77,12 +77,28 @@ const char* kTaaShaderSource =
     "    }\n"
     "    vec4 historyColor = texture(historyTex, uv);\n"
     "    vec3 clampedHistory = clamp(historyColor.rgb, neighborMin, neighborMax);\n"
+    // History rejection: the neighborhood clamp above only bounds history to the CURRENT
+    // frame's own local color range at this pixel - it has no idea whether that range still
+    // describes the same on-screen content, or a completely different thing that happens to
+    // land in a similar numeric range (busy/detailed regions have wide clamp boxes, so this
+    // happens easily). That let stale history survive the clamp mostly unrejected on a fast
+    // scene change, then take ~10 frames to exponentially decay away at a high `blend` -
+    // visible as persisting ghosts of the previous frame. This is a SEPARATE, more direct
+    // signal: how far the RAW (pre-clamp) history is from the current frame at this exact
+    // pixel. A small raw difference is ordinary temporal noise the clamp is meant to smooth;
+    // a large one means this pixel's content itself just changed, so history should be
+    // rejected regardless of what the clamp box would have allowed.
+    "    float rawDiff = length(currentColor.rgb - historyColor.rgb);\n"
+    "    float rejection = smoothstep(0.1, 0.4, rawDiff);\n"
+    "    float baseBlend = blend * (1.0 - rejection);\n"
     // Shimmer suppression: only kicks in where the current frame and the (already-clamped)
     // history nearly agree - i.e. nothing is actually moving here - so it can't add ghosting
-    // to real motion or edges, only quiet flicker in already-static content.
+    // to real motion or edges, only quiet flicker in already-static content. Layered on top of
+    // rejection (not instead of it): a big rawDiff already drove baseBlend near 0, so this has
+    // nothing left to amplify on a genuine scene change.
     "    float diff = length(currentColor.rgb - clampedHistory);\n"
     "    float stillness = 1.0 - smoothstep(0.0, 0.05, diff);\n"
-    "    float effectiveBlend = mix(blend, max(blend, 0.95), stillness * shimmerSuppression);\n"
+    "    float effectiveBlend = mix(baseBlend, max(baseBlend, 0.95), stillness * shimmerSuppression);\n"
     "    vec3 result = mix(currentColor.rgb, clampedHistory, effectiveBlend);\n"
     "    vec4 out4 = vec4(result, currentColor.a);\n"
     "    imageStore(outputImage, outCoord, out4);\n"

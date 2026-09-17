@@ -49,6 +49,33 @@ unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height
     return tex;
 }
 
+void UploadRgba(const GlComputeApi& gl, unsigned int tex, int width, int height,
+                 const unsigned char* pixels) {
+    gl.glBindTexture(GL_TEXTURE_2D, tex);
+    gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, 0x1908 /* GL_RGBA */,
+                        0x1401 /* GL_UNSIGNED_BYTE */, pixels);
+}
+
+// A busy (spatially high-contrast) checkerboard, so the neighborhood clamp's box is wide open
+// at every cell boundary - the scenario where a scene-cut ghost can most easily hide, since a
+// wide box accepts almost any stale value. `phaseShift` moves the cell boundaries sideways,
+// so the same on-screen pixel can be assigned to a "light" cell in one call and a "dark" cell
+// in another while both frames remain equally busy - simulating a scene cut, not just a
+// brightness change, without needing real motion vectors to describe it.
+void BuildChecker(unsigned char* pixels, int width, int height, int cellSize, int phaseShift,
+                   unsigned char dark, unsigned char light) {
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            size_t i = ((size_t)y * width + x) * 4;
+            int cx = (x - phaseShift) / cellSize;
+            if (x - phaseShift < 0) { cx -= 1; }  // floor division for negative x
+            int cy = y / cellSize;
+            unsigned char v = ((cx + cy) % 2 == 0) ? light : dark;
+            pixels[i + 0] = v; pixels[i + 1] = v; pixels[i + 2] = v; pixels[i + 3] = 255;
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -163,6 +190,80 @@ int main() {
             }
             ok = callOk && ok;
         }
+    }
+
+    // Fast scene change on BUSY content: this is the ghosting case a flat clear color can't
+    // reproduce, because a flat frame makes the neighborhood clamp degenerate to a single
+    // value (see this file's header comment) - trivially rejecting any stale history and
+    // hiding a real bug. A checkerboard keeps the clamp box wide open at every cell boundary,
+    // which is exactly the situation where stale history can numerically fit inside the new
+    // frame's local range even though the on-screen content is completely different.
+    {
+        const int width2 = 64;
+        const int height2 = 64;
+        const int cellSize = 4;
+        const unsigned char kDark = 40;
+        const unsigned char kLight = 220;
+        // Probe pixel (4,4) sits at a cell boundary - some of its 3x3 neighbors are dark, some
+        // light, in EVERY scheme below, so the clamp box is wide there in every call.
+        const int probeX = 4;
+        const int probeY = 4;
+
+        unsigned int srcTex2 = CreatePipelineTexture(gl, width2, height2);
+        unsigned int dstTex2 = CreatePipelineTexture(gl, width2, height2);
+
+        size_t texelCount = (size_t)width2 * height2;
+        unsigned char* schemeA = new unsigned char[texelCount * 4];
+        // phaseShift=0: probe (4,4) -> cx=1,cy=1 -> (1+1)%2==0 -> light (220).
+        BuildChecker(schemeA, width2, height2, cellSize, 0, kDark, kLight);
+
+        // Seed converged history on scheme A - two calls: the first takes the historyValid=0
+        // passthrough path (this is a fresh width/height, so EnsureTextures reset it even
+        // though earlier blocks in this file already ran TAA at a different size), the second
+        // confirms the clamp settles since the content isn't changing.
+        UploadRgba(gl, srcTex2, width2, height2, schemeA);
+        ApplyTaa(srcTex2, dstTex2, width2, height2, 0.85f, 0.0f);
+        ApplyTaa(srcTex2, dstTex2, width2, height2, 0.85f, 0.0f);
+
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, readFbo);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex2, 0);
+        unsigned char seedPixel[4] = {0, 0, 0, 0};
+        gl.glReadPixels(probeX, probeY, 1, 1, 0x1908, 0x1401, seedPixel);
+        printf("Probe pixel after seeding on scheme A: r=%d (expected ~%d)\n", seedPixel[0], kLight);
+        bool seedOk = CheckClose(seedPixel[0], kLight, 4, "r", 6);
+        ok = seedOk && ok;
+
+        // The cut: phaseShift=cellSize flips the probe pixel's cell role to dark, while
+        // keeping the frame just as busy everywhere. ONE call, simulating the very next frame
+        // after a fast scene change.
+        unsigned char* schemeB = new unsigned char[texelCount * 4];
+        BuildChecker(schemeB, width2, height2, cellSize, cellSize, kDark, kLight);
+        UploadRgba(gl, srcTex2, width2, height2, schemeB);
+        bool wroteCut = ApplyTaa(srcTex2, dstTex2, width2, height2, 0.85f, 0.0f);
+        unsigned int errCut = gl.glGetError();
+        if (!wroteCut || errCut != 0) {
+            printf("FAIL: scene-cut call left glGetError() = 0x%04X (wrote=%d)\n", errCut, wroteCut ? 1 : 0);
+            ok = false;
+        } else {
+            gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex2, 0);
+            unsigned char cutPixel[4] = {0, 0, 0, 0};
+            gl.glReadPixels(probeX, probeY, 1, 1, 0x1908, 0x1401, cutPixel);
+            printf("Probe pixel one frame after the cut: r=%d (new content=%d, stale ghost would be near %d)\n",
+                   cutPixel[0], kDark, kLight);
+            // A tolerance of 40 still comfortably separates "converged to new content" (~40)
+            // from "ghosting" (the unrejected-history math above predicts ~193 for this exact
+            // fixture at blend=0.85) - this is not a hair's-width tolerance tightening.
+            bool cutOk = CheckClose(cutPixel[0], kDark, 40, "r", 7);
+            if (cutOk) {
+                printf("PASS: scene cut on busy content converged in one frame, no lingering ghost\n");
+            }
+            ok = cutOk && ok;
+        }
+
+        delete[] schemeA;
+        delete[] schemeB;
+        gl.glDeleteTextures(1, &srcTex2);
+        gl.glDeleteTextures(1, &dstTex2);
     }
 
     wglMakeCurrent(nullptr, nullptr);

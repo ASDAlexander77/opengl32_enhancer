@@ -141,7 +141,12 @@ anti-aliasing.
 
 `taa` has no access to the game's motion vectors — a `wglSwapBuffers` proxy
 has no way to obtain them — which is precisely why it can struggle exactly
-when anti-aliasing matters most.
+when anti-aliasing matters most. It does automatically cut a pixel's history
+weight the larger that pixel's raw frame-to-frame difference is, so a fast
+scene change (a cut, a snap-turn) converges in about one frame rather than
+visibly trailing for several — but ordinary fast *motion* within a still-
+continuous scene has no such sharp signal to key off, and remains where `taa`
+is weakest.
 
 ### Choosing a sharpener: sharpen vs FSR vs CAS
 

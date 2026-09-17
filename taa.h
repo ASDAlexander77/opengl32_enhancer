@@ -16,6 +16,17 @@
 // GetAnaxConfig().taaBlend, 0..1: how much of the (clamped) history to keep versus the current
 // frame (0 = no temporal blending, 1 = heaviest - most stable but most ghosting risk).
 //
+// The neighborhood clamp alone can't fully stop ghosting: it only bounds history to the
+// CURRENT frame's own local color range at each pixel, and a busy/detailed region has a wide
+// range, so stale history from a completely different scene can numerically fit inside it and
+// survive almost unclamped - then take many frames to fade at a high `blend`, visible as a
+// persisting ghost after a fast scene change. So `blend` is only a ceiling: internally, each
+// pixel's EFFECTIVE blend weight is reduced automatically the larger its RAW (pre-clamp)
+// difference from history is - a direct, motion-vector-free "did this pixel's content just
+// change" signal, independent of what the clamp box happens to allow. A pixel that's actually
+// still showing the same thing keeps the full configured `blend`; a pixel that just changed
+// converges toward the current frame in about one call, not several.
+//
 // shimmerSuppression is GetAnaxConfig().shimmerSuppression, 0..1 (0=off): a fixed `blend` still
 // lets a pixel that's essentially unchanged frame to frame (dithered/noisy specular highlights,
 // foliage, fine detail near the antialiasing/shading noise floor) flicker at whatever floor
