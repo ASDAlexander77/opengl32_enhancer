@@ -116,6 +116,7 @@ const StageName kStageNames[] = {
     {EffectKind::Nr,                  "nr"},
     {EffectKind::LocalContrast,       "localcontrast"},
     {EffectKind::DepthVignette,       "depthvignette"},
+    {EffectKind::Ssao,                "ssao"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
 
@@ -451,6 +452,15 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.depthVignetteIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.depthVignetteIntensity, "depthVignetteIntensity");
         } else if (strcmp(key, "depthVignetteThreshold") == 0) {
             config.depthVignetteThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.depthVignetteThreshold, "depthVignetteThreshold");
+        } else if (strcmp(key, "ssaoRadius") == 0) {
+            // World units, so the upper bound is deliberately far above the 0..1 most values
+            // here use - see config.h. 512 is well past useful for a Quake II-scale map and
+            // exists only to catch a typo'd order of magnitude.
+            config.ssaoRadius = ParseClampedFloat(value, 0.1f, 512.0f, config.ssaoRadius, "ssaoRadius");
+        } else if (strcmp(key, "ssaoIntensity") == 0) {
+            config.ssaoIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.ssaoIntensity, "ssaoIntensity");
+        } else if (strcmp(key, "ssaoBias") == 0) {
+            config.ssaoBias = ParseClampedFloat(value, 0.0f, 16.0f, config.ssaoBias, "ssaoBias");
         } else if (strcmp(key, "fxIndicator") == 0) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
         } else if (strcmp(key, "anisotropy") == 0) {
@@ -485,6 +495,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "nrIntensity=%.3f, nrPasses=%d, nrColorStrength=%.3f, nrTonePreservation=%.3f, "
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
+           "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
            "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
@@ -495,6 +506,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.nrIntensity, config.nrPasses, config.nrColorStrength, config.nrTonePreservation,
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
+           config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
            config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));
     return config;

@@ -178,6 +178,7 @@ def emit_cpp(funcs):
     lines.append('#include "post_effects.h"')
     lines.append('#include "texture_effect.h"')
     lines.append('#include "texture_filter.h"')
+    lines.append('#include "projection_capture.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -234,6 +235,12 @@ def emit_cpp(funcs):
         lines.append("    }")
         if name == "wglSwapBuffers":
             lines.append("    ApplySelectedEffect();")
+        if name == "glFrustum":
+            # See projection_capture.h: records the world projection so depth-consuming stages
+            # can unproject raw depth. Recording only - this deliberately falls through to the
+            # normal passthrough below rather than calling cache_var itself, since the game's
+            # own glFrustum call must still happen exactly as it asked for it.
+            lines.append(f"    CaptureProjectionFrustum({params_call});")
         if name == "glTexImage2D":
             # See texture_effect.h: decides whether to run this upload through the configured
             # texture effect and calls cache_var itself (with either the original pixels or

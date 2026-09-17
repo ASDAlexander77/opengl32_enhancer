@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -134,6 +134,13 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 add_executable(depth_vignette_test depth_vignette_test.cpp depth_vignette.cpp gl_loader.cpp)
 target_link_libraries(depth_vignette_test opengl32 gdi32 user32)
 
+# Creates a real GL context, renders a 3D scene under a real glFrustum projection (a wall with a
+# box in front of it), and checks ApplySsao()'s two-pass GPU pipeline reproduces the input exactly
+# at intensity=0, produces occlusion beside the box but not on open wall at full intensity, and
+# no-ops when no projection has been captured - see ssao_test.cpp.
+add_executable(ssao_test ssao_test.cpp ssao.cpp projection_capture.cpp gl_loader.cpp)
+target_link_libraries(ssao_test opengl32 gdi32 user32)
+
 # Creates a real GL context, clears to a known color, and checks ApplyChromaticAberration()'s
 # GPU pipeline at strength=0 (exact passthrough) and strength=1 (flat frame must survive the
 # radial channel offsets unchanged - catches channel swaps and out-of-bounds sampling) - see
@@ -204,8 +211,8 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp)
+    vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp chromatic_aberration.cpp taa.cpp
+    dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -262,6 +269,7 @@ foreach(test_target
     dither_test
     vignette_test
     depth_vignette_test
+    ssao_test
     chromatic_aberration_test
     smaa_test
     nr_test

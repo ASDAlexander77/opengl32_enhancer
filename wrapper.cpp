@@ -14,6 +14,7 @@
 #include "post_effects.h"
 #include "texture_effect.h"
 #include "texture_filter.h"
+#include "projection_capture.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -1628,6 +1629,7 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
             printf("[opengl32_enh_cpp]   glFrustum: resolved OK\n");
         }
     }
+    CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
     __proc_glFrustum(left, right, bottom, top, zNear, zFar);
 }
 

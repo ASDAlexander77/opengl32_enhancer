@@ -87,6 +87,8 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
 | `nr` | Edge-aware (bilateral) noise reduction |
 | `localcontrast` | Local tone/structure boost ("clarity"/"texture") |
+| `ssao` | Screen-space ambient occlusion — contact shadows in creases and corners |
+| `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `dither` | Ordered dither, masks 8-bit banding |
 | `invert` | Debug/demo — inverts the image |
 
@@ -177,6 +179,37 @@ blur would just as happily smear across genuine detail.
 | `nrColorStrength` | How much of the filtered *color* to keep. Most real denoisers hit color harder than brightness by default, since color noise reads as far uglier at the same magnitude |
 | `nrTonePreservation` | Protects *brightness/detail* specifically — 1.0 leaves luma untouched regardless of the other settings, denoising color only |
 | `nrGrainPreservation` | Re-adds back some of the real detail the filter removed, so NR can smooth without flattening a deliberately grainy look |
+
+### Ambient occlusion: `ssao`
+
+Darkens creases, corners and the places where objects meet, by estimating how much of each
+pixel's surrounding hemisphere is blocked by nearby geometry. id Tech 2-era renderers bake all
+their lighting into lightmaps and have no ambient occlusion term whatsoever, so this is the
+stage that makes objects look *seated* in the world instead of pasted onto it.
+
+It is the only stage that needs more than the finished frame: it reads the game's depth buffer,
+and it reads the game's projection by intercepting the `glFrustum` call the engine makes when it
+sets up the 3D view. (Reading the projection matrix at swap time would not work — these engines
+draw the HUD last under an orthographic projection, so by then the world's projection is gone.)
+If either is unavailable — no depth buffer on the context, or the game builds its projection some
+other way and never calls `glFrustum` — the stage no-ops instead of guessing, and the rest of the
+pipeline is unaffected. On first successful capture it logs `projection: captured first frustum`,
+which is the quickest way to confirm it is actually running.
+
+| Parameter | What it does |
+| --- | --- |
+| `ssaoRadius` | How far from a pixel geometry still counts as occluding it, **in the game's own world units** — not a 0..1 fraction like nearly every other value here. Quake II units are roughly an inch, so useful values are in the tens. This is the one setting that genuinely needs tuning per game |
+| `ssaoIntensity` | How dark fully-occluded pixels get. `0` is an exact no-op |
+| `ssaoBias` | View-space epsilon that stops a flat surface occluding itself through depth-precision noise. Raise it if flat walls look dirty or banded; lower it if contact shadows have gone missing |
+
+Put `ssao` **early** in the chain, ahead of `acestonemap` and `lutgrading`: it is a lighting
+term, so it belongs on scene colors that are then graded, not painted over a finished grade.
+
+Two caveats worth knowing before you tune it. Normals are reconstructed from the depth buffer
+rather than read from a G-buffer the wrapper doesn't have, so they are unreliable on very thin
+geometry and at silhouette edges. And 2D/HUD elements typically don't write depth, so they carry
+whatever the world left behind them — meaning the HUD can pick up occlusion from geometry it is
+drawn over. How visible that is depends entirely on the game's HUD.
 
 ### Local contrast: `localcontrast`
 

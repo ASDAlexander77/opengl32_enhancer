@@ -32,6 +32,8 @@
 #include "local_contrast.h"
 #include "fx_indicator.h"
 #include "depth_vignette.h"
+#include "ssao.h"
+#include "projection_capture.h"
 #include "gl_loader.h"
 
 namespace {
@@ -195,7 +197,8 @@ void ApplySelectedEffect() {
     int savedUniformBuffer = 0;
     gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
-    bool needDepth = HasEffectStage(config, EffectKind::DepthVignette);
+    bool needDepth = HasEffectStage(config, EffectKind::DepthVignette) ||
+                      HasEffectStage(config, EffectKind::Ssao);
     EnsurePipelineTextures(gl, width, height, needDepth);
 
     auto restoreState = [&]() {
@@ -224,12 +227,12 @@ void ApplySelectedEffect() {
         return;
     }
 
-    // EXPERIMENTAL (see depth_vignette.h): blit the default framebuffer's depth attachment
-    // into g_pipeline.depthTex, same read-framebuffer-0 reasoning as the color capture above.
-    // Only attempted when depthvignette is actually listed - everyone else pays nothing for
-    // this. A blit error (e.g. this GL context's pixel format has no depth buffer at all) is
-    // logged once and leaves depthCaptured false, which makes ApplyDepthVignette() below no-op
-    // for this frame exactly like any other stage that can't run.
+    // Blit the default framebuffer's depth attachment into g_pipeline.depthTex, same
+    // read-framebuffer-0 reasoning as the color capture above. Only attempted when a stage that
+    // consumes depth is actually listed - everyone else pays nothing for this. A blit error
+    // (e.g. this GL context's pixel format has no depth buffer at all) is logged once and leaves
+    // depthCaptured false, which makes the depth-consuming stages below no-op for this frame
+    // exactly like any other stage that can't run.
     bool depthCaptured = false;
     if (needDepth) {
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
@@ -241,7 +244,7 @@ void ApplySelectedEffect() {
             static bool warnedNoDepth = false;
             if (!warnedNoDepth) {
                 printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X blitting depth, "
-                       "depthvignette will no-op until this changes\n", depthErr);
+                       "depth-based stages will no-op until this changes\n", depthErr);
                 warnedNoDepth = true;
             }
         }
@@ -319,6 +322,16 @@ void ApplySelectedEffect() {
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold);
                 break;
+            case EffectKind::Ssao: {
+                // Unlike every other stage, this needs the game's projection to unproject depth
+                // - see ssao.h. GetCapturedProjection() is false until the game first sets up a
+                // 3D view (menu-only frames), which no-ops the stage rather than guessing.
+                ProjectionParams projection;
+                wrote = depthCaptured && GetCapturedProjection(projection) &&
+                         ApplySsao(src, dst, g_pipeline.depthTex, width, height, projection,
+                                   config.ssaoRadius, config.ssaoIntensity, config.ssaoBias);
+                break;
+            }
         }
         if (wrote) {
             cur = 1 - cur;

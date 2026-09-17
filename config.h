@@ -26,6 +26,7 @@ enum class EffectKind {
     Nr,
     LocalContrast,
     DepthVignette,
+    Ssao,
 };
 
 // Plenty of headroom for the real stages, even if a config lists some of them twice.
@@ -65,6 +66,11 @@ struct AnaxConfig {
     float shimmerSuppression = 0.0f;           // Taa
     float depthVignetteIntensity = 0.3f;       // DepthVignette
     float depthVignetteThreshold = 0.3f;       // DepthVignette
+    // Ssao. ssaoRadius is in the GAME's world units, not a 0..1 fraction like most values here -
+    // Quake II units are roughly an inch, so the useful range is tens of units. See ssao.h.
+    float ssaoRadius = 24.0f;                  // Ssao
+    float ssaoIntensity = 0.5f;                // Ssao
+    float ssaoBias = 0.5f;                     // Ssao
 
     // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
     // textures - see texture_filter.h. 0 (default) leaves every glTexParameter call the game
