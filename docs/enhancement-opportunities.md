@@ -39,9 +39,12 @@ attachment the pipeline blits for it).
 
 - ~~**Depth of field.**~~ **Done** — `dof.h`, shipped 2026-09-18.
 - ~~**Per-pixel distance fog.**~~ **Done** — `fog.h`, shipped 2026-09-19.
-- **Volumetric light shafts.** Radial blur from bright pixels, masked by depth.
-  Medium risk: the proxy cannot know where the light source is and must infer it
-  from bright-pixel detection, which misfires when the sun is off-screen.
+- ~~**Volumetric light shafts.**~~ **Done** — `light_shafts.h`, shipped
+  2026-09-19. The predicted risk was real and is now a documented limitation
+  rather than a surprise: the light is located by taking the brightness-weighted
+  centroid of the frame, so a large pale surface can drag the rays off the actual
+  lamp (raise `shaftsThreshold`), and a light that is off-screen cannot be found
+  at all. Notably this stage needs neither depth nor a projection.
 - **SSR (screen-space reflections).** Depth, colour, and normals reconstructed
   from depth — `ssao.cpp` already does that reconstruction. The largest visible
   change of the four, and the hardest to make look *right*: a GL 1.1 game

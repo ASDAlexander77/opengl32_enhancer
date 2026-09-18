@@ -170,8 +170,35 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     int savedDrawFbo = 0;
     gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFbo);
 
+    // Drain anything the app left pending before we touch GL. glGetError() reports the first
+    // error since it was last called, with no notion of who caused it, so without this an error
+    // the game generated in its own rendering gets attributed to whichever stage of ours checks
+    // next - which is exactly how a "cas: glGetError() = 0x0502" came to be reported for a
+    // dispatch that may not have been at fault.
+    unsigned int pendingErr = gl.glGetError();
+    if (pendingErr != GL_NO_ERROR) {
+        static bool warnedPending = false;
+        if (!warnedPending) {
+            printf("[opengl32_enh_cpp] texture_effect: the app had glGetError() = 0x%04X pending "
+                   "before this upload; draining it so it is not blamed on a later stage\n",
+                   pendingErr);
+            warnedPending = true;
+        }
+    }
+
     unsigned int srcTex = MakeTexture(gl, GL_RGBA8, width, height);
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, pixels);
+
+    unsigned int uploadErr = gl.glGetError();
+    if (uploadErr != GL_NO_ERROR) {
+        static bool warnedUpload = false;
+        if (!warnedUpload) {
+            printf("[opengl32_enh_cpp] texture_effect: glGetError() = 0x%04X staging the app's "
+                   "%dx%d texture (internalformat=%d, format=0x%04X, type=0x%04X)\n",
+                   uploadErr, width, height, internalformat, format, type);
+            warnedUpload = true;
+        }
+    }
 
     unsigned int dstTex = MakeTexture(gl, GL_RGBA16F, width, height);
     // The None check above already means only Sharpen/Invert reach here, but switch on it

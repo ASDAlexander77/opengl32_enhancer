@@ -30,6 +30,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Ambient occlusion: ssao](#ambient-occlusion-ssao)
   - [Depth of field: dof](#depth-of-field-dof)
   - [Distance fog: fog](#distance-fog-fog)
+  - [Light shafts: lightshafts](#light-shafts-lightshafts)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
@@ -103,6 +104,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `ssao` | Screen-space ambient occlusion — contact shadows in creases and corners |
 | `dof` | Depth of field — blurs whatever is not at the focus distance |
 | `fog` | Per-pixel distance fog — fades distance toward a colour |
+| `lightshafts` | Volumetric god rays radiating from the brightest thing in frame |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
@@ -279,6 +281,36 @@ grade.
 
 The same HUD caveat as `ssao` and `dof` applies: 2D elements that do not write depth inherit
 whatever the world left behind them, so a HUD can fog along with the geometry it covers.
+
+### Light shafts: `lightshafts`
+
+Volumetric god rays: each pixel marches toward the light and accumulates what it passes through,
+so bright sources streak and geometry carves shadows out of the streaks.
+
+Unlike every other depth-era stage, this needs **neither depth nor a projection** — which also
+makes it the one that still works on a frame captured before the game established a 3D view.
+
+The interesting part is that a proxy has no way to be *told* where the light is, and a fixed
+screen position would be useless as soon as the camera moves. So the light is **found in the
+frame**: a first compute pass takes the brightness-weighted centroid of everything above
+`shaftsThreshold`, and a second radiates from there. A weighted centroid rather than the single
+brightest pixel, because one bright texel is noise-sensitive and would make the rays swim between
+frames.
+
+| Setting | What it does |
+| --- | --- |
+| `shaftsIntensity` | `0`..`1`, how much shaft light is added. `0` is an exact no-op and is the default |
+| `shaftsDensity` | `0`..`1`, how far toward the light each pixel marches as a fraction of its distance. A pixel further away than the march reaches picks up nothing |
+| `shaftsDecay` | `0`..`1`, per-step falloff — this is what tapers a ray. Near `1` for long shafts |
+| `shaftsThreshold` | `0`..`1`, the luma that counts as light, for both finding the source and accumulating along the ray |
+
+`shaftsThreshold` is the setting that matters. The detector cannot tell a lamp from a bright
+wall, so a large pale surface can drag the centroid — and the rays — away from the actual light.
+Raise it until only genuine highlights qualify.
+
+The honest limitation: when the light is off-screen there is nothing in the frame to find, which
+is exactly when a real engine would still draw shafts. That is inherent to detecting from the
+image rather than being told by the renderer, and no threshold fixes it.
 
 ### Local contrast: `localcontrast`
 

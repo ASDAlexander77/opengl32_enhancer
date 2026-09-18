@@ -119,6 +119,7 @@ const StageName kStageNames[] = {
     {EffectKind::Ssao,                "ssao"},
     {EffectKind::Dof,                 "dof"},
     {EffectKind::Fog,                 "fog"},
+    {EffectKind::LightShafts,         "lightshafts"},
     {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
@@ -484,6 +485,14 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.fogColorG = ParseClampedFloat(value, 0.0f, 1.0f, config.fogColorG, "fogColorG");
         } else if (strcmp(key, "fogColorB") == 0) {
             config.fogColorB = ParseClampedFloat(value, 0.0f, 1.0f, config.fogColorB, "fogColorB");
+        } else if (strcmp(key, "shaftsIntensity") == 0) {
+            config.shaftsIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsIntensity, "shaftsIntensity");
+        } else if (strcmp(key, "shaftsDensity") == 0) {
+            config.shaftsDensity = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsDensity, "shaftsDensity");
+        } else if (strcmp(key, "shaftsDecay") == 0) {
+            config.shaftsDecay = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsDecay, "shaftsDecay");
+        } else if (strcmp(key, "shaftsThreshold") == 0) {
+            config.shaftsThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsThreshold, "shaftsThreshold");
         } else if (strcmp(key, "ssaoRadius") == 0) {
             // World units, so the upper bound is deliberately far above the 0..1 most values
             // here use - see config.h. 512 is well past useful for a Quake II-scale map and
@@ -540,6 +549,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
            "dofFocusDistance=%.3f, dofFocusRange=%.3f, dofBlurStrength=%.3f, "
            "fogStart=%.3f, fogEnd=%.3f, fogIntensity=%.3f, fogColor=%.2f/%.2f/%.2f, "
+           "shaftsIntensity=%.3f, shaftsDensity=%.3f, shaftsDecay=%.3f, shaftsThreshold=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
@@ -557,6 +567,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.dofFocusDistance, config.dofFocusRange, config.dofBlurStrength,
            config.fogStart, config.fogEnd, config.fogIntensity,
            config.fogColorR, config.fogColorG, config.fogColorB,
+           config.shaftsIntensity, config.shaftsDensity, config.shaftsDecay, config.shaftsThreshold,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath,

@@ -115,6 +115,8 @@ int main() {
     config.fogStart = 310.0f;
     config.fogIntensity = 0.42f;
     config.fogColorG = 0.33f;
+    config.shaftsIntensity = 0.27f;
+    config.shaftsDecay = 0.88f;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -161,6 +163,10 @@ int main() {
                "float value round-tripped (fogIntensity)") && ok;
     ok = Check(reloaded.fogColorG > 0.32f && reloaded.fogColorG < 0.34f,
                "float value round-tripped (fogColorG)") && ok;
+    ok = Check(reloaded.shaftsIntensity > 0.26f && reloaded.shaftsIntensity < 0.28f,
+               "float value round-tripped (shaftsIntensity)") && ok;
+    ok = Check(reloaded.shaftsDecay > 0.87f && reloaded.shaftsDecay < 0.89f,
+               "float value round-tripped (shaftsDecay)") && ok;
     ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
                "float value round-tripped (gamma)") && ok;
     ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,

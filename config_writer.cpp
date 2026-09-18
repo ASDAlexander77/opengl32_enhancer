@@ -33,6 +33,10 @@ const char* const kManagedKeys[] = {
     "fogColorR",
     "fogColorG",
     "fogColorB",
+    "shaftsIntensity",
+    "shaftsDensity",
+    "shaftsDecay",
+    "shaftsThreshold",
     "gamma",
     "brightness",
     "depthVignetteIntensity",
@@ -100,6 +104,10 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "fogColorR") == 0)                   { out = FormatFloat(config.fogColorR); return true; }
     if (strcmp(key, "fogColorG") == 0)                   { out = FormatFloat(config.fogColorG); return true; }
     if (strcmp(key, "fogColorB") == 0)                   { out = FormatFloat(config.fogColorB); return true; }
+    if (strcmp(key, "shaftsIntensity") == 0)             { out = FormatFloat(config.shaftsIntensity); return true; }
+    if (strcmp(key, "shaftsDensity") == 0)               { out = FormatFloat(config.shaftsDensity); return true; }
+    if (strcmp(key, "shaftsDecay") == 0)                 { out = FormatFloat(config.shaftsDecay); return true; }
+    if (strcmp(key, "shaftsThreshold") == 0)             { out = FormatFloat(config.shaftsThreshold); return true; }
     if (strcmp(key, "gamma") == 0)                       { out = FormatFloat(config.gamma); return true; }
     if (strcmp(key, "brightness") == 0)                  { out = FormatFloat(config.brightness); return true; }
     if (strcmp(key, "depthVignetteIntensity") == 0)      { out = FormatFloat(config.depthVignetteIntensity); return true; }

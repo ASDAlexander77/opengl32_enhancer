@@ -55,7 +55,7 @@ const EffectKind kAllStages[] = {
     EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::LutGrading,
     EffectKind::Vignette, EffectKind::DepthVignette, EffectKind::ChromaticAberration,
     EffectKind::Taa, EffectKind::Smaa, EffectKind::Cas, EffectKind::Sharpen,
-    EffectKind::Dof, EffectKind::Fog,
+    EffectKind::Dof, EffectKind::Fog, EffectKind::LightShafts,
     EffectKind::Gamma, EffectKind::Dither, EffectKind::Invert,
 };
 const int kAllStageCount = (int)(sizeof(kAllStages) / sizeof(kAllStages[0]));
@@ -172,6 +172,13 @@ void DrawParameters(AnaxConfig& config) {
         }
         ImGui::TextDisabled("fog distances are in WORLD UNITS too. Unlike depthvignette, this");
         ImGui::TextDisabled("fades distance toward a COLOUR rather than toward black.");
+        ImGui::Separator();
+        ImGui::SliderFloat("shaftsIntensity", &config.shaftsIntensity, 0.0f, 1.0f);
+        ImGui::SliderFloat("shaftsDensity", &config.shaftsDensity, 0.0f, 1.0f);
+        ImGui::SliderFloat("shaftsDecay", &config.shaftsDecay, 0.0f, 1.0f);
+        ImGui::SliderFloat("shaftsThreshold", &config.shaftsThreshold, 0.0f, 1.0f);
+        ImGui::TextDisabled("lightshafts finds the light in the frame itself. Raise the");
+        ImGui::TextDisabled("threshold if a bright wall is pulling the rays off the lamp.");
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);

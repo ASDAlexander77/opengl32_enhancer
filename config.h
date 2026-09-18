@@ -29,6 +29,7 @@ enum class EffectKind {
     Ssao,
     Dof,
     Fog,
+    LightShafts,
     Gamma,
 };
 
@@ -93,6 +94,14 @@ struct AnaxConfig {
     float fogColorR = 0.55f;                   // Fog
     float fogColorG = 0.62f;                   // Fog
     float fogColorB = 0.70f;                   // Fog
+
+    // LightShafts. Unlike the other depth-era stages these are screen-space fractions, not world
+    // units - the light's position is found in the frame itself (see light_shafts.h), so there is
+    // nothing here denominated in the game's scale.
+    float shaftsIntensity = 0.0f;              // LightShafts, 0 = exact no-op
+    float shaftsDensity = 0.6f;                // LightShafts
+    float shaftsDecay = 0.96f;                 // LightShafts
+    float shaftsThreshold = 0.75f;             // LightShafts
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact

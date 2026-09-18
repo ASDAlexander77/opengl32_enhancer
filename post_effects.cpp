@@ -38,6 +38,7 @@
 #include "depth_vignette.h"
 #include "dof.h"
 #include "fog.h"
+#include "light_shafts.h"
 #include "ssao.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
@@ -312,6 +313,20 @@ void ApplySelectedEffect(void* hdc) {
         // is unavailable - skip the capture/blit machinery here too rather than round-trip
         // the back buffer through a pipeline nothing can actually run.
         return;
+    }
+
+    // Drain anything the app left pending before any stage of ours checks glGetError(). The
+    // flag is global and carries no notion of who set it, so without this the first stage to
+    // look reports the GAME's error as its own - see texture_effect.cpp, where exactly that
+    // made a healthy CAS dispatch look like it was failing on every run.
+    unsigned int pendingErr = gl.glGetError();
+    if (pendingErr != GL_NO_ERROR) {
+        static bool warnedPending = false;
+        if (!warnedPending) {
+            printf("[opengl32_enh_cpp] post_effects: the app had glGetError() = 0x%04X pending "
+                   "at swap; draining it so it is not blamed on a stage\n", pendingErr);
+            warnedPending = true;
+        }
     }
 
     // The game's own render resolution - whatever it last set via glViewport.
@@ -615,6 +630,13 @@ void ApplySelectedEffect(void* hdc) {
                 wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, dstW, dstH,
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold);
+                break;
+            case EffectKind::LightShafts:
+                // No depth and no projection: the light is found in the colour buffer itself,
+                // so this is the one late-era stage with no scene-geometry prerequisites.
+                wrote = ApplyLightShafts(src, dst, dstW, dstH, config.shaftsIntensity,
+                                          config.shaftsDensity, config.shaftsDecay,
+                                          config.shaftsThreshold);
                 break;
             case EffectKind::Fog: {
                 // World-unit distances, so it needs the projection for the same reason dof does.
