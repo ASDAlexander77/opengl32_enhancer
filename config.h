@@ -28,6 +28,7 @@ enum class EffectKind {
     DepthVignette,
     Ssao,
     Dof,
+    Fog,
     Gamma,
 };
 
@@ -81,6 +82,17 @@ struct AnaxConfig {
     float dofFocusDistance = 0.0f;             // Dof, 0 = auto-focus on screen centre
     float dofFocusRange = 64.0f;               // Dof
     float dofBlurStrength = 0.0f;              // Dof, 0 = exact no-op
+
+    // Fog. fogStart/fogEnd are in the GAME'S OWN WORLD UNITS, like ssaoRadius and dof's
+    // distances - see fog.h. The defaults are sized for Quake II scale (roughly 1 unit = 1 inch),
+    // so 200..2000 is about 17 to 170 feet. fogIntensity defaults to 0 because fog is a strong
+    // stylistic choice, not a correction: listing the stage must change nothing until asked.
+    float fogStart = 200.0f;                   // Fog
+    float fogEnd = 2000.0f;                    // Fog
+    float fogIntensity = 0.0f;                 // Fog, 0 = exact no-op
+    float fogColorR = 0.55f;                   // Fog
+    float fogColorG = 0.62f;                   // Fog
+    float fogColorB = 0.70f;                   // Fog
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact

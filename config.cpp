@@ -118,6 +118,7 @@ const StageName kStageNames[] = {
     {EffectKind::DepthVignette,       "depthvignette"},
     {EffectKind::Ssao,                "ssao"},
     {EffectKind::Dof,                 "dof"},
+    {EffectKind::Fog,                 "fog"},
     {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
@@ -471,6 +472,18 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.dofFocusRange = ParseClampedFloat(value, 0.1f, 16384.0f, config.dofFocusRange, "dofFocusRange");
         } else if (strcmp(key, "dofBlurStrength") == 0) {
             config.dofBlurStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.dofBlurStrength, "dofBlurStrength");
+        } else if (strcmp(key, "fogStart") == 0) {
+            config.fogStart = ParseClampedFloat(value, 0.0f, 65536.0f, config.fogStart, "fogStart");
+        } else if (strcmp(key, "fogEnd") == 0) {
+            config.fogEnd = ParseClampedFloat(value, 0.0f, 65536.0f, config.fogEnd, "fogEnd");
+        } else if (strcmp(key, "fogIntensity") == 0) {
+            config.fogIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.fogIntensity, "fogIntensity");
+        } else if (strcmp(key, "fogColorR") == 0) {
+            config.fogColorR = ParseClampedFloat(value, 0.0f, 1.0f, config.fogColorR, "fogColorR");
+        } else if (strcmp(key, "fogColorG") == 0) {
+            config.fogColorG = ParseClampedFloat(value, 0.0f, 1.0f, config.fogColorG, "fogColorG");
+        } else if (strcmp(key, "fogColorB") == 0) {
+            config.fogColorB = ParseClampedFloat(value, 0.0f, 1.0f, config.fogColorB, "fogColorB");
         } else if (strcmp(key, "ssaoRadius") == 0) {
             // World units, so the upper bound is deliberately far above the 0..1 most values
             // here use - see config.h. 512 is well past useful for a Quake II-scale map and
@@ -526,6 +539,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
            "dofFocusDistance=%.3f, dofFocusRange=%.3f, dofBlurStrength=%.3f, "
+           "fogStart=%.3f, fogEnd=%.3f, fogIntensity=%.3f, fogColor=%.2f/%.2f/%.2f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
@@ -541,6 +555,8 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
            config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
            config.dofFocusDistance, config.dofFocusRange, config.dofBlurStrength,
+           config.fogStart, config.fogEnd, config.fogIntensity,
+           config.fogColorR, config.fogColorG, config.fogColorB,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath,

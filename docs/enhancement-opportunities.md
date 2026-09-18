@@ -37,16 +37,25 @@ These need no new interception and drop into the existing stage pattern
 (`depth_vignette.cpp` is the closest template — it already samples the depth
 attachment the pipeline blits for it).
 
-- **SSR (screen-space reflections).** Depth, colour, and normals reconstructed
-  from depth — `ssao.cpp` already does that reconstruction. 1.1-era surfaces are
-  uniformly flat-shaded, so this is a large, visible change.
-- **Depth of field.** Focus distance sampled from depth near screen centre.
+- ~~**Depth of field.**~~ **Done** — `dof.h`, shipped 2026-09-18.
+- ~~**Per-pixel distance fog.**~~ **Done** — `fog.h`, shipped 2026-09-19.
 - **Volumetric light shafts.** Radial blur from bright pixels, masked by depth.
-- **Per-pixel distance fog.** Old engines fog per vertex; real depth plus the
-  captured `zNear`/`zFar` gives correct per-pixel fog, and can equally *remove*
-  an engine's fog banding.
+  Medium risk: the proxy cannot know where the light source is and must infer it
+  from bright-pixel detection, which misfires when the sun is off-screen.
+- **SSR (screen-space reflections).** Depth, colour, and normals reconstructed
+  from depth — `ssao.cpp` already does that reconstruction. The largest visible
+  change of the four, and the hardest to make look *right*: a GL 1.1 game
+  supplies no roughness or material signal, so nothing tells the shader what
+  should reflect. Needs a heuristic gate (near-horizontal surfaces, say), which
+  is a design risk rather than just shader work. Left until last for that
+  reason.
 
-Risk: low. Cost: one stage each, same shape as the existing ones.
+Risk: low. Cost: one stage each, same shape as the existing ones — both
+completed stages took one new `.cpp`/`.h`/`_test.cpp` plus registration in
+`config.h`, `config.cpp`, `config_writer.cpp`, `post_effects.cpp`,
+`config_editor.cpp`, `CMakeLists.txt`, the `.ini` and the README. Note
+`config_writer.cpp`: it keeps an explicit key allow-list, and forgetting it
+means the editor silently drops the new settings on save.
 
 ## Tier 2 — capture the modelview matrix (recommended first)
 
@@ -132,6 +141,31 @@ had assumed otherwise). Real DSR requires intercepting the size the game
 existing NIS spec reaches the same conclusion from the other direction: "Real
 reduced-resolution rendering is future work once the wrapper can intercept the
 app's actual render-target setup."
+
+### DPI virtualisation comes first, though
+
+Before any of that matters, check whether the game is DPI-aware. It usually is
+not, and the proxy inherits whatever the host process has.
+
+Measured on Anachronox, on a 3840x2160 display at 150% scaling: the game — and
+therefore this DLL inside it — sees a virtualised 2560x1440 desktop. Every
+coordinate the proxy handles is in that space, so `windowWidth`/`windowHeight`
+are virtual pixels, and Windows then bitmap-stretches the finished frame by 1.5x
+onto the panel. That stretch lands *after* every sharpening stage this project
+runs, which makes it the single largest image-quality problem available to fix,
+and no amount of FSR or CAS can compensate for it.
+
+It cannot be fixed from inside the DLL: neither `anox.exe` nor `ref_gl.dll`
+statically imports `opengl32.dll`, so the proxy is `LoadLibrary`'d long after the
+game's window exists, and an existing window cannot be un-virtualised. An
+external `.manifest` is ignored on modern Windows without `PreferExternalManifest`.
+What does work is the per-user AppCompat layer — `HIGHDPIAWARE` under
+`HKCU\...\AppCompatFlags\Layers`, the same thing the "Override high DPI scaling
+behaviour: Application" checkbox writes. With it set, a requested 1920x1440
+client area arrives as exactly 1920x1440 *physical* pixels.
+
+So this is documentation and a setup step, not code — but it should be the first
+thing checked whenever "the resolution setting isn't working".
 
 ## Suggested order
 

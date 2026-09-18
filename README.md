@@ -29,6 +29,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Noise reduction: nr](#noise-reduction-nr)
   - [Ambient occlusion: ssao](#ambient-occlusion-ssao)
   - [Depth of field: dof](#depth-of-field-dof)
+  - [Distance fog: fog](#distance-fog-fog)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
@@ -101,6 +102,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `localcontrast` | Local tone/structure boost ("clarity"/"texture") |
 | `ssao` | Screen-space ambient occlusion — contact shadows in creases and corners |
 | `dof` | Depth of field — blurs whatever is not at the focus distance |
+| `fog` | Per-pixel distance fog — fades distance toward a colour |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
@@ -253,6 +255,30 @@ real lens would drift. Both are fixable, neither is free, and neither is worth i
 basic effect is tuned to taste. Also note that HUD elements typically do not write depth, so
 they inherit whatever the world left behind them and can blur along with it — the same caveat
 `ssao` carries.
+
+### Distance fog: `fog`
+
+Fades distance toward a colour, using the game's own depth buffer and projection. Distances are
+in world units, like `ssaoRadius` and `dof`'s.
+
+This is not `depthvignette`. That fades distance toward **black**; this fades it toward a
+**colour**, which is what real atmospheric haze does — it lightens and tints distance rather than
+darkening it. The engine's own fog is per-vertex on geometry that can be very coarse, so it bands
+across large surfaces; this is computed per pixel from real depth.
+
+| Setting | What it does |
+| --- | --- |
+| `fogStart` | World units at which fog begins. Nothing at or nearer than this is touched at all |
+| `fogEnd` | World units at which fog is full. Linear in between, matching the `GL_LINEAR` fog model these engines used |
+| `fogIntensity` | `0`..`1`, scaling the whole ramp. `0` is an exact no-op and is the default |
+| `fogColorR/G/B` | `0`..`1` each. Default is a desaturated blue-grey; warm it up for rusty exteriors, cool it for interiors |
+
+Put `fog` **early** in the chain, before `acestonemap` and `lutgrading` — fog is part of the
+scene, so it wants grading along with everything else rather than being painted over a finished
+grade.
+
+The same HUD caveat as `ssao` and `dof` applies: 2D elements that do not write depth inherit
+whatever the world left behind them, so a HUD can fog along with the geometry it covers.
 
 ### Local contrast: `localcontrast`
 

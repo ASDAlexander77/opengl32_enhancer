@@ -27,6 +27,12 @@ const char* const kManagedKeys[] = {
     "dofFocusDistance",
     "dofFocusRange",
     "dofBlurStrength",
+    "fogStart",
+    "fogEnd",
+    "fogIntensity",
+    "fogColorR",
+    "fogColorG",
+    "fogColorB",
     "gamma",
     "brightness",
     "depthVignetteIntensity",
@@ -88,6 +94,12 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "dofFocusDistance") == 0)            { out = FormatFloat(config.dofFocusDistance); return true; }
     if (strcmp(key, "dofFocusRange") == 0)               { out = FormatFloat(config.dofFocusRange); return true; }
     if (strcmp(key, "dofBlurStrength") == 0)             { out = FormatFloat(config.dofBlurStrength); return true; }
+    if (strcmp(key, "fogStart") == 0)                    { out = FormatFloat(config.fogStart); return true; }
+    if (strcmp(key, "fogEnd") == 0)                      { out = FormatFloat(config.fogEnd); return true; }
+    if (strcmp(key, "fogIntensity") == 0)                { out = FormatFloat(config.fogIntensity); return true; }
+    if (strcmp(key, "fogColorR") == 0)                   { out = FormatFloat(config.fogColorR); return true; }
+    if (strcmp(key, "fogColorG") == 0)                   { out = FormatFloat(config.fogColorG); return true; }
+    if (strcmp(key, "fogColorB") == 0)                   { out = FormatFloat(config.fogColorB); return true; }
     if (strcmp(key, "gamma") == 0)                       { out = FormatFloat(config.gamma); return true; }
     if (strcmp(key, "brightness") == 0)                  { out = FormatFloat(config.brightness); return true; }
     if (strcmp(key, "depthVignetteIntensity") == 0)      { out = FormatFloat(config.depthVignetteIntensity); return true; }

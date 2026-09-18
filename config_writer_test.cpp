@@ -112,6 +112,9 @@ int main() {
     config.dofFocusDistance = 125.0f;
     config.dofFocusRange = 48.0f;
     config.dofBlurStrength = 0.65f;
+    config.fogStart = 310.0f;
+    config.fogIntensity = 0.42f;
+    config.fogColorG = 0.33f;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -152,6 +155,12 @@ int main() {
                "float value round-tripped (dofFocusRange)") && ok;
     ok = Check(reloaded.dofBlurStrength > 0.64f && reloaded.dofBlurStrength < 0.66f,
                "float value round-tripped (dofBlurStrength)") && ok;
+    ok = Check(reloaded.fogStart > 309.9f && reloaded.fogStart < 310.1f,
+               "float value round-tripped (fogStart)") && ok;
+    ok = Check(reloaded.fogIntensity > 0.41f && reloaded.fogIntensity < 0.43f,
+               "float value round-tripped (fogIntensity)") && ok;
+    ok = Check(reloaded.fogColorG > 0.32f && reloaded.fogColorG < 0.34f,
+               "float value round-tripped (fogColorG)") && ok;
     ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
                "float value round-tripped (gamma)") && ok;
     ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,

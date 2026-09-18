@@ -55,7 +55,7 @@ const EffectKind kAllStages[] = {
     EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::LutGrading,
     EffectKind::Vignette, EffectKind::DepthVignette, EffectKind::ChromaticAberration,
     EffectKind::Taa, EffectKind::Smaa, EffectKind::Cas, EffectKind::Sharpen,
-    EffectKind::Dof,
+    EffectKind::Dof, EffectKind::Fog,
     EffectKind::Gamma, EffectKind::Dither, EffectKind::Invert,
 };
 const int kAllStageCount = (int)(sizeof(kAllStages) / sizeof(kAllStages[0]));
@@ -160,6 +160,18 @@ void DrawParameters(AnaxConfig& config) {
         ImGui::SliderFloat("dofFocusRange", &config.dofFocusRange, 0.1f, 2048.0f);
         ImGui::TextDisabled("dof distances are in WORLD UNITS, like ssaoRadius - the loaded");
         ImGui::TextDisabled("frame's own range is shown under Scene. 0 distance = auto-focus.");
+        ImGui::Separator();
+        ImGui::SliderFloat("fogIntensity", &config.fogIntensity, 0.0f, 1.0f);
+        ImGui::SliderFloat("fogStart", &config.fogStart, 0.0f, 4096.0f);
+        ImGui::SliderFloat("fogEnd", &config.fogEnd, 0.0f, 8192.0f);
+        float fogColor[3] = {config.fogColorR, config.fogColorG, config.fogColorB};
+        if (ImGui::ColorEdit3("fogColor", fogColor)) {
+            config.fogColorR = fogColor[0];
+            config.fogColorG = fogColor[1];
+            config.fogColorB = fogColor[2];
+        }
+        ImGui::TextDisabled("fog distances are in WORLD UNITS too. Unlike depthvignette, this");
+        ImGui::TextDisabled("fades distance toward a COLOUR rather than toward black.");
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);

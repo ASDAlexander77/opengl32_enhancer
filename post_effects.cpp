@@ -37,6 +37,7 @@
 #include "fx_indicator.h"
 #include "depth_vignette.h"
 #include "dof.h"
+#include "fog.h"
 #include "ssao.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
@@ -406,7 +407,8 @@ void ApplySelectedEffect(void* hdc) {
 
     bool needDepth = HasEffectStage(config, EffectKind::DepthVignette) ||
                       HasEffectStage(config, EffectKind::Ssao) ||
-                      HasEffectStage(config, EffectKind::Dof);
+                      HasEffectStage(config, EffectKind::Dof) ||
+                      HasEffectStage(config, EffectKind::Fog);
     EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth);
 
     auto restoreState = [&]() {
@@ -497,12 +499,12 @@ void ApplySelectedEffect(void* hdc) {
         // after the upscaler can only no-op. Logged once so a misordered effect= list is
         // diagnosable instead of silently doing nothing.
         bool isDepthStage = (stage == EffectKind::DepthVignette || stage == EffectKind::Ssao ||
-                             stage == EffectKind::Dof);
+                             stage == EffectKind::Dof || stage == EffectKind::Fog);
         if (isDepthStage && !atNativeRes) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
                        "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/depthvignette BEFORE "
+                       "stage is being skipped. List ssao/dof/fog/depthvignette BEFORE "
                        "bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
                 warnedDepthAfterUpscale = true;
             }
@@ -614,6 +616,15 @@ void ApplySelectedEffect(void* hdc) {
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold);
                 break;
+            case EffectKind::Fog: {
+                // World-unit distances, so it needs the projection for the same reason dof does.
+                ProjectionParams fogProjection;
+                wrote = depthCaptured && GetCapturedProjection(fogProjection) &&
+                         ApplyFog(src, dst, g_pipeline.depthTex, dstW, dstH, fogProjection,
+                                  config.fogStart, config.fogEnd, config.fogIntensity,
+                                  config.fogColorR, config.fogColorG, config.fogColorB);
+                break;
+            }
             case EffectKind::Dof: {
                 // Needs the projection for the same reason ssao does - dof.h's distances are in
                 // world units, and raw depth cannot be turned into those without the frustum.
