@@ -37,3 +37,27 @@ void LoadedFrameSize(int& outWidth, int& outHeight);
 // aspect ratio: stretching the image while leaving those extents alone would make every
 // unprojected position subtly wrong, and SSAO with it.
 void RenderLoadedFrame(int windowWidth, int windowHeight);
+
+// The depth information a loaded dump carries, for the editor's readout. nearUnits/farUnits are
+// the frame's own nearest and farthest depths expressed in the game's world units - the unit
+// ssaoRadius is denominated in, which is what makes them worth showing - and are both 0 when the
+// dump carried no usable projection to convert with. See depth_view.h.
+struct LoadedFrameDepth {
+    bool hasRange = false;
+    float minRaw = 0.0f;
+    float maxRaw = 0.0f;
+    float nearUnits = 0.0f;
+    float farUnits = 0.0f;
+};
+
+// Fills `out` with the loaded dump's depth span. Returns false (leaving `out` untouched) when no
+// frame is loaded.
+bool GetLoadedFrameDepthInfo(LoadedFrameDepth& out);
+
+// Blits the loaded frame's depth plane, rendered as a readable grayscale image, into the default
+// framebuffer - nearest geometry white, farthest black, normalized across the frame's own span
+// (see depth_view.h for why that normalization is what makes it visible at all). This is a
+// picture OF the depth for a human to check, not an input to anything: the caller shows it
+// INSTEAD of running the effect pipeline, since post-processing a depth visualization would be
+// meaningless. No-ops if no frame is loaded or the depth image could not be built.
+void RenderLoadedFrameDepth(int windowWidth, int windowHeight);

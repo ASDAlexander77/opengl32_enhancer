@@ -83,6 +83,10 @@ add_custom_command(TARGET config_writer_test POST_BUILD
         $<TARGET_FILE_DIR:config_writer_test>
 )
 
+# No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
+# plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
+add_executable(depth_view_test depth_view_test.cpp depth_view.cpp frame_dump.cpp)
+
 # Creates a real GL context and checks gl_loader.cpp resolves every GL 4.3 compute-shader
 # entry point it needs - see gl_loader_test.cpp.
 add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
@@ -284,6 +288,7 @@ add_executable(config_editor WIN32
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
+    depth_view.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp
@@ -347,7 +352,8 @@ foreach(test_target
     ${WRAPPER_NAME_CXX}_test
     config_test
     config_writer_test
-    window_override_test)
+    window_override_test
+    depth_view_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()

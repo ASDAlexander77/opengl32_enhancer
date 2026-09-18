@@ -35,6 +35,7 @@ char g_iniPath[512] = "opengl32_enhancer.ini";
 char g_dumpPath[512] = "opengl32_enhancer_frame.dump";
 char g_status[512] = "";
 bool g_useLoadedFrame = false;
+bool g_showDepth = false;
 
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
@@ -217,6 +218,32 @@ void DrawSceneControls() {
     if (HasLoadedFrame()) {
         ImGui::Text("Loaded frame: %dx%d, projection %s",
                     dumpWidth, dumpHeight, LoadedFrameHasProjection() ? "yes" : "no");
+
+        // The depth view shows the dump's depth plane instead of the post-processed result, so
+        // it is a check on the INPUT the depth-consuming stages get - the one thing the ordinary
+        // view cannot show, because depth only ever reaches the screen indirectly through ssao
+        // and depthVignette.
+        ImGui::Checkbox("Show depth map", &g_showDepth);
+
+        LoadedFrameDepth depthInfo;
+        if (GetLoadedFrameDepthInfo(depthInfo)) {
+            if (!depthInfo.hasRange) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                                   "Depth is FLAT (%.6f everywhere) - ssao and depthVignette",
+                                   depthInfo.minRaw);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                                   "have nothing to work with. Re-dump from an in-game view.");
+            } else if (depthInfo.nearUnits > 0.0f) {
+                ImGui::Text("Depth: raw %.4f..%.4f", depthInfo.minRaw, depthInfo.maxRaw);
+                // The number that matters for tuning: ssaoRadius is in world units, and this is
+                // the world-unit span the frame actually covers.
+                ImGui::Text("       %.0f..%.0f world units (ssaoRadius is in these)",
+                            depthInfo.nearUnits, depthInfo.farUnits);
+            } else {
+                ImGui::Text("Depth: raw %.4f..%.4f", depthInfo.minRaw, depthInfo.maxRaw);
+                ImGui::TextDisabled("       no projection in this dump, so no world-unit scale");
+            }
+        }
     } else {
         ImGui::TextDisabled("No frame loaded. In-game, press the frameDumpKey (F12 by default)");
         ImGui::TextDisabled("to write one next to the game's .exe, then point this at it.");
@@ -317,13 +344,21 @@ int main(int argc, char** argv) {
 
         // Scene first, then the real pipeline over it, then the UI on top - so the UI is never
         // itself captured and post-processed, exactly as the DLL orders things in-game.
-        if (g_useLoadedFrame && HasLoadedFrame()) {
-            RenderLoadedFrame(clientWidth, clientHeight);
+        // The depth view deliberately bypasses ApplySelectedEffect: it is a picture of the
+        // frame's depth input, and running colour post-processing over it would say nothing
+        // about either the depth or the effects.
+        bool showingDepth = g_showDepth && g_useLoadedFrame && HasLoadedFrame();
+        if (showingDepth) {
+            RenderLoadedFrameDepth(clientWidth, clientHeight);
         } else {
-            RenderSyntheticScene(clientWidth, clientHeight);
-        }
+            if (g_useLoadedFrame && HasLoadedFrame()) {
+                RenderLoadedFrame(clientWidth, clientHeight);
+            } else {
+                RenderSyntheticScene(clientWidth, clientHeight);
+            }
 
-        ApplySelectedEffect(hdc);
+            ApplySelectedEffect(hdc);
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplWin32_NewFrame();

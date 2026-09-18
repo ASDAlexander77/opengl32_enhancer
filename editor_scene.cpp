@@ -4,7 +4,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
+#include "depth_view.h"
 #include "editor_scene.h"
 #include "frame_dump.h"
 #include "gl_loader.h"
@@ -30,6 +32,12 @@ struct LoadedFrame {
     unsigned int colorTexture = 0;
     unsigned int depthTexture = 0;
     unsigned int fbo = 0;
+    // The depth plane rendered as a viewable grayscale image (see depth_view.h), built on the
+    // CPU at load time and kept as an ordinary RGBA8 texture with its own FBO to blit from.
+    // Separate from depthTexture, which is the real depth attachment the effects sample.
+    unsigned int depthViewTexture = 0;
+    unsigned int depthViewFbo = 0;
+    DepthStats depthStats;
 };
 
 LoadedFrame g_frame;
@@ -146,10 +154,12 @@ bool LoadFrameDump(const char* path) {
     // A reload at a different size needs fresh immutable storage - glTexStorage2D cannot be
     // re-specified, so the old textures go rather than being reused.
     if (g_frame.valid) {
-        unsigned int textures[2] = {g_frame.colorTexture, g_frame.depthTexture};
-        gl.glDeleteTextures(2, textures);
+        unsigned int textures[3] = {g_frame.colorTexture, g_frame.depthTexture,
+                                    g_frame.depthViewTexture};
+        gl.glDeleteTextures(3, textures);
         g_frame.colorTexture = 0;
         g_frame.depthTexture = 0;
+        g_frame.depthViewTexture = 0;
         g_frame.valid = false;
     }
 
@@ -179,6 +189,36 @@ bool LoadFrameDump(const char* path) {
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER_, GL_DEPTH_ATTACHMENT_, GL_TEXTURE_2D, g_frame.depthTexture, 0);
     gl.glBindFramebuffer(GL_FRAMEBUFFER_, 0);
 
+    // The depth view, built while the CPU-side depth plane is still here. Normalizing across
+    // the frame's own span is what makes it readable at all - see depth_view.h.
+    size_t texelCount = (size_t)header.width * (size_t)header.height;
+    g_frame.depthStats = ComputeDepthStats(depth, texelCount);
+    unsigned char* depthRgba = (unsigned char*)malloc(texelCount * 4);
+    if (depthRgba != nullptr) {
+        RenderDepthToRgba(depth, texelCount, g_frame.depthStats, depthRgba);
+
+        gl.glGenTextures(1, &g_frame.depthViewTexture);
+        gl.glBindTexture(GL_TEXTURE_2D, g_frame.depthViewTexture);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE_);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE_);
+        gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8_, header.width, header.height);
+        gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, header.width, header.height,
+                           GL_RGBA, GL_UNSIGNED_BYTE, depthRgba);
+        free(depthRgba);
+
+        if (g_frame.depthViewFbo == 0) {
+            gl.glGenFramebuffers(1, &g_frame.depthViewFbo);
+        }
+        gl.glBindFramebuffer(GL_FRAMEBUFFER_, g_frame.depthViewFbo);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER_, GL_COLOR_ATTACHMENT0_, GL_TEXTURE_2D,
+                                  g_frame.depthViewTexture, 0);
+        gl.glBindFramebuffer(GL_FRAMEBUFFER_, 0);
+    } else {
+        printf("editor_scene: out of memory building the depth view for '%s'\n", path);
+    }
+
     FreeFrameDump(color, depth);
 
     unsigned int err = gl.glGetError();
@@ -191,8 +231,9 @@ bool LoadFrameDump(const char* path) {
     g_frame.hasProjection = header.hasProjection != 0;
     g_frame.projection = header.projection;
     g_frame.valid = true;
-    printf("editor_scene: loaded '%s' (%dx%d, projection=%s)\n",
-           path, header.width, header.height, g_frame.hasProjection ? "yes" : "no");
+    printf("editor_scene: loaded '%s' (%dx%d, projection=%s, depth=%s)\n",
+           path, header.width, header.height, g_frame.hasProjection ? "yes" : "no",
+           g_frame.depthStats.hasRange ? "present" : "FLAT - nothing to tune ssao against");
     return true;
 }
 
@@ -209,6 +250,27 @@ void LoadedFrameSize(int& outWidth, int& outHeight) {
     outHeight = g_frame.valid ? g_frame.height : 0;
 }
 
+namespace {
+
+// The largest aspect-preserving region the loaded frame occupies in a window of this size.
+// Preserved rather than stretched because the captured projection's near-plane extents encode
+// the frame's aspect ratio - see RenderLoadedFrame's comment.
+bool PreviewSize(int windowWidth, int windowHeight, int& outWidth, int& outHeight) {
+    if (!g_frame.valid || windowWidth <= 0 || windowHeight <= 0) {
+        return false;
+    }
+    float scale = (float)windowWidth / (float)g_frame.width;
+    float vScale = (float)windowHeight / (float)g_frame.height;
+    if (vScale < scale) {
+        scale = vScale;
+    }
+    outWidth = (int)((float)g_frame.width * scale);
+    outHeight = (int)((float)g_frame.height * scale);
+    return outWidth > 0 && outHeight > 0;
+}
+
+}  // namespace
+
 void RenderLoadedFrame(int windowWidth, int windowHeight) {
     if (!g_frame.valid || windowWidth <= 0 || windowHeight <= 0) {
         return;
@@ -218,14 +280,8 @@ void RenderLoadedFrame(int windowWidth, int windowHeight) {
         return;
     }
 
-    float scale = (float)windowWidth / (float)g_frame.width;
-    float vScale = (float)windowHeight / (float)g_frame.height;
-    if (vScale < scale) {
-        scale = vScale;
-    }
-    int previewWidth = (int)((float)g_frame.width * scale);
-    int previewHeight = (int)((float)g_frame.height * scale);
-    if (previewWidth <= 0 || previewHeight <= 0) {
+    int previewWidth = 0, previewHeight = 0;
+    if (!PreviewSize(windowWidth, windowHeight, previewWidth, previewHeight)) {
         return;
     }
 
@@ -255,4 +311,55 @@ void RenderLoadedFrame(int windowWidth, int windowHeight) {
                                   g_frame.projection.bottom, g_frame.projection.top,
                                   g_frame.projection.zNear, g_frame.projection.zFar);
     }
+}
+
+void RenderLoadedFrameDepth(int windowWidth, int windowHeight) {
+    if (!g_frame.valid || g_frame.depthViewTexture == 0) {
+        return;
+    }
+    const GlComputeApi& gl = GetGlComputeApi();
+    if (!gl.loaded) {
+        return;
+    }
+
+    int previewWidth = 0, previewHeight = 0;
+    if (!PreviewSize(windowWidth, windowHeight, previewWidth, previewHeight)) {
+        return;
+    }
+
+    glViewport(0, 0, windowWidth, windowHeight);
+    glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Color only: this is already a picture OF the depth, not a depth buffer, and nothing
+    // downstream samples it. LINEAR would blur the very per-pixel detail the view exists to
+    // show, so NEAREST here as well.
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER_, g_frame.depthViewFbo);
+    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER_, 0);
+    gl.glBlitFramebuffer(0, 0, g_frame.width, g_frame.height,
+                          0, 0, previewWidth, previewHeight,
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER_, 0);
+
+    glViewport(0, 0, windowWidth, windowHeight);
+}
+
+bool GetLoadedFrameDepthInfo(LoadedFrameDepth& out) {
+    if (!g_frame.valid) {
+        return false;
+    }
+    out.hasRange = g_frame.depthStats.hasRange;
+    out.minRaw = g_frame.depthStats.minRaw;
+    out.maxRaw = g_frame.depthStats.maxRaw;
+    // Zero when the dump carried no usable projection - LinearizeDepth says so itself rather
+    // than inventing a distance, and the UI shows the raw range alone in that case.
+    out.nearUnits = LinearizeDepth(g_frame.depthStats.minRaw,
+                                   g_frame.projection.zNear, g_frame.projection.zFar);
+    out.farUnits = LinearizeDepth(g_frame.depthStats.maxRaw,
+                                  g_frame.projection.zNear, g_frame.projection.zFar);
+    if (!g_frame.hasProjection) {
+        out.nearUnits = 0.0f;
+        out.farUnits = 0.0f;
+    }
+    return true;
 }

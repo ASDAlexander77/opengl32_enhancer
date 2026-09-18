@@ -457,6 +457,16 @@ Load that file in the editor and every stage, `ssao` included, runs against genu
 with genuine depth. The dump is taken before any stage runs, so it works with `effect=none` too
 and always yields unprocessed source.
 
+**Show depth map** displays the dump's depth plane itself instead of the post-processed result.
+Depth otherwise only ever reaches the screen indirectly, through `ssao` and `depthVignette`, so
+this is the one way to check the input those stages are actually getting before blaming their
+settings. The view normalizes across the frame's own depth span, which is what makes it readable:
+raw hardware depth is hyperbolic, so a real frame covering 51–1192 world units can occupy under
+8% of the 0–1 depth range and look like a flat rectangle drawn as-is. Alongside it the editor
+reports that span in the game's world units — the unit `ssaoRadius` is denominated in — and says
+so loudly if the depth is flat, which means the dump was taken somewhere with no 3D view and
+nothing depth-based can be tuned against it.
+
 ## How it works
 
 1. Windows resolves `opengl32.dll` next to the game's `.exe` before the copy
