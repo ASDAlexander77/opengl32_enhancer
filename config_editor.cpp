@@ -11,7 +11,7 @@
 // message loop and GL context, so there is no WndProc subclassing inside someone else's process,
 // no fighting the game for input, and no risk of destabilizing a running game to move a slider.
 // The cost is that a synthetic scene is not the game's content - which is what the frame dump
-// exists to fix. Press the dump hotkey in-game (frameDumpKey, F11 by default), then load the
+// exists to fix. Press the dump hotkey in-game (frameDumpKey, F12 by default), then load the
 // file here to tune against a real frame, depth and projection included.
 #include <windows.h>
 #include <cstdio>
@@ -218,7 +218,7 @@ void DrawSceneControls() {
         ImGui::Text("Loaded frame: %dx%d, projection %s",
                     dumpWidth, dumpHeight, LoadedFrameHasProjection() ? "yes" : "no");
     } else {
-        ImGui::TextDisabled("No frame loaded. In-game, press the frameDumpKey (F11 by default)");
+        ImGui::TextDisabled("No frame loaded. In-game, press the frameDumpKey (F12 by default)");
         ImGui::TextDisabled("to write one next to the game's .exe, then point this at it.");
     }
 }

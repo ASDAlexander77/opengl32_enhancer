@@ -476,6 +476,25 @@ int main() {
         Check(config.textureEffect == EffectKind::None, "legacy textureSharpen=0 migrates to textureEffect=none");
     }
 
+    // windowWidth/windowHeight: default 0 (leave the window alone), parse, and clamp.
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.windowWidth == 0, "missing file falls back to default windowWidth=0");
+        Check(config.windowHeight == 0, "missing file falls back to default windowHeight=0");
+    }
+    {
+        WriteFixture("config_test_window_size.ini", "windowWidth=1280\nwindowHeight=720\n");
+        AnaxConfig config = ParseConfigFile("config_test_window_size.ini");
+        Check(config.windowWidth == 1280, "parses windowWidth=1280");
+        Check(config.windowHeight == 720, "parses windowHeight=720");
+    }
+    {
+        WriteFixture("config_test_window_size_clamp.ini", "windowWidth=-5\nwindowHeight=99999\n");
+        AnaxConfig config = ParseConfigFile("config_test_window_size_clamp.ini");
+        Check(config.windowWidth == 0, "out-of-range windowWidth (-5) clamps to min 0");
+        Check(config.windowHeight == 16384, "out-of-range windowHeight (99999) clamps to max 16384");
+    }
+
     if (g_failures > 0) {
         printf("\n%d check(s) FAILED\n", g_failures);
         return 1;

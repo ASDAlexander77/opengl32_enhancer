@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -87,6 +87,12 @@ add_custom_command(TARGET config_writer_test POST_BUILD
 # entry point it needs - see gl_loader_test.cpp.
 add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
 target_link_libraries(gl_loader_test opengl32 gdi32 user32)
+
+# Creates a real window (no GL context - this module never touches rendering) and checks
+# ApplyWindowSizeOverride() resizes its client area to config.h's windowWidth/windowHeight, only
+# when both are set - see window_override_test.cpp.
+add_executable(window_override_test window_override_test.cpp window_override.cpp config.cpp)
+target_link_libraries(window_override_test gdi32 user32)
 
 # Creates a real GL context and checks ApplyCas() reproduces a flat image and sharpens a
 # mid-contrast edge - see cas_test.cpp.
@@ -340,7 +346,8 @@ enable_testing()
 foreach(test_target
     ${WRAPPER_NAME_CXX}_test
     config_test
-    config_writer_test)
+    config_writer_test
+    window_override_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()

@@ -423,7 +423,7 @@ most settings. But the ones that are hardest to get right are exactly the ones i
 honestly: `ssaoRadius` is denominated in the game's own world units, and `bloomThreshold`
 depends on the actual brightness distribution of the game's art.
 
-So the DLL can hand the editor a real frame. In-game, press `frameDumpKey` (F11 by default) to
+So the DLL can hand the editor a real frame. In-game, press `frameDumpKey` (F12 by default) to
 write the current frame — color, depth and the captured projection — next to the game's `.exe`.
 Load that file in the editor and every stage, `ssao` included, runs against genuine game content
 with genuine depth. The dump is taken before any stage runs, so it works with `effect=none` too

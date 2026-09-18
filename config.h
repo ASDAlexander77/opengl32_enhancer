@@ -84,7 +84,7 @@ struct AnaxConfig {
     // against - see frame_dump.h. 0 disables the feature and the per-frame key poll with it.
     // Independent of the effect= pipeline: a dump captures the game's frame BEFORE any stage
     // runs, so it works with effect=none and always yields unprocessed source.
-    int frameDumpKey = 0x7A;                   // VK_F11
+    int frameDumpKey = 0x7B;                   // VK_F12
     char frameDumpPath[256] = "opengl32_enhancer_frame.dump";
 
     // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
@@ -92,6 +92,15 @@ struct AnaxConfig {
     // makes completely untouched; 1..16 is the anisotropy level to request (capped at runtime
     // to whatever the GPU/driver actually supports). Independent of the effect= pipeline.
     float anisotropy = 0.0f;
+
+    // Overrides the game window's size at the moment it creates its GL context (see
+    // window_override.h) - independent of the effect= pipeline, since it's a Win32 window
+    // property, not a rendered stage. Both default to 0, meaning "leave the game's own window
+    // size alone"; the override only applies when BOTH are set to a positive value, since a
+    // window size is a single (width, height) pair, and honoring just one would mean guessing
+    // the other instead of using what's actually configured.
+    int windowWidth = 0;
+    int windowHeight = 0;
 
     // Draws a small "FX" badge in a corner of the frame whenever the effect= pipeline actually
     // runs, so you can tell "the pipeline ran but nothing looked different" apart from "the

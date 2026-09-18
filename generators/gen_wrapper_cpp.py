@@ -179,6 +179,7 @@ def emit_cpp(funcs):
     lines.append('#include "texture_effect.h"')
     lines.append('#include "texture_filter.h"')
     lines.append('#include "projection_capture.h"')
+    lines.append('#include "window_override.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -235,6 +236,12 @@ def emit_cpp(funcs):
         lines.append("    }")
         if name == "wglSwapBuffers":
             lines.append("    ApplySelectedEffect();")
+        if name == "wglCreateContext":
+            # See window_override.h: resizes the game's window to config.h's
+            # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
+            # context for. Runs before the real call - it's a window property, not something
+            # the context creation itself depends on either way.
+            lines.append(f"    ApplyWindowSizeOverride({params_call});")
         if name == "glFrustum":
             # See projection_capture.h: records the world projection so depth-consuming stages
             # can unproject raw depth. Recording only - this deliberately falls through to the

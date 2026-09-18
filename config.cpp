@@ -471,9 +471,13 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.ssaoIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.ssaoIntensity, "ssaoIntensity");
         } else if (strcmp(key, "ssaoBias") == 0) {
             config.ssaoBias = ParseClampedFloat(value, 0.0f, 16.0f, config.ssaoBias, "ssaoBias");
+        } else if (strcmp(key, "windowWidth") == 0) {
+            config.windowWidth = ParseClampedInt(value, 0, 16384, config.windowWidth, "windowWidth");
+        } else if (strcmp(key, "windowHeight") == 0) {
+            config.windowHeight = ParseClampedInt(value, 0, 16384, config.windowHeight, "windowHeight");
         } else if (strcmp(key, "frameDumpKey") == 0) {
             // A Windows virtual-key code, so the sensible way to write it in an ini is hex
-            // (0x7A = F11). strtol with base 0 accepts both that and plain decimal.
+            // (0x7B = F12). strtol with base 0 accepts both that and plain decimal.
             config.frameDumpKey = ParseClampedInt(value, 0, 0xFE, config.frameDumpKey, "frameDumpKey", 0);
         } else if (strcmp(key, "frameDumpPath") == 0) {
             CopyStringValue(config.frameDumpPath, sizeof(config.frameDumpPath), value, "frameDumpPath");
@@ -513,6 +517,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
+           "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
            "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
@@ -526,6 +531,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
            config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
            config.gamma, config.brightness,
+           config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath,
            config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));
