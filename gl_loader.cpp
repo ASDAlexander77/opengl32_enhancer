@@ -157,11 +157,20 @@ bool LoadGlComputeApi(GlComputeApi& api) {
 const GlComputeApi& GetGlComputeApi() {
     // Not synchronized: like wrapper.cpp's EnsureRealOpenGL32 and other lazy-init patterns
     // in this codebase, this is only ever called from the single render thread inside the
-    // wglSwapBuffers-family hooks, so no locking is needed. Only a successful resolution is
-    // cached - a failed attempt (e.g. called before any GL context is current) is retried on
-    // every subsequent call instead of latching failure for the rest of the process. A context
-    // change also discards the cached table (see below).
+    // wglSwapBuffers-family hooks, so no locking is needed. Resolution is attempted at most
+    // once per GL context - success caches the table, failure is remembered just as firmly -
+    // and a context change discards both (see below), so a failure under one context never
+    // latches for the rest of the process.
     static GlComputeApi api;
+
+    // Whether resolution has already been attempted against the context cached below. Failure
+    // can only be caused by something fixed for the lifetime of a context - the driver simply
+    // doesn't expose these entry points - so retrying inside one context re-runs (and re-logs)
+    // forty-odd failing lookups on every single call, i.e. every frame. The context-change
+    // reset below is what actually covers the case the old unconditional retry existed for:
+    // being called before any context was current resolves nothing, leaves g_lastContext at
+    // nullptr, and the first call that DOES have a context current counts as a change.
+    static bool triedThisContext = false;
 
     // Every effect calls this before touching GL, so it's the one chokepoint where a context
     // switch can be caught. Entry points resolved via wglGetProcAddress are only valid for the
@@ -176,9 +185,11 @@ const GlComputeApi& GetGlComputeApi() {
         g_lastContext = currentContext;
         ++g_contextGeneration;
         api = GlComputeApi{};
+        triedThisContext = false;
     }
 
-    if (!api.loaded) {
+    if (!api.loaded && !triedThisContext) {
+        triedThisContext = true;
         LoadGlComputeApi(api);
     }
     return api;

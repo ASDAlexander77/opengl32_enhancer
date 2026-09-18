@@ -187,8 +187,16 @@ int main() {
         return 1;
     }
 
+    // glViewport/glClear* are GL 1.1 core, exported directly from opengl32.dll, so a plain
+    // GetProcAddress on the module resolves them - GlComputeApi only carries the 4.3-era entry
+    // points the effects themselves need.
     typedef void (__stdcall *PFNGLVIEWPORTPROC)(int, int, int, int);
-    PFNGLVIEWPORTPROC pGlViewport = (PFNGLVIEWPORTPROC)GetProcAddress(GetModuleHandleA("opengl32.dll"), "glViewport");
+    typedef void (__stdcall *PFNGLCLEARCOLORPROC)(float, float, float, float);
+    typedef void (__stdcall *PFNGLCLEARPROC)(unsigned int);
+    HMODULE glModule = GetModuleHandleA("opengl32.dll");
+    PFNGLVIEWPORTPROC pGlViewport = (PFNGLVIEWPORTPROC)GetProcAddress(glModule, "glViewport");
+    PFNGLCLEARCOLORPROC pGlClearColor = (PFNGLCLEARCOLORPROC)GetProcAddress(glModule, "glClearColor");
+    PFNGLCLEARPROC pGlClear = (PFNGLCLEARPROC)GetProcAddress(glModule, "glClear");
     pGlViewport(0, 0, width, height);
 
     bool ok = true;
@@ -352,6 +360,10 @@ int main() {
         bool grown = Check(grownClientRect.right - grownClientRect.left == dstSize &&
                             grownClientRect.bottom - grownClientRect.top == dstSize,
                             "real upscale: test window grew to a real 2x client area");
+        // Folded into `ok` as well as gating the block below: if the resize doesn't take, every
+        // assertion that actually exercises the upscale path is skipped, and this test must fail
+        // rather than report a pass for checks it never ran.
+        ok = grown && ok;
 
         if (grown) {
             AnaxConfig& mutableConfig = GetMutableAnaxConfig();
@@ -407,6 +419,61 @@ int main() {
                        "real upscale: the WHOLE bigger window's mean brightness matches the source, "
                        "not just a corner of it") && ok;
         }
+    }
+
+    // --- A fourth scenario: an OFFSET viewport must NOT be treated as a small render. ---
+    //
+    // A game whose final pass targets a region of a full-size back buffer (pillarboxed 4:3
+    // content in a wider window, a letterboxed cutscene) is not rendering small-and-then-scaled.
+    // The window is still 2x here, so the only thing separating this from the genuine upscale
+    // above is the viewport's non-zero origin - if that alone isn't enough to reject it, the
+    // rendered region gets stretched over the whole window and the image visibly jumps.
+    {
+        const int dstSize = width * 2;
+        const int offset = 64;
+
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        mutableConfig.fxIndicator = false;
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Bilinear;
+
+        // A distinctive full-window background, so anything the pipeline writes outside the
+        // rendered region is unmistakable. Cleared through a full-window viewport, since
+        // glClear is itself viewport-independent but glScissor/viewport state must not be
+        // left over from the previous scenario.
+        pGlViewport(0, 0, dstSize, dstSize);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        pGlClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+        pGlClear(GL_COLOR_BUFFER_BIT);
+
+        // The game's content, drawn into the bottom-left corner of that bigger buffer...
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+        // ...and an OFFSET sub-viewport left current, the way a pillarboxing game would.
+        pGlViewport(offset, offset, width, height);
+
+        ApplySelectedEffect(hdc);
+        ok = Check(gl.glGetError() == 0, "offset viewport: ApplySelectedEffect() left no GL error") && ok;
+
+        std::vector<unsigned char> offsetPixels((size_t)dstSize * dstSize * 4);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glReadBuffer(GL_BACK);
+        gl.glReadPixels(0, 0, dstSize, dstSize, GL_RGBA, GL_UNSIGNED_BYTE, offsetPixels.data());
+        ok = Check(gl.glGetError() == 0, "offset viewport: readback left no GL error") && ok;
+
+        // Far outside the rendered region: must still be the background. If an offset viewport
+        // were mistaken for a small render, reconstructed game content would cover this.
+        size_t farI = ((size_t)(dstSize - 40) * dstSize + (dstSize - 40)) * 4;
+        bool stillBackground = offsetPixels[farI] < 60 && offsetPixels[farI + 1] > 195 &&
+                                offsetPixels[farI + 2] < 60;
+        printf("offset viewport: far pixel rgb = %d,%d,%d (expected the green background)\n",
+               offsetPixels[farI], offsetPixels[farI + 1], offsetPixels[farI + 2]);
+        ok = Check(stillBackground,
+                   "offset viewport: content was NOT stretched over the whole window") && ok;
+
+        pGlViewport(0, 0, width, height);
     }
 
     gl.glDeleteFramebuffers(1, &patternFbo);

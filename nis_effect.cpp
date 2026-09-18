@@ -665,8 +665,14 @@ bool RunNisPipeline(NisPipelineState& state, NisVariant variant, const char* eff
             0, 0, NISHDRMode::None);
     }
     if (!configOk) {
-        printf("[opengl32_enh_cpp] nis_effect: %s config rejected (scale out of [0.5,1] "
-               "range), skipping this frame\n", effectName);
+        // Once only: this is a per-frame entry point and the rejection is caused by an argument
+        // that won't change between frames, so logging every time would be unbounded spam.
+        static bool warnedConfigRejected = false;
+        if (!warnedConfigRejected) {
+            printf("[opengl32_enh_cpp] nis_effect: %s config rejected (scale out of [0.5,1] "
+                   "range), skipping this frame\n", effectName);
+            warnedConfigRejected = true;
+        }
         return false;
     }
 

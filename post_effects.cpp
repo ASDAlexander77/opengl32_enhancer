@@ -286,14 +286,14 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
 void ApplySelectedEffect(void* hdc) {
     const AnaxConfig& config = GetAnaxConfig();
 
-    // Nothing to do at all, and - importantly - don't touch GetGlComputeApi() in that case: it
-    // re-attempts resolution and re-logs failures on every call until it succeeds, which would
-    // turn "effects are off on an old GPU" into per-frame log spam. windowWidth/windowHeight
-    // being configured is included here (even with an empty effect= list and no frame dump)
+    // Nothing to do at all - don't even reach GetGlComputeApi(). windowWidth/windowHeight being
+    // configured counts as something to do (even with an empty effect= list and no frame dump),
     // since that alone can put the game's native resolution and the real window at odds - see
     // the native/dst split below - and this proxy needs to at least stretch-fill the window for
     // that, without the player having to also list an upscale stage just to avoid a small image
-    // in the corner of a bigger window.
+    // in the corner of a bigger window. Reaching the loader on a GPU that can't support the
+    // effects is no longer a per-frame log: it resolves at most once per context (see
+    // gl_loader.cpp's GetGlComputeApi).
     bool windowSizeOverrideActive = config.windowWidth > 0 && config.windowHeight > 0;
     if (config.stageCount == 0 && config.frameDumpKey == 0 && !windowSizeOverrideActive) {
         return;
@@ -310,6 +310,8 @@ void ApplySelectedEffect(void* hdc) {
     // The game's own render resolution - whatever it last set via glViewport.
     int viewport[4] = {0, 0, 0, 0};
     gl.glGetIntegerv(GL_VIEWPORT, viewport);
+    int viewportX = viewport[0];
+    int viewportY = viewport[1];
     int nativeWidth = viewport[2];
     int nativeHeight = viewport[3];
     if (nativeWidth <= 0 || nativeHeight <= 0) {
@@ -337,18 +339,40 @@ void ApplySelectedEffect(void* hdc) {
         dstWidth = nativeWidth;
         dstHeight = nativeHeight;
     }
-    bool hasRealUpscale = (dstWidth != nativeWidth) || (dstHeight != nativeHeight);
+
+    // Deliberately strict about what counts as "the game is rendering smaller than its window":
+    //
+    //   - The viewport must start at the back buffer's origin. A game whose final pass targets a
+    //     SUB-viewport (a pillarboxed 4:3 view inside a wider window, a letterboxed cutscene) is
+    //     not rendering small-and-then-scaled, it is rendering into part of a full-size buffer -
+    //     treating it as an upscale would stretch that region over the whole window. The capture
+    //     below reads from (0,0) regardless, so an offset viewport also wouldn't be the region
+    //     the upscale then blew up.
+    //   - The window must be strictly BIGGER on both axes. A client area smaller than the render
+    //     resolution (windowWidth/windowHeight set below the game's own mode, or a frame caught
+    //     mid-resize) would otherwise produce a ratio above 1.0, which every upscaler either
+    //     clamps away or rejects outright.
+    //
+    // Anything that fails these falls through to the original same-size path: captured, run
+    // through the chain and blitted back exactly where it came from.
+    bool hasRealUpscale = viewportX == 0 && viewportY == 0 &&
+                           dstWidth > nativeWidth && dstHeight > nativeHeight;
+
+    // The exact ratio that maps the real (physically smaller) native-resolution source across a
+    // destination-sized output - see fsr.h/bilinear_upscale.cpp/nis_effect.cpp: their `scale`
+    // describes a virtual source grid laid over the full output size, which is precisely what a
+    // genuinely smaller physical source texture needs.
+    float realUpscaleRatio = hasRealUpscale ? (float)nativeWidth / (float)dstWidth : 1.0f;
+
     if (hasRealUpscale) {
-        // The upscalers apply one scalar ratio to both axes (see bilinear_upscale.cpp/fsr.cpp/
-        // nis_effect.cpp) - correct as long as native and window share an aspect ratio, which is
-        // what setting windowWidth/windowHeight to a clean multiple of the game's own resolution
-        // gives you. A mismatched aspect ratio still runs (using the width ratio), it just comes
-        // out stretched vertically - flagged once rather than silently producing a subtly wrong
-        // image.
-        float widthRatio = (float)nativeWidth / (float)dstWidth;
+        // The upscalers apply one scalar ratio to both axes - correct as long as native and
+        // window share an aspect ratio, which is what setting windowWidth/windowHeight to a clean
+        // multiple of the game's own resolution gives you. A mismatched aspect ratio still runs
+        // (using the width ratio), it just comes out stretched vertically - flagged once rather
+        // than silently producing a subtly wrong image.
         float heightRatio = (float)nativeHeight / (float)dstHeight;
         static bool warnedAspect = false;
-        if (!warnedAspect && fabsf(widthRatio - heightRatio) > 0.01f) {
+        if (!warnedAspect && fabsf(realUpscaleRatio - heightRatio) > 0.01f) {
             printf("[opengl32_enh_cpp] post_effects: native resolution %dx%d and window %dx%d "
                    "don't share an aspect ratio - an upscale stage will stretch the image\n",
                    nativeWidth, nativeHeight, dstWidth, dstHeight);
@@ -484,6 +508,23 @@ void ApplySelectedEffect(void* hdc) {
         // at destination resolution like any other same-size stage, using config.scale as usual.
         bool doRealUpscale = isUpscaleStage && atNativeRes && hasRealUpscale;
 
+        // NVScaler (NIS) is only defined for a 1x..2x resize: nis_effect.cpp's
+        // NVScalerUpdateConfig rejects a ratio outside [0.5, 1] outright, and being a public
+        // entry point it has no way to know it is being called once per frame. Skip the stage
+        // rather than hand it a ratio it will refuse every frame - the implicit stretch after
+        // this loop still fills the window, and fsr/bilinear have no such limit.
+        if (doRealUpscale && stage == EffectKind::NVScaler && realUpscaleRatio < 0.5f) {
+            static bool warnedNvScalerRange = false;
+            if (!warnedNvScalerRange) {
+                printf("[opengl32_enh_cpp] post_effects: 'nvscaler' cannot upscale beyond 2x "
+                       "(window %dx%d is more than double the game's %dx%d), so it is being "
+                       "skipped. Use 'fsr' or 'bilinear' for this ratio.\n",
+                       dstWidth, dstHeight, nativeWidth, nativeHeight);
+                warnedNvScalerRange = true;
+            }
+            continue;
+        }
+
         unsigned int src = pair[cur];
         unsigned int dst;
         int dstW, dstH;
@@ -497,13 +538,9 @@ void ApplySelectedEffect(void* hdc) {
             dstH = curHeight;
         }
 
-        // The exact ratio needed to map the real (physically smaller) native-resolution src
-        // texture across the destination-sized output - see fsr.h/bilinear_upscale.cpp/
-        // nis_effect.cpp: their `scale` describes a virtual source grid laid over the full
-        // output size, which is precisely what a genuinely smaller physical source texture
-        // needs. config.scale is deliberately NOT used here; it would additionally simulate a
-        // lower-res look on top of a resize that is already real.
-        float upscaleRatio = doRealUpscale ? (float)nativeWidth / (float)dstWidth : config.scale;
+        // config.scale is deliberately NOT used for a real upscale: it would additionally
+        // simulate a lower-res look on top of a resize that is already real.
+        float upscaleRatio = doRealUpscale ? realUpscaleRatio : config.scale;
 
         bool wrote = false;
         switch (stage) {
