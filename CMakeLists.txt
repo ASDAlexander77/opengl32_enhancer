@@ -44,6 +44,21 @@ add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp g
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
+# Static CRT, for the same reason config_editor uses one (see its target below), and one more
+# that is specific to being a proxy DLL: this gets loaded into somebody else's process, next to
+# whatever CRT that game already carries. Linking the runtime in means the proxy depends on the
+# host for nothing but the OS, so a machine without the VC++ redistributable loads it fine
+# instead of failing before DllMain - which, for a proxy whose whole failure mode is "the game
+# just looks normal", is a particularly opaque way to break.
+#
+# The safety question for a DLL is real but answerable: a static CRT goes wrong when a module
+# hands a CRT-owned resource (heap allocation, FILE*, errno) to a different module that then
+# releases it. Nothing here does. The exports forward the opengl32 API - GL handles and
+# primitives - and every malloc/new inside (post_effects.cpp, frame_dump.cpp,
+# texture_effect.cpp) is freed by the same function that made it.
+set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
 
 # Loads opengl32_enh32.dll by name (same output directory) and calls a couple of
 # functions through it, the same sanity check test.ts does for the x64 build.
@@ -275,16 +290,15 @@ target_link_libraries(config_editor opengl32 gdi32 user32 dwmapi imm32)
 # reports through printf - so give it a console back. Without this, every diagnostic from the
 # config parser, the GL loader and the stages themselves would go nowhere.
 set_target_properties(config_editor PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
-# Static CRT for this target only (cmake_minimum_required(3.20) puts CMP0091 at NEW, so this
-# property is what selects it - there is no /MD in CMAKE_CXX_FLAGS to fight). Unlike every
-# other target here, this one is shipped to end users as a standalone double-clickable .exe
-# (see .github/workflows/build.yml), where a missing VC++ redistributable is a loader error box
-# before a single line of our code runs - no console message, nothing to go on. Linking the CRT
-# in costs a couple hundred KB and makes the editor self-contained.
+# Static CRT, like the proxy DLL above. Those two are exactly the targets that ship (see
+# .github/workflows/build.yml); the test executables stay on the default dynamic CRT, since
+# nothing hands those to a user. It matters most here: this is the binary an end user
+# double-clicks, and a missing VC++ redistributable is a loader error box before a single line
+# of our code runs - no console message, nothing to go on.
 #
-# Safe precisely because it IS standalone: static CRT is a problem when modules pass ownership
-# of CRT resources (allocations, FILE*, errno) across a boundary, and this target is its own
-# process that shares none with anything.
+# Here it is safe with none of the DLL's caveats: a static CRT goes wrong when modules pass
+# ownership of CRT resources across a boundary, and this target is its own process, sharing
+# none with anything.
 set_target_properties(config_editor PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )

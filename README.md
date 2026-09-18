@@ -70,7 +70,7 @@ it changes nothing about how the DLL behaves.
 | **OS** | Windows |
 | **Game** | 32-bit, rendering through OpenGL (`opengl32.dll`) |
 | **GPU** | Anything supporting OpenGL 4.3 compute shaders |
-| **Runtime** | The [Visual C++ 2015-2022 redistributable (x86)](https://aka.ms/vs/17/release/vc_redist.x86.exe), which `opengl32.dll` links against. Most systems already have it. `config_editor.exe` links its CRT statically and needs nothing |
+| **Runtime** | Nothing to install. Both `opengl32.dll` and `config_editor.exe` link the C runtime statically, so no Visual C++ redistributable is needed — the DLL imports only `kernel32` and `user32` |
 
 Direct3D and Vulkan games are not affected — this proxy only sees OpenGL
 calls. If the GPU or driver cannot provide GL 4.3 compute, the affected stage
