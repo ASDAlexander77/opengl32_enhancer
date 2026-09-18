@@ -107,6 +107,8 @@ int main() {
     // Change one of each kind the writer formats differently: a float, an int, a bool, an enum
     // name and the ordered stage list.
     config.ssaoRadius = 37.5f;
+    config.gamma = 2.2f;
+    config.brightness = 1.4f;
     config.nrPasses = 3;
     config.fxIndicator = !config.fxIndicator;
     bool expectedIndicator = config.fxIndicator;
@@ -139,6 +141,10 @@ int main() {
     AnaxConfig reloaded = ParseConfigFile(kWorkIni);
     ok = Check(reloaded.ssaoRadius > 37.4f && reloaded.ssaoRadius < 37.6f,
                "float value round-tripped (ssaoRadius)") && ok;
+    ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
+               "float value round-tripped (gamma)") && ok;
+    ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,
+               "float value round-tripped (brightness)") && ok;
     ok = Check(reloaded.nrPasses == 3, "int value round-tripped (nrPasses)") && ok;
     ok = Check(reloaded.fxIndicator == expectedIndicator, "bool value round-tripped (fxIndicator)") && ok;
     ok = Check(reloaded.textureEffect == EffectKind::Invert, "enum value round-tripped (textureEffect)") && ok;

@@ -280,6 +280,56 @@ int main() {
            "whether the current config actually looks right - that part is a human call, "
            "not something this test can assert.\n");
 
+    // --- A second, config-independent scenario: the `gamma` stage is actually WIRED UP. ---
+    //
+    // Everything above deliberately tests whatever the shipped ini happens to say, which means
+    // it says nothing about a stage the ini doesn't currently list. A stage that exists in
+    // EffectKind and parses fine but was never given a case in ApplySelectedEffect()'s switch
+    // fails completely silently: it writes nothing, `cur` never flips, and the frame is
+    // presented untouched. No compiler diagnostic, no GL error, no log line. So drive one
+    // through the mutable config the way the editor does and check the image really moved.
+    //
+    // fxIndicator has to go off first: the badge is drawn whenever stageCount > 0, regardless
+    // of whether any stage ran, so leaving it on would supply a pixel difference all by itself
+    // and turn this into a check that always passes.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        mutableConfig.fxIndicator = false;
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Gamma;
+        mutableConfig.gamma = 2.2f;
+        mutableConfig.brightness = 1.0f;
+
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+        ApplySelectedEffect();
+
+        std::vector<unsigned char> gammaPixels((size_t)width * height * 4);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glReadBuffer(GL_BACK);
+        gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, gammaPixels.data());
+        ok = Check(gl.glGetError() == 0, "effect=gamma: ApplySelectedEffect() left no GL error") && ok;
+
+        // gamma=2.2 is a brightening curve, so the mean must rise, not merely differ - a
+        // difference alone would also be satisfied by a stage wired to the wrong function.
+        double inputMean = 0.0, gammaMean = 0.0;
+        size_t sampled = 0;
+        for (size_t i = 0; i < inputPixels.size(); i += 4) {
+            for (int ch = 0; ch < 3; ++ch) {
+                inputMean += inputPixels[i + ch];
+                gammaMean += gammaPixels[i + ch];
+                ++sampled;
+            }
+        }
+        inputMean /= (double)sampled;
+        gammaMean /= (double)sampled;
+        printf("effect=gamma (2.2): mean channel %.2f -> %.2f\n", inputMean, gammaMean);
+        ok = Check(gammaMean > inputMean + 10.0,
+                   "effect=gamma is wired into ApplySelectedEffect() and brightened the frame") && ok;
+    }
+
     gl.glDeleteFramebuffers(1, &patternFbo);
     gl.glDeleteTextures(1, &patternTex);
 

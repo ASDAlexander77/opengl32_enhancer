@@ -27,6 +27,7 @@ enum class EffectKind {
     LocalContrast,
     DepthVignette,
     Ssao,
+    Gamma,
 };
 
 // Plenty of headroom for the real stages, even if a config lists some of them twice.
@@ -71,6 +72,12 @@ struct AnaxConfig {
     float ssaoRadius = 24.0f;                  // Ssao
     float ssaoIntensity = 0.5f;                // Ssao
     float ssaoBias = 0.5f;                     // Ssao
+
+    // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
+    // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact
+    // passthrough. See gamma.h for why brightness is a gain and not an additive offset.
+    float gamma = 1.0f;                        // Gamma
+    float brightness = 1.0f;                   // Gamma
 
     // Writes the current frame (color + depth + the captured projection) to frameDumpPath when
     // this virtual-key code is pressed, for the standalone config editor to load and tune

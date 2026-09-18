@@ -89,6 +89,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `localcontrast` | Local tone/structure boost ("clarity"/"texture") |
 | `ssao` | Screen-space ambient occlusion — contact shadows in creases and corners |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
+| `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
 | `invert` | Debug/demo — inverts the image |
 
@@ -128,6 +129,10 @@ cases:
 
 `dither` belongs last, so it dithers the finished image immediately before it
 reaches the 8-bit back buffer.
+
+`gamma` is an output correction, so it wants the same end of the chain — after
+grading, immediately before `dither`. Putting it early instead is a legitimate
+thing to try, using `brightness` as an exposure control feeding `acestonemap`.
 
 ### Choosing an anti-aliasing stage: TAA vs SMAA
 
@@ -223,6 +228,33 @@ controls act at genuinely different, independent spatial scales.
 | `localToneStrength` | Boosts broad midtone separation — the classic "clarity" look (large blur radius) |
 
 Both default to a modest `0.3`; `0` for either disables that layer.
+
+### Gamma and brightness: `gamma`
+
+The "everything is too dark on my monitor" control. Per pixel, in this order:
+
+```
+c = max(color.rgb * brightness, 0)
+c = pow(c, vec3(1 / gamma))
+```
+
+`brightness` is applied first, and as a **gain** rather than an offset. That is
+what makes this a real gamma curve instead of an additive lift: black is `0`,
+`0 * anything` is still `0`, so the floor stays put at every setting. An
+additive brightness control raises black off the floor, and the image goes grey
+and washed out long before it looks brighter.
+
+| Parameter | What it does |
+| --- | --- |
+| `gamma` | Display exponent, `0.5`–`3.0`. `1.0` is an exact no-op, above `1.0` brightens the midtones, below `1.0` darkens them. `2.2` is the classic correction. The low end stops at `0.5` because the shader divides by this value |
+| `brightness` | Linear gain applied before the exponent, `0.0`–`2.0`. `1.0` is a no-op |
+
+Both default to `1.0`, so listing `gamma` in `effect=` and leaving the values
+alone costs one dispatch and changes nothing.
+
+Note that this acts on the **composited frame**, unlike a game's own
+brightness/gamma cvars, which typically rebuild palettes or relight lightmaps —
+so it reaches content those never touch, and the two stack if you use both.
 
 ### Example configurations
 

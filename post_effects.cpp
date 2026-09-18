@@ -26,6 +26,7 @@
 #include "chromatic_aberration.h"
 #include "taa.h"
 #include "dither.h"
+#include "gamma.h"
 #include "smaa.h"
 #include "fsr.h"
 #include "cas.h"
@@ -393,6 +394,9 @@ void ApplySelectedEffect() {
                 break;
             case EffectKind::Dither:
                 wrote = ApplyDither(src, dst, width, height, config.ditherStrength);
+                break;
+            case EffectKind::Gamma:
+                wrote = ApplyGamma(src, dst, width, height, config.gamma, config.brightness);
                 break;
             case EffectKind::Smaa:
                 wrote = ApplySmaa(src, dst, width, height);

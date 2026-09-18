@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -133,6 +133,13 @@ target_link_libraries(bloom_test opengl32 gdi32 user32)
 # one 8-bit step) - see dither_test.cpp.
 add_executable(dither_test dither_test.cpp dither.cpp gl_loader.cpp)
 target_link_libraries(dither_test opengl32 gdi32 user32)
+
+# Creates a real GL context, uploads a four-step grey wedge, and checks ApplyGamma()'s GPU
+# pipeline is an exact passthrough at gamma=1/brightness=1, a straight linear gain at
+# brightness alone, and a true gamma curve at gamma alone - midtones lifted to their arithmetic
+# values with black and white both left pinned - see gamma_test.cpp.
+add_executable(gamma_test gamma_test.cpp gamma.cpp gl_loader.cpp)
+target_link_libraries(gamma_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyVignette()'s GPU pipeline
 # at intensity=0 (must reproduce the input exactly everywhere, corners included) and at a strong
@@ -227,7 +234,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp
-    chromatic_aberration.cpp taa.cpp dither.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
+    chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
     local_contrast.cpp fx_indicator.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
@@ -254,7 +261,7 @@ add_executable(config_editor WIN32
     config_editor.cpp editor_scene.cpp config_writer.cpp
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
@@ -323,6 +330,7 @@ foreach(test_target
     lut_grading_test
     bloom_test
     dither_test
+    gamma_test
     vignette_test
     depth_vignette_test
     ssao_test

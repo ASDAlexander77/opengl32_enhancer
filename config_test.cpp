@@ -290,6 +290,43 @@ int main() {
         Check(config.ditherStrength == 0.0f, "out-of-range ditherStrength (-1.0) clamps to min 0.0");
     }
 
+    // The gamma stage: both parameters default to an exact passthrough, parse, and clamp to
+    // the ranges gamma.h documents. The defaults matter more here than for most stages -
+    // `gamma`/`brightness` are the settings a user is most likely to reach for first, and a
+    // default that was anything other than 1.0 would silently alter every config that never
+    // mentions them.
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.gamma == 1.0f, "missing file falls back to default gamma=1.0 (no-op)");
+        Check(config.brightness == 1.0f, "missing file falls back to default brightness=1.0 (no-op)");
+    }
+    {
+        WriteFixture("config_test_gamma.ini",
+            "effect=acestonemap, Gamma, dither\n"
+            "gamma=2.2\n"
+            "brightness=1.25\n");
+        AnaxConfig config = ParseConfigFile("config_test_gamma.ini");
+        const EffectKind expected[] = {EffectKind::AcesToneMap, EffectKind::Gamma, EffectKind::Dither};
+        CheckStages(config, expected, 3, "effect=gamma parses as a stage, in list order");
+        Check(config.gamma == 2.2f, "parses gamma=2.2");
+        Check(config.brightness == 1.25f, "parses brightness=1.25");
+    }
+    {
+        WriteFixture("config_test_gamma_clamp.ini",
+            "gamma=10.0\n"
+            "brightness=-1.0\n");
+        AnaxConfig config = ParseConfigFile("config_test_gamma_clamp.ini");
+        Check(config.gamma == 3.0f, "out-of-range gamma (10.0) clamps to max 3.0");
+        Check(config.brightness == 0.0f, "out-of-range brightness (-1.0) clamps to min 0.0");
+    }
+    {
+        // gamma=0 would be a divide-by-zero in the shader's 1/gamma, so the low clamp is the
+        // thing standing between a typo and a frame of infinities.
+        WriteFixture("config_test_gamma_zero.ini", "gamma=0\n");
+        AnaxConfig config = ParseConfigFile("config_test_gamma_zero.ini");
+        Check(config.gamma == 0.5f, "gamma=0 clamps up to min 0.5 rather than dividing by zero");
+    }
+
     // The FSR extras parse, clamp and default like every other per-stage parameter.
     {
         AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");

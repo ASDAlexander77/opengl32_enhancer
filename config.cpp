@@ -117,6 +117,7 @@ const StageName kStageNames[] = {
     {EffectKind::LocalContrast,       "localcontrast"},
     {EffectKind::DepthVignette,       "depthvignette"},
     {EffectKind::Ssao,                "ssao"},
+    {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
 
@@ -433,6 +434,12 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.fsrDenoise = ParseBool(value, config.fsrDenoise, "fsrDenoise");
         } else if (strcmp(key, "fsrFilmGrain") == 0) {
             config.fsrFilmGrain = ParseClampedFloat(value, 0.0f, 1.0f, config.fsrFilmGrain, "fsrFilmGrain");
+        } else if (strcmp(key, "gamma") == 0) {
+            // The low clamp is 0.5, not 0: the shader divides by this, so 0 would be an
+            // infinity sprayed across the whole frame. See gamma.h.
+            config.gamma = ParseClampedFloat(value, 0.5f, 3.0f, config.gamma, "gamma");
+        } else if (strcmp(key, "brightness") == 0) {
+            config.brightness = ParseClampedFloat(value, 0.0f, 2.0f, config.brightness, "brightness");
         } else if (strcmp(key, "ditherStrength") == 0) {
             config.ditherStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.ditherStrength, "ditherStrength");
         } else if (strcmp(key, "nrIntensity") == 0) {
@@ -505,6 +512,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
+           "gamma=%.3f, brightness=%.3f, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
            "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
@@ -517,6 +525,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
            config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
+           config.gamma, config.brightness,
            config.frameDumpKey, config.frameDumpPath,
            config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));

@@ -54,7 +54,7 @@ const EffectKind kAllStages[] = {
     EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::LutGrading,
     EffectKind::Vignette, EffectKind::DepthVignette, EffectKind::ChromaticAberration,
     EffectKind::Taa, EffectKind::Smaa, EffectKind::Cas, EffectKind::Sharpen,
-    EffectKind::Dither, EffectKind::Invert,
+    EffectKind::Gamma, EffectKind::Dither, EffectKind::Invert,
 };
 const int kAllStageCount = (int)(sizeof(kAllStages) / sizeof(kAllStages[0]));
 
@@ -167,6 +167,15 @@ void DrawParameters(AnaxConfig& config) {
         ImGui::SliderFloat("nrGrainPreservation", &config.nrGrainPreservation, 0.0f, 1.0f);
         ImGui::SliderFloat("localStructureStrength", &config.localStructureStrength, 0.0f, 2.0f);
         ImGui::SliderFloat("localToneStrength", &config.localToneStrength, 0.0f, 2.0f);
+    }
+    if (ImGui::CollapsingHeader("Gamma / brightness")) {
+        ImGui::SliderFloat("gamma", &config.gamma, 0.5f, 3.0f);
+        ImGui::SliderFloat("brightness", &config.brightness, 0.0f, 2.0f);
+        ImGui::TextDisabled("1.0/1.0 is an exact no-op. brightness is a gain applied before");
+        ImGui::TextDisabled("the exponent, so black stays black at every setting.");
+        if (!HasEffectStage(config, EffectKind::Gamma)) {
+            ImGui::TextDisabled("`gamma` is not in the pipeline above - these do nothing yet.");
+        }
     }
     if (ImGui::CollapsingHeader("Output / misc")) {
         ImGui::SliderFloat("ditherStrength", &config.ditherStrength, 0.0f, 1.0f);
