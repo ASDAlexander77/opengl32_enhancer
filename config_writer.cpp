@@ -24,6 +24,9 @@ const char* const kManagedKeys[] = {
     "ssaoRadius",
     "ssaoIntensity",
     "ssaoBias",
+    "dofFocusDistance",
+    "dofFocusRange",
+    "dofBlurStrength",
     "gamma",
     "brightness",
     "depthVignetteIntensity",
@@ -82,6 +85,9 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "ssaoRadius") == 0)                  { out = FormatFloat(config.ssaoRadius); return true; }
     if (strcmp(key, "ssaoIntensity") == 0)               { out = FormatFloat(config.ssaoIntensity); return true; }
     if (strcmp(key, "ssaoBias") == 0)                    { out = FormatFloat(config.ssaoBias); return true; }
+    if (strcmp(key, "dofFocusDistance") == 0)            { out = FormatFloat(config.dofFocusDistance); return true; }
+    if (strcmp(key, "dofFocusRange") == 0)               { out = FormatFloat(config.dofFocusRange); return true; }
+    if (strcmp(key, "dofBlurStrength") == 0)             { out = FormatFloat(config.dofBlurStrength); return true; }
     if (strcmp(key, "gamma") == 0)                       { out = FormatFloat(config.gamma); return true; }
     if (strcmp(key, "brightness") == 0)                  { out = FormatFloat(config.brightness); return true; }
     if (strcmp(key, "depthVignetteIntensity") == 0)      { out = FormatFloat(config.depthVignetteIntensity); return true; }

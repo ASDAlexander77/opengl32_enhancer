@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -181,6 +181,12 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 add_executable(depth_vignette_test depth_vignette_test.cpp depth_vignette.cpp gl_loader.cpp)
 target_link_libraries(depth_vignette_test opengl32 gdi32 user32)
 
+# Creates a real GL context, renders a hard dark/bright edge at two very different depths under
+# a real perspective frustum, and checks ApplyDof() leaves the in-focus edge bit-exact while
+# measurably smearing the out-of-focus one - see dof_test.cpp.
+add_executable(dof_test dof_test.cpp dof.cpp gl_loader.cpp projection_capture.cpp)
+target_link_libraries(dof_test opengl32 gdi32 user32)
+
 # Creates a real GL context, renders a 3D scene under a real glFrustum projection (a wall with a
 # box in front of it), and checks ApplySsao()'s two-pass GPU pipeline reproduces the input exactly
 # at intensity=0, produces occlusion beside the box but not on open wall at full intensity, and
@@ -258,7 +264,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # (everything except wrapper.cpp itself, which this doesn't need).
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp projection_capture.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
     local_contrast.cpp fx_indicator.cpp window_override.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
@@ -286,7 +292,7 @@ add_executable(config_editor WIN32
     config_editor.cpp editor_scene.cpp config_writer.cpp
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp
@@ -374,6 +380,7 @@ foreach(test_target
     vignette_test
     depth_vignette_test
     ssao_test
+    dof_test
     chromatic_aberration_test
     smaa_test
     nr_test

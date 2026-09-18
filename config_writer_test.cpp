@@ -107,6 +107,11 @@ int main() {
     // Change one of each kind the writer formats differently: a float, an int, a bool, an enum
     // name and the ordered stage list.
     config.ssaoRadius = 37.5f;
+    // dof's settings are world-unit denominated like ssaoRadius, and a stage whose settings the
+    // editor silently drops on save is worse than one that isn't there - so they round-trip too.
+    config.dofFocusDistance = 125.0f;
+    config.dofFocusRange = 48.0f;
+    config.dofBlurStrength = 0.65f;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -141,6 +146,12 @@ int main() {
     AnaxConfig reloaded = ParseConfigFile(kWorkIni);
     ok = Check(reloaded.ssaoRadius > 37.4f && reloaded.ssaoRadius < 37.6f,
                "float value round-tripped (ssaoRadius)") && ok;
+    ok = Check(reloaded.dofFocusDistance > 124.9f && reloaded.dofFocusDistance < 125.1f,
+               "float value round-tripped (dofFocusDistance)") && ok;
+    ok = Check(reloaded.dofFocusRange > 47.9f && reloaded.dofFocusRange < 48.1f,
+               "float value round-tripped (dofFocusRange)") && ok;
+    ok = Check(reloaded.dofBlurStrength > 0.64f && reloaded.dofBlurStrength < 0.66f,
+               "float value round-tripped (dofBlurStrength)") && ok;
     ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
                "float value round-tripped (gamma)") && ok;
     ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,

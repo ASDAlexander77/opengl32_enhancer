@@ -27,6 +27,7 @@ enum class EffectKind {
     LocalContrast,
     DepthVignette,
     Ssao,
+    Dof,
     Gamma,
 };
 
@@ -72,6 +73,14 @@ struct AnaxConfig {
     float ssaoRadius = 24.0f;                  // Ssao
     float ssaoIntensity = 0.5f;                // Ssao
     float ssaoBias = 0.5f;                     // Ssao
+
+    // Dof. focusDistance and focusRange are in the GAME'S OWN WORLD UNITS, like ssaoRadius -
+    // see dof.h for why depth-denominated settings have to be. focusDistance 0 means "focus on
+    // whatever is at the centre of the screen", which is what makes a single setting work as
+    // the player walks around instead of only in the room it was tuned in.
+    float dofFocusDistance = 0.0f;             // Dof, 0 = auto-focus on screen centre
+    float dofFocusRange = 64.0f;               // Dof
+    float dofBlurStrength = 0.0f;              // Dof, 0 = exact no-op
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact

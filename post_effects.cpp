@@ -35,6 +35,7 @@
 #include "local_contrast.h"
 #include "fx_indicator.h"
 #include "depth_vignette.h"
+#include "dof.h"
 #include "ssao.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
@@ -399,7 +400,8 @@ void ApplySelectedEffect(void* hdc) {
     gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
     bool needDepth = HasEffectStage(config, EffectKind::DepthVignette) ||
-                      HasEffectStage(config, EffectKind::Ssao);
+                      HasEffectStage(config, EffectKind::Ssao) ||
+                      HasEffectStage(config, EffectKind::Dof);
     EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth);
 
     auto restoreState = [&]() {
@@ -489,7 +491,8 @@ void ApplySelectedEffect(void* hdc) {
         // resolution there is no depth data left to sample, so a depth-consuming stage listed
         // after the upscaler can only no-op. Logged once so a misordered effect= list is
         // diagnosable instead of silently doing nothing.
-        bool isDepthStage = (stage == EffectKind::DepthVignette || stage == EffectKind::Ssao);
+        bool isDepthStage = (stage == EffectKind::DepthVignette || stage == EffectKind::Ssao ||
+                             stage == EffectKind::Dof);
         if (isDepthStage && !atNativeRes) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
@@ -606,6 +609,16 @@ void ApplySelectedEffect(void* hdc) {
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold);
                 break;
+            case EffectKind::Dof: {
+                // Needs the projection for the same reason ssao does - dof.h's distances are in
+                // world units, and raw depth cannot be turned into those without the frustum.
+                ProjectionParams dofProjection;
+                wrote = depthCaptured && GetCapturedProjection(dofProjection) &&
+                         ApplyDof(src, dst, g_pipeline.depthTex, dstW, dstH, dofProjection,
+                                  config.dofFocusDistance, config.dofFocusRange,
+                                  config.dofBlurStrength);
+                break;
+            }
             case EffectKind::Ssao: {
                 // Unlike every other stage, this needs the game's projection to unproject depth
                 // - see ssao.h. GetCapturedProjection() is false until the game first sets up a

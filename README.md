@@ -28,6 +28,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Choosing a sharpener: sharpen vs FSR vs CAS](#choosing-a-sharpener-sharpen-vs-fsr-vs-cas)
   - [Noise reduction: nr](#noise-reduction-nr)
   - [Ambient occlusion: ssao](#ambient-occlusion-ssao)
+  - [Depth of field: dof](#depth-of-field-dof)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
@@ -99,6 +100,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `nr` | Edge-aware (bilateral) noise reduction |
 | `localcontrast` | Local tone/structure boost ("clarity"/"texture") |
 | `ssao` | Screen-space ambient occlusion — contact shadows in creases and corners |
+| `dof` | Depth of field — blurs whatever is not at the focus distance |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
@@ -226,6 +228,31 @@ rather than read from a G-buffer the wrapper doesn't have, so they are unreliabl
 geometry and at silhouette edges. And 2D/HUD elements typically don't write depth, so they carry
 whatever the world left behind them — meaning the HUD can pick up occlusion from geometry it is
 drawn over. How visible that is depends entirely on the game's HUD.
+
+### Depth of field: `dof`
+
+Blurs whatever is not at the focus distance, using the game's own depth buffer. Unlike every
+stage above it, and like `ssao`, this needs the game's projection as well as its depth — its
+distances are in the game's own world units, and raw hardware depth cannot be converted into
+those without the frustum. It no-ops rather than guessing when either is missing.
+
+| Setting | What it does |
+| --- | --- |
+| `dofFocusDistance` | The distance that stays perfectly sharp, in world units. **`0` means auto** — focus on whatever is at the centre of the screen, so focus follows the player instead of staying pinned to the distance one room happened to need |
+| `dofFocusRange` | Width of the fully sharp band around the focus distance, in world units, and also the distance over which blur ramps to full beyond it. Small is shallow and cinematic; large keeps most of the scene sharp |
+| `dofBlurStrength` | `0`..`1`, scaling the maximum blur radius. `0` is an exact no-op, and is the default — depth of field is a strong stylistic choice, not a correction |
+
+Put `dof` **early** in the chain, before `acestonemap` and `lutgrading`, for the same reason
+`ssao` goes early: blurring a finished grade smears the grade rather than the scene.
+
+Two limitations worth knowing. A blurred foreground will not correctly spill over a sharp
+background — the blur is a gather, not a scatter, so it can soften an out-of-focus object but
+cannot make it bleed past its own silhouette. And auto-focus snaps rather than glides: it reads
+the centre depth fresh every frame, so walking past a doorway changes focus instantly where a
+real lens would drift. Both are fixable, neither is free, and neither is worth it until the
+basic effect is tuned to taste. Also note that HUD elements typically do not write depth, so
+they inherit whatever the world left behind them and can blur along with it — the same caveat
+`ssao` carries.
 
 ### Local contrast: `localcontrast`
 
@@ -453,7 +480,7 @@ depends on the actual brightness distribution of the game's art.
 
 So the DLL can hand the editor a real frame. In-game, press `frameDumpKey` (F12 by default) to
 write the current frame — color, depth and the captured projection — next to the game's `.exe`.
-Load that file in the editor and every stage, `ssao` included, runs against genuine game content
+Load that file in the editor and every stage, `ssao` and `dof` included, runs against genuine game content
 with genuine depth. The dump is taken before any stage runs, so it works with `effect=none` too
 and always yields unprocessed source.
 

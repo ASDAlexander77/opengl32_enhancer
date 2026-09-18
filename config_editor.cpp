@@ -55,6 +55,7 @@ const EffectKind kAllStages[] = {
     EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::LutGrading,
     EffectKind::Vignette, EffectKind::DepthVignette, EffectKind::ChromaticAberration,
     EffectKind::Taa, EffectKind::Smaa, EffectKind::Cas, EffectKind::Sharpen,
+    EffectKind::Dof,
     EffectKind::Gamma, EffectKind::Dither, EffectKind::Invert,
 };
 const int kAllStageCount = (int)(sizeof(kAllStages) / sizeof(kAllStages[0]));
@@ -154,6 +155,11 @@ void DrawParameters(AnaxConfig& config) {
         ImGui::SliderFloat("depthVignetteIntensity", &config.depthVignetteIntensity, 0.0f, 1.0f);
         ImGui::SliderFloat("depthVignetteThreshold", &config.depthVignetteThreshold, 0.0f, 1.0f);
         ImGui::SliderFloat("chromaticAberrationStrength", &config.chromaticAberrationStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("dofBlurStrength", &config.dofBlurStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("dofFocusDistance", &config.dofFocusDistance, 0.0f, 2048.0f);
+        ImGui::SliderFloat("dofFocusRange", &config.dofFocusRange, 0.1f, 2048.0f);
+        ImGui::TextDisabled("dof distances are in WORLD UNITS, like ssaoRadius - the loaded");
+        ImGui::TextDisabled("frame's own range is shown under Scene. 0 distance = auto-focus.");
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);

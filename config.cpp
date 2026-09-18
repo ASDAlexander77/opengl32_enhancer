@@ -117,6 +117,7 @@ const StageName kStageNames[] = {
     {EffectKind::LocalContrast,       "localcontrast"},
     {EffectKind::DepthVignette,       "depthvignette"},
     {EffectKind::Ssao,                "ssao"},
+    {EffectKind::Dof,                 "dof"},
     {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
@@ -462,6 +463,14 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.depthVignetteIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.depthVignetteIntensity, "depthVignetteIntensity");
         } else if (strcmp(key, "depthVignetteThreshold") == 0) {
             config.depthVignetteThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.depthVignetteThreshold, "depthVignetteThreshold");
+        } else if (strcmp(key, "dofFocusDistance") == 0) {
+            // 0 is meaningful here (auto-focus), so the lower bound is 0 rather than a minimum
+            // sensible distance. The upper bound matches ssaoRadius's world-unit scale.
+            config.dofFocusDistance = ParseClampedFloat(value, 0.0f, 16384.0f, config.dofFocusDistance, "dofFocusDistance");
+        } else if (strcmp(key, "dofFocusRange") == 0) {
+            config.dofFocusRange = ParseClampedFloat(value, 0.1f, 16384.0f, config.dofFocusRange, "dofFocusRange");
+        } else if (strcmp(key, "dofBlurStrength") == 0) {
+            config.dofBlurStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.dofBlurStrength, "dofBlurStrength");
         } else if (strcmp(key, "ssaoRadius") == 0) {
             // World units, so the upper bound is deliberately far above the 0..1 most values
             // here use - see config.h. 512 is well past useful for a Quake II-scale map and
@@ -516,6 +525,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
            "ssaoRadius=%.3f, ssaoIntensity=%.3f, ssaoBias=%.3f, "
+           "dofFocusDistance=%.3f, dofFocusRange=%.3f, dofBlurStrength=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
@@ -530,6 +540,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,
            config.shimmerSuppression, config.depthVignetteIntensity, config.depthVignetteThreshold,
            config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
+           config.dofFocusDistance, config.dofFocusRange, config.dofBlurStrength,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath,
