@@ -32,6 +32,33 @@ void GetClientSize(HWND hwnd, int& width, int& height) {
     height = rect.bottom - rect.top;
 }
 
+// The largest CLIENT area a window of this style can actually reach on this desktop.
+//
+// DefWindowProc caps a sizable window at SM_CXMAXTRACK x SM_CYMAXTRACK - the desktop plus about
+// 20px - when it handles WM_GETMINMAXINFO, and SetWindowPos silently honours that cap while
+// still returning TRUE. So asking for a client area larger than this yields a smaller window and
+// no error at all, and a check asserting on the exact requested size would fail for reasons that
+// have nothing to do with ApplyWindowSizeOverride. This is what broke CI: GitHub's headless
+// windows runners have a 1024x768 desktop, where a 1024x768 CLIENT area needs a 1040x807 outer
+// window and that 807 does not fit under a max track height of roughly 788.
+void GetMaxClientSize(HWND hwnd, int& width, int& height) {
+    RECT decoration = {0, 0, 0, 0};
+    AdjustWindowRectEx(&decoration, (DWORD)GetWindowLongA(hwnd, GWL_STYLE), FALSE,
+                       (DWORD)GetWindowLongA(hwnd, GWL_EXSTYLE));
+    width = GetSystemMetrics(SM_CXMAXTRACK) - (decoration.right - decoration.left);
+    height = GetSystemMetrics(SM_CYMAXTRACK) - (decoration.bottom - decoration.top);
+}
+
+// Shrinks a size the checks below would like to use down to one the OS will actually grant.
+void ClampToMaxClient(int maxWidth, int maxHeight, int& width, int& height) {
+    if (width > maxWidth) {
+        width = maxWidth;
+    }
+    if (height > maxHeight) {
+        height = maxHeight;
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -55,6 +82,25 @@ int main() {
     int width = 0, height = 0;
     GetClientSize(hwnd, width, height);
     printf("  initial client size: %dx%d\n", width, height);
+
+    // Both resize checks below assert on an exact client size, so they must ask for sizes this
+    // desktop can actually host - see GetMaxClientSize.
+    int maxWidth = 0, maxHeight = 0;
+    GetMaxClientSize(hwnd, maxWidth, maxHeight);
+    printf("  largest client size this desktop allows: %dx%d\n", maxWidth, maxHeight);
+
+    int firstWidth = 640, firstHeight = 480;
+    ClampToMaxClient(maxWidth, maxHeight, firstWidth, firstHeight);
+    int secondWidth = 1024, secondHeight = 768;
+    ClampToMaxClient(maxWidth, maxHeight, secondWidth, secondHeight);
+    if (secondWidth == firstWidth && secondHeight == firstHeight) {
+        // A desktop too small to host either size - go smaller instead, so the "resizes again"
+        // check still asks for a size genuinely different from the first one.
+        secondWidth = firstWidth / 2;
+        secondHeight = firstHeight / 2;
+    }
+
+    char label[160];
 
     // windowWidth/windowHeight default to 0 - leave the game's own window size alone.
     {
@@ -87,28 +133,33 @@ int main() {
     // of how much border/titlebar WS_OVERLAPPEDWINDOW adds around it.
     {
         AnaxConfig& config = GetMutableAnaxConfig();
-        config.windowWidth = 640;
-        config.windowHeight = 480;
+        config.windowWidth = firstWidth;
+        config.windowHeight = firstHeight;
 
         ApplyWindowSizeOverride(hdc);
 
         int w, h;
         GetClientSize(hwnd, w, h);
-        Check(w == 640 && h == 480, "windowWidth=640, windowHeight=480 resizes the client area exactly");
+        snprintf(label, sizeof(label),
+                 "windowWidth=%d, windowHeight=%d resizes the client area exactly",
+                 firstWidth, firstHeight);
+        Check(w == firstWidth && h == firstHeight, label);
     }
 
     // A second override to a different size must apply again (a vid_restart calls
     // wglCreateContext again on the same window) - not just once, ever.
     {
         AnaxConfig& config = GetMutableAnaxConfig();
-        config.windowWidth = 1024;
-        config.windowHeight = 768;
+        config.windowWidth = secondWidth;
+        config.windowHeight = secondHeight;
 
         ApplyWindowSizeOverride(hdc);
 
         int w, h;
         GetClientSize(hwnd, w, h);
-        Check(w == 1024 && h == 768, "a later call with a different size resizes again");
+        snprintf(label, sizeof(label), "a later call with a different size (%dx%d) resizes again",
+                 secondWidth, secondHeight);
+        Check(w == secondWidth && h == secondHeight, label);
     }
 
     ReleaseDC(hwnd, hdc);
