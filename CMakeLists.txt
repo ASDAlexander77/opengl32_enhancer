@@ -256,7 +256,7 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp projection_capture.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp)
+    local_contrast.cpp fx_indicator.cpp window_override.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -283,7 +283,7 @@ add_executable(config_editor WIN32
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
-    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp
+    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp

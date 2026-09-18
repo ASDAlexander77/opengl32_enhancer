@@ -25,6 +25,7 @@
 //     anything that reads PPM (most image viewers, or GIMP/Photoshop) after running this
 //     test.
 #include <windows.h>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -241,9 +242,9 @@ int main() {
     unsigned int blitErr = gl.glGetError();
     ok = Check(blitErr == 0, "test pattern blitted onto the real back buffer with no GL error") && ok;
 
-    // This is the actual call under test: the same zero-argument entry point wrapper.cpp
-    // calls from wglSwapBuffers, reading whatever opengl32_enhancer.ini next to this .exe says.
-    ApplySelectedEffect();
+    // This is the actual call under test: the same entry point wrapper.cpp calls from
+    // wglSwapBuffers, reading whatever opengl32_enhancer.ini next to this .exe says.
+    ApplySelectedEffect(hdc);
     unsigned int applyErr = gl.glGetError();
     ok = Check(applyErr == 0, "ApplySelectedEffect() left no GL error") && ok;
 
@@ -304,7 +305,7 @@ int main() {
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-        ApplySelectedEffect();
+        ApplySelectedEffect(hdc);
 
         std::vector<unsigned char> gammaPixels((size_t)width * height * 4);
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -328,6 +329,84 @@ int main() {
         printf("effect=gamma (2.2): mean channel %.2f -> %.2f\n", inputMean, gammaMean);
         ok = Check(gammaMean > inputMean + 10.0,
                    "effect=gamma is wired into ApplySelectedEffect() and brightened the frame") && ok;
+    }
+
+    // --- A third scenario: a REAL upscale - the game renders at `width`x`height` but the real
+    // window is bigger. ---
+    //
+    // Grows the test window's client area without touching glViewport (still `width`x`height`) -
+    // exactly what windowWidth/windowHeight (see window_override.h) produces in practice: the
+    // game keeps rendering at its own resolution, the window around it is bigger. This is what
+    // should turn `bilinear` into an actual reconstruction from a genuinely smaller source, not
+    // the same-size "preview a lower-res look" round-trip `scale` alone does on a full-size
+    // capture (see fsr.h's header comment and ApplySelectedEffect()'s in post_effects.cpp).
+    {
+        const int dstSize = width * 2;
+        RECT bigWindowRect = {0, 0, dstSize, dstSize};
+        AdjustWindowRect(&bigWindowRect, WS_OVERLAPPEDWINDOW, FALSE);
+        SetWindowPos(hwnd, nullptr, 0, 0, bigWindowRect.right - bigWindowRect.left,
+                     bigWindowRect.bottom - bigWindowRect.top, SWP_NOMOVE | SWP_NOZORDER);
+
+        RECT grownClientRect = {};
+        GetClientRect(hwnd, &grownClientRect);
+        bool grown = Check(grownClientRect.right - grownClientRect.left == dstSize &&
+                            grownClientRect.bottom - grownClientRect.top == dstSize,
+                            "real upscale: test window grew to a real 2x client area");
+
+        if (grown) {
+            AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+            mutableConfig.fxIndicator = false;
+            mutableConfig.stageCount = 1;
+            mutableConfig.stages[0] = EffectKind::Bilinear;
+            // Deliberately NOT 0.5 (the "correct" ratio, if this were read at all): proves the
+            // real native/dst texture sizes drive the reconstruction, not this config value.
+            mutableConfig.scale = 1.0f;
+
+            // Re-paint the test pattern into the (still `width`x`height`) region glViewport
+            // covers - exactly where the game "rendered" this frame.
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0, "real upscale: ApplySelectedEffect() left no GL error") && ok;
+
+            std::vector<unsigned char> upscaledPixels((size_t)dstSize * dstSize * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, dstSize, dstSize, GL_RGBA, GL_UNSIGNED_BYTE, upscaledPixels.data());
+            ok = Check(gl.glGetError() == 0, "real upscale: readback at the real (bigger) window size left no GL error") && ok;
+
+            // The bright highlight patch sits at native x<width/8,y<height/8 (GL bottom-left
+            // origin - see BuildTestPattern/WritePpm's header comments), so after a clean 2x
+            // reconstruction it must show up near the SAME corner of the bigger window.
+            size_t cornerI = ((size_t)10 * dstSize + 10) * 4;
+            bool cornerBright = upscaledPixels[cornerI] > 200 && upscaledPixels[cornerI + 1] > 200 &&
+                                 upscaledPixels[cornerI + 2] > 200;
+            ok = Check(cornerBright,
+                       "real upscale: the source's bright corner reconstructed near the same corner of the bigger window") && ok;
+
+            // The real test: did the WHOLE window get filled with reconstructed content, or only
+            // a width x height corner of it (the bug this feature exists to fix)? A clean
+            // upscale roughly preserves average brightness; a pipeline that only wrote the small
+            // native image into one corner and left the rest of a much bigger canvas at
+            // whatever it was before (typically much darker) would pull the whole-image mean
+            // well below the original pattern's.
+            double inputMeanAll = 0.0, upscaledMeanAll = 0.0;
+            for (size_t i = 0; i < inputPixels.size(); i += 4) {
+                inputMeanAll += inputPixels[i] + inputPixels[i + 1] + inputPixels[i + 2];
+            }
+            inputMeanAll /= (double)(inputPixels.size() / 4) * 3.0;
+            for (size_t i = 0; i < upscaledPixels.size(); i += 4) {
+                upscaledMeanAll += upscaledPixels[i] + upscaledPixels[i + 1] + upscaledPixels[i + 2];
+            }
+            upscaledMeanAll /= (double)(upscaledPixels.size() / 4) * 3.0;
+            printf("real upscale: whole-image mean channel %.2f (source) vs %.2f (2x upscaled)\n",
+                   inputMeanAll, upscaledMeanAll);
+            ok = Check(fabs(upscaledMeanAll - inputMeanAll) < 20.0,
+                       "real upscale: the WHOLE bigger window's mean brightness matches the source, "
+                       "not just a corner of it") && ok;
+        }
     }
 
     gl.glDeleteFramebuffers(1, &patternFbo);

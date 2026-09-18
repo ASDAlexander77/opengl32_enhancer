@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
             RenderSyntheticScene(clientWidth, clientHeight);
         }
 
-        ApplySelectedEffect();
+        ApplySelectedEffect(hdc);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplWin32_NewFrame();

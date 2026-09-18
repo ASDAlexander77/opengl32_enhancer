@@ -5840,7 +5840,7 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
             printf("[opengl32_enh_cpp]   wglSwapBuffers: resolved OK\n");
         }
     }
-    ApplySelectedEffect();
+    ApplySelectedEffect(p0);
     return __proc_wglSwapBuffers(p0);
 }
 

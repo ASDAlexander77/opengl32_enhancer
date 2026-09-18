@@ -17,3 +17,11 @@
 // a positive value, if the HDC has no window behind it (WindowFromDC failed), or if SetWindowPos
 // itself fails - logged via printf either way, never fatal to context creation.
 void ApplyWindowSizeOverride(void* hdc);
+
+// The real, current CLIENT size of the window behind `hdc` - i.e. what a player actually sees
+// the game presenting into right now, independent of whatever resolution the game itself thinks
+// it is rendering at. post_effects.cpp uses this (not GL_VIEWPORT) to find out when the real
+// window is bigger than the game's own render size, which is exactly the situation a real
+// upscale - not just windowWidth/windowHeight's cosmetic resize - needs to detect and fill.
+// Returns false (outWidth/outHeight left untouched) if the HDC has no window behind it.
+bool GetWindowClientSize(void* hdc, int& outWidth, int& outHeight);

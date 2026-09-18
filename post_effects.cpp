@@ -11,6 +11,7 @@
 // Also owns the single GL state save/restore around the whole chain: since nothing outside
 // this pipeline runs between the capture and the final blit, one outer save/restore here
 // covers every stage - individual ApplyX functions don't need (and don't do) their own.
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -38,6 +39,7 @@
 #include "projection_capture.h"
 #include "frame_dump.h"
 #include "gl_loader.h"
+#include "window_override.h"
 
 // Same no-<windows.h> discipline as the rest of this DLL (see config.cpp's equivalent block and
 // wrapper.cpp's header comment): <windows.h> declares dllimport wgl*/gl* names that collide with
@@ -88,16 +90,35 @@ struct PipelineTextures {
     bool valid = false;
     // The GL context these cached objects belong to - see GetGlContextGeneration().
     unsigned int generation = 0;
+    // The DESTINATION-resolution ping-pong pair - the size most stages run at, and what every
+    // stage after a real upscale (see ApplySelectedEffect()) runs at. Equal to the game's own
+    // native render resolution whenever the real window isn't bigger than that (the common
+    // case), in which case this is the ONLY pair in use, exactly as before this feature existed.
     int width = 0;
     int height = 0;
     unsigned int tex[2] = {0, 0};
     unsigned int presentFbo = 0;   // reused, re-attached to whichever tex[] is final each frame
-    // EXPERIMENTAL (see depth_vignette.h): the default framebuffer's depth attachment, blitted
-    // here once per frame, but only when depthvignette is actually listed - see
+
+    // EXPERIMENTAL (see depth_vignette.h). The default framebuffer's depth attachment, blitted
+    // here once per frame, but only when a depth-consuming stage is actually listed - see
     // ApplySelectedEffect(). depthFbo exists purely as a blit target for depthTex; nothing ever
-    // reads from it as a framebuffer otherwise.
+    // reads from it as a framebuffer otherwise. ALWAYS sized at the game's own native render
+    // resolution (independent of width/height above) - that's the only resolution a depth buffer
+    // actually exists at.
     unsigned int depthTex = 0;
     unsigned int depthFbo = 0;
+    int depthWidth = 0;
+    int depthHeight = 0;
+
+    // A second ping-pong pair, sized at the game's own native render resolution, that only
+    // exists while that native resolution is smaller than the real window (see
+    // ApplySelectedEffect()): the initial capture and any stage listed before the upscaler run
+    // here, until an upscale-capable stage (bilinear/nvscaler/fsr) copies the image over into
+    // tex[]/width/height above at the window's real size.
+    bool hasNativePair = false;
+    int nativeWidth = 0;
+    int nativeHeight = 0;
+    unsigned int nativeTex[2] = {0, 0};
 };
 
 PipelineTextures g_pipeline;
@@ -129,8 +150,14 @@ unsigned int CreateDepthTexture(const GlComputeApi& gl, int width, int height) {
     return texture;
 }
 
-void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height, bool needDepth) {
-    // A context change invalidates the cached textures and FBO. Drop the handles rather than
+// `nativeWidth/nativeHeight` is the game's own render resolution (GL_VIEWPORT); `dstWidth/
+// dstHeight` is the real window's client size - equal to native in the common case, larger when
+// windowWidth/windowHeight (or a manual resize) makes the window bigger than what the game
+// itself renders, which is what turns an upscale-capable stage into a REAL upscale rather than
+// the same-size preview `scale` alone gives (see ApplySelectedEffect()'s header comment).
+void EnsurePipelineTextures(const GlComputeApi& gl, int nativeWidth, int nativeHeight,
+                             int dstWidth, int dstHeight, bool needDepth) {
+    // A context change invalidates every cached texture/FBO. Drop the handles rather than
     // deleting them (the owning context freed them already, and glDelete* now would hit
     // unrelated objects in the current context); everything below then recreates them.
     if (g_pipeline.generation != GetGlContextGeneration()) {
@@ -138,40 +165,59 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int width, int height, bool 
         g_pipeline.generation = GetGlContextGeneration();
     }
 
-    if (g_pipeline.valid && g_pipeline.width == width && g_pipeline.height == height) {
-        if (needDepth && g_pipeline.depthTex == 0) {
-            g_pipeline.depthTex = CreateDepthTexture(gl, width, height);
-            gl.glGenFramebuffers(1, &g_pipeline.depthFbo);
-            gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.depthFbo);
-            gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_pipeline.depthTex, 0);
+    // The destination-resolution pair - recreated only when that size actually changes.
+    if (!g_pipeline.valid || g_pipeline.width != dstWidth || g_pipeline.height != dstHeight) {
+        if (g_pipeline.valid) {
+            gl.glDeleteTextures(2, g_pipeline.tex);
         }
-        return;
+        if (g_pipeline.presentFbo == 0) {
+            gl.glGenFramebuffers(1, &g_pipeline.presentFbo);
+        }
+        g_pipeline.tex[0] = CreatePipelineTexture(gl, dstWidth, dstHeight);
+        g_pipeline.tex[1] = CreatePipelineTexture(gl, dstWidth, dstHeight);
+        g_pipeline.width = dstWidth;
+        g_pipeline.height = dstHeight;
+        g_pipeline.valid = true;
     }
 
-    if (g_pipeline.valid) {
-        gl.glDeleteTextures(2, g_pipeline.tex);
-        g_pipeline.valid = false;
-    }
-    if (g_pipeline.presentFbo == 0) {
-        gl.glGenFramebuffers(1, &g_pipeline.presentFbo);
+    // The native-resolution pair only needs to exist while native and destination actually
+    // differ - freed again if a later frame's native/window sizes end up matching (e.g. the game
+    // changed its own video mode to match the window), so this feature costs nothing once it
+    // isn't in play.
+    bool needNativePair = (nativeWidth != dstWidth) || (nativeHeight != dstHeight);
+    if (needNativePair) {
+        if (!g_pipeline.hasNativePair || g_pipeline.nativeWidth != nativeWidth ||
+            g_pipeline.nativeHeight != nativeHeight) {
+            if (g_pipeline.hasNativePair) {
+                gl.glDeleteTextures(2, g_pipeline.nativeTex);
+            }
+            g_pipeline.nativeTex[0] = CreatePipelineTexture(gl, nativeWidth, nativeHeight);
+            g_pipeline.nativeTex[1] = CreatePipelineTexture(gl, nativeWidth, nativeHeight);
+            g_pipeline.nativeWidth = nativeWidth;
+            g_pipeline.nativeHeight = nativeHeight;
+            g_pipeline.hasNativePair = true;
+        }
+    } else if (g_pipeline.hasNativePair) {
+        gl.glDeleteTextures(2, g_pipeline.nativeTex);
+        g_pipeline.nativeTex[0] = g_pipeline.nativeTex[1] = 0;
+        g_pipeline.hasNativePair = false;
+        g_pipeline.nativeWidth = g_pipeline.nativeHeight = 0;
     }
 
-    g_pipeline.tex[0] = CreatePipelineTexture(gl, width, height);
-    g_pipeline.tex[1] = CreatePipelineTexture(gl, width, height);
-    g_pipeline.width = width;
-    g_pipeline.height = height;
-    g_pipeline.valid = true;
-
-    // A resize invalidates the old depth texture/FBO too (they were sized to the old
-    // width/height) - drop the stale handles so the needDepth branch just below rebuilds them
-    // against the new size.
-    g_pipeline.depthTex = 0;
-    g_pipeline.depthFbo = 0;
-    if (needDepth) {
-        g_pipeline.depthTex = CreateDepthTexture(gl, width, height);
+    // Depth is always native-resolution, and only allocated when a depth-consuming stage is
+    // actually listed - everyone else pays nothing for this.
+    if (needDepth && (g_pipeline.depthTex == 0 || g_pipeline.depthWidth != nativeWidth ||
+                       g_pipeline.depthHeight != nativeHeight)) {
+        if (g_pipeline.depthTex != 0) {
+            gl.glDeleteTextures(1, &g_pipeline.depthTex);
+            gl.glDeleteFramebuffers(1, &g_pipeline.depthFbo);
+        }
+        g_pipeline.depthTex = CreateDepthTexture(gl, nativeWidth, nativeHeight);
         gl.glGenFramebuffers(1, &g_pipeline.depthFbo);
         gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.depthFbo);
         gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_pipeline.depthTex, 0);
+        g_pipeline.depthWidth = nativeWidth;
+        g_pipeline.depthHeight = nativeHeight;
     }
 }
 
@@ -237,13 +283,19 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
 
 }  // namespace
 
-void ApplySelectedEffect() {
+void ApplySelectedEffect(void* hdc) {
     const AnaxConfig& config = GetAnaxConfig();
 
     // Nothing to do at all, and - importantly - don't touch GetGlComputeApi() in that case: it
     // re-attempts resolution and re-logs failures on every call until it succeeds, which would
-    // turn "effects are off on an old GPU" into per-frame log spam.
-    if (config.stageCount == 0 && config.frameDumpKey == 0) {
+    // turn "effects are off on an old GPU" into per-frame log spam. windowWidth/windowHeight
+    // being configured is included here (even with an empty effect= list and no frame dump)
+    // since that alone can put the game's native resolution and the real window at odds - see
+    // the native/dst split below - and this proxy needs to at least stretch-fill the window for
+    // that, without the player having to also list an upscale stage just to avoid a small image
+    // in the corner of a bigger window.
+    bool windowSizeOverrideActive = config.windowWidth > 0 && config.windowHeight > 0;
+    if (config.stageCount == 0 && config.frameDumpKey == 0 && !windowSizeOverrideActive) {
         return;
     }
 
@@ -255,21 +307,56 @@ void ApplySelectedEffect() {
         return;
     }
 
+    // The game's own render resolution - whatever it last set via glViewport.
     int viewport[4] = {0, 0, 0, 0};
     gl.glGetIntegerv(GL_VIEWPORT, viewport);
-    int width = viewport[2];
-    int height = viewport[3];
-    if (width <= 0 || height <= 0) {
+    int nativeWidth = viewport[2];
+    int nativeHeight = viewport[3];
+    if (nativeWidth <= 0 || nativeHeight <= 0) {
         return;
     }
 
     // Before the pipeline runs, so the dump is the game's own unprocessed frame - which is what
-    // the editor needs in order to apply stages to it itself.
+    // the editor needs in order to apply stages to it itself. Always at the native resolution:
+    // a dump is meant to capture exactly what the game drew, independent of any window resize.
     if (ConsumeFrameDumpRequest(config.frameDumpKey)) {
-        DumpFrame(gl, width, height, config.frameDumpPath);
+        DumpFrame(gl, nativeWidth, nativeHeight, config.frameDumpPath);
     }
 
-    if (config.stageCount == 0) {
+    // The real window's client size. Whenever this is bigger than the game's own native render
+    // resolution above, an upscale-capable stage (bilinear/nvscaler/fsr) becomes a REAL upscale -
+    // reconstructing a genuinely smaller source up to fill the window - rather than the
+    // same-size "preview a lower-res look" trick `scale` alone provides on a capture that was
+    // already rendered at full size (see fsr.h's header comment). Falls back to the native size
+    // (no mismatch, no behavior change from before this feature existed) if the window's size
+    // can't be determined.
+    int dstWidth = nativeWidth;
+    int dstHeight = nativeHeight;
+    GetWindowClientSize(hdc, dstWidth, dstHeight);
+    if (dstWidth <= 0 || dstHeight <= 0) {
+        dstWidth = nativeWidth;
+        dstHeight = nativeHeight;
+    }
+    bool hasRealUpscale = (dstWidth != nativeWidth) || (dstHeight != nativeHeight);
+    if (hasRealUpscale) {
+        // The upscalers apply one scalar ratio to both axes (see bilinear_upscale.cpp/fsr.cpp/
+        // nis_effect.cpp) - correct as long as native and window share an aspect ratio, which is
+        // what setting windowWidth/windowHeight to a clean multiple of the game's own resolution
+        // gives you. A mismatched aspect ratio still runs (using the width ratio), it just comes
+        // out stretched vertically - flagged once rather than silently producing a subtly wrong
+        // image.
+        float widthRatio = (float)nativeWidth / (float)dstWidth;
+        float heightRatio = (float)nativeHeight / (float)dstHeight;
+        static bool warnedAspect = false;
+        if (!warnedAspect && fabsf(widthRatio - heightRatio) > 0.01f) {
+            printf("[opengl32_enh_cpp] post_effects: native resolution %dx%d and window %dx%d "
+                   "don't share an aspect ratio - an upscale stage will stretch the image\n",
+                   nativeWidth, nativeHeight, dstWidth, dstHeight);
+            warnedAspect = true;
+        }
+    }
+
+    if (config.stageCount == 0 && !hasRealUpscale) {
         return;
     }
 
@@ -289,7 +376,7 @@ void ApplySelectedEffect() {
 
     bool needDepth = HasEffectStage(config, EffectKind::DepthVignette) ||
                       HasEffectStage(config, EffectKind::Ssao);
-    EnsurePipelineTextures(gl, width, height, needDepth);
+    EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth);
 
     auto restoreState = [&]() {
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
@@ -301,13 +388,21 @@ void ApplySelectedEffect() {
         gl.glActiveTexture((unsigned int)savedActiveTexture);
     };
 
+    // The pair of ping-pong textures actually in use right now: the native-resolution pair while
+    // hasRealUpscale is true (nothing has reconstructed up to the window's size yet), otherwise
+    // directly the destination pair - which IS the native-resolution pair, size-for-size, when
+    // there's no real upscale in play at all.
+    unsigned int* pair = hasRealUpscale ? g_pipeline.nativeTex : g_pipeline.tex;
+
     // Force the read framebuffer to the default (live back buffer) before capture, same
     // reasoning as every individual effect used to: whatever the host app had bound as its
-    // read framebuffer at swap time would otherwise still be bound here.
+    // read framebuffer at swap time would otherwise still be bound here. Always captures at the
+    // NATIVE resolution - that's the real size of what the game actually drew into the back
+    // buffer, regardless of how much bigger the window/back buffer itself is.
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl.glReadBuffer(GL_BACK);
-    gl.glBindTexture(GL_TEXTURE_2D, g_pipeline.tex[0]);
-    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+    gl.glBindTexture(GL_TEXTURE_2D, pair[0]);
+    gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
 
     unsigned int captureErr = gl.glGetError();
     if (captureErr != GL_NO_ERROR) {
@@ -322,12 +417,14 @@ void ApplySelectedEffect() {
     // consumes depth is actually listed - everyone else pays nothing for this. A blit error
     // (e.g. this GL context's pixel format has no depth buffer at all) is logged once and leaves
     // depthCaptured false, which makes the depth-consuming stages below no-op for this frame
-    // exactly like any other stage that can't run.
+    // exactly like any other stage that can't run. Always native resolution - see depthTex's
+    // comment on PipelineTextures.
     bool depthCaptured = false;
     if (needDepth) {
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        gl.glBlitFramebuffer(0, 0, nativeWidth, nativeHeight, 0, 0, nativeWidth, nativeHeight,
+                              GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         unsigned int depthErr = gl.glGetError();
         depthCaptured = (depthErr == GL_NO_ERROR);
         if (!depthCaptured) {
@@ -342,76 +439,133 @@ void ApplySelectedEffect() {
 
     // Run the stages in exactly the order the config listed them - there is no hard-coded
     // pipeline order any more, and no distinction between a "primary" effect and an "addon".
-    // `cur` indexes whichever ping-pong texture currently holds the live image; a stage reads
-    // it, writes the other one, and only when the stage reports it actually wrote does `cur`
-    // flip to follow the image (see e.g. lut_grading.h for why a stage can legitimately
-    // no-op). A stage that no-ops therefore drops out of the chain cleanly instead of
-    // handing the next stage an untouched buffer.
+    // `cur` indexes whichever ping-pong texture currently holds the live image (within `pair`);
+    // a stage reads it, writes the other one, and only when the stage reports it actually wrote
+    // does `cur` flip to follow the image (see e.g. lut_grading.h for why a stage can
+    // legitimately no-op). A stage that no-ops therefore drops out of the chain cleanly instead
+    // of handing the next stage an untouched buffer.
+    //
+    // `atNativeRes` tracks which side of a real upscale the pipeline is currently on. It starts
+    // true (the just-captured image is native-resolution) and flips, at most once, the moment
+    // the FIRST upscale-capable stage (bilinear/nvscaler/fsr) actually runs while hasRealUpscale
+    // is set - from then on `pair`/`cur`/curWidth/curHeight all refer to the destination
+    // (window-sized) pair instead, exactly like every stage always has when there's no real
+    // upscale in play at all.
     int cur = 0;
+    int curWidth = nativeWidth;
+    int curHeight = nativeHeight;
+    bool atNativeRes = true;
+    static bool warnedDepthAfterUpscale = false;
+
     for (int i = 0; i < config.stageCount; ++i) {
-        unsigned int src = g_pipeline.tex[cur];
-        unsigned int dst = g_pipeline.tex[1 - cur];
+        EffectKind stage = config.stages[i];
+
+        // The game's depth buffer only exists at its own native resolution (see depthTex's
+        // comment on PipelineTextures) - once the chain has moved on to the larger destination
+        // resolution there is no depth data left to sample, so a depth-consuming stage listed
+        // after the upscaler can only no-op. Logged once so a misordered effect= list is
+        // diagnosable instead of silently doing nothing.
+        bool isDepthStage = (stage == EffectKind::DepthVignette || stage == EffectKind::Ssao);
+        if (isDepthStage && !atNativeRes) {
+            if (!warnedDepthAfterUpscale) {
+                printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
+                       "the game's depth buffer only exists at its native resolution, so this "
+                       "stage is being skipped. List ssao/depthvignette BEFORE "
+                       "bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
+                warnedDepthAfterUpscale = true;
+            }
+            continue;
+        }
+
+        bool isUpscaleStage = (stage == EffectKind::Bilinear || stage == EffectKind::NVScaler ||
+                                stage == EffectKind::Fsr);
+        // Only the FIRST upscale-capable stage still at native resolution performs the real
+        // resolution change - any later one (e.g. a second upscaler listed by mistake) just runs
+        // at destination resolution like any other same-size stage, using config.scale as usual.
+        bool doRealUpscale = isUpscaleStage && atNativeRes && hasRealUpscale;
+
+        unsigned int src = pair[cur];
+        unsigned int dst;
+        int dstW, dstH;
+        if (doRealUpscale) {
+            dst = g_pipeline.tex[0];
+            dstW = dstWidth;
+            dstH = dstHeight;
+        } else {
+            dst = pair[1 - cur];
+            dstW = curWidth;
+            dstH = curHeight;
+        }
+
+        // The exact ratio needed to map the real (physically smaller) native-resolution src
+        // texture across the destination-sized output - see fsr.h/bilinear_upscale.cpp/
+        // nis_effect.cpp: their `scale` describes a virtual source grid laid over the full
+        // output size, which is precisely what a genuinely smaller physical source texture
+        // needs. config.scale is deliberately NOT used here; it would additionally simulate a
+        // lower-res look on top of a resize that is already real.
+        float upscaleRatio = doRealUpscale ? (float)nativeWidth / (float)dstWidth : config.scale;
+
         bool wrote = false;
-        switch (config.stages[i]) {
+        switch (stage) {
             case EffectKind::None:
                 break;
             case EffectKind::Invert:
-                wrote = ApplyInvert(src, dst, width, height);
+                wrote = ApplyInvert(src, dst, dstW, dstH);
                 break;
             case EffectKind::Bilinear:
-                wrote = ApplyBilinearUpscale(src, dst, width, height, config.scale);
+                wrote = ApplyBilinearUpscale(src, dst, dstW, dstH, upscaleRatio);
                 break;
             case EffectKind::Cas:
-                wrote = ApplyCas(src, dst, width, height, config.sharpness);
+                wrote = ApplyCas(src, dst, dstW, dstH, config.sharpness);
                 break;
             case EffectKind::Fsr:
-                wrote = ApplyFsr(src, dst, width, height, config.scale, config.sharpness,
+                wrote = ApplyFsr(src, dst, dstW, dstH, upscaleRatio, config.sharpness,
                                  config.fsrDenoise, config.fsrFilmGrain);
                 break;
             case EffectKind::NVScaler:
-                wrote = ApplyNVScaler(src, dst, width, height, config.scale, config.sharpness);
+                wrote = ApplyNVScaler(src, dst, dstW, dstH, upscaleRatio, config.sharpness);
                 break;
             case EffectKind::AcesToneMap:
-                wrote = ApplyHdrLook(src, dst, width, height, config.acesStrength);
+                wrote = ApplyHdrLook(src, dst, dstW, dstH, config.acesStrength);
                 break;
             case EffectKind::Bloom:
-                wrote = ApplyBloom(src, dst, width, height, config.bloomThreshold, config.bloomIntensity);
+                wrote = ApplyBloom(src, dst, dstW, dstH, config.bloomThreshold, config.bloomIntensity);
                 break;
             case EffectKind::Sharpen:
-                wrote = ApplyNVSharpen(src, dst, width, height, config.sharpness);
+                wrote = ApplyNVSharpen(src, dst, dstW, dstH, config.sharpness);
                 break;
             case EffectKind::LutGrading:
-                wrote = ApplyLutGrading(src, dst, width, height, config.lutPath, config.lutStrength);
+                wrote = ApplyLutGrading(src, dst, dstW, dstH, config.lutPath, config.lutStrength);
                 break;
             case EffectKind::Vignette:
-                wrote = ApplyVignette(src, dst, width, height, config.vignetteIntensity, config.vignetteRadius);
+                wrote = ApplyVignette(src, dst, dstW, dstH, config.vignetteIntensity, config.vignetteRadius);
                 break;
             case EffectKind::ChromaticAberration:
-                wrote = ApplyChromaticAberration(src, dst, width, height, config.chromaticAberrationStrength);
+                wrote = ApplyChromaticAberration(src, dst, dstW, dstH, config.chromaticAberrationStrength);
                 break;
             case EffectKind::Taa:
-                wrote = ApplyTaa(src, dst, width, height, config.taaBlend, config.shimmerSuppression);
+                wrote = ApplyTaa(src, dst, dstW, dstH, config.taaBlend, config.shimmerSuppression);
                 break;
             case EffectKind::Dither:
-                wrote = ApplyDither(src, dst, width, height, config.ditherStrength);
+                wrote = ApplyDither(src, dst, dstW, dstH, config.ditherStrength);
                 break;
             case EffectKind::Gamma:
-                wrote = ApplyGamma(src, dst, width, height, config.gamma, config.brightness);
+                wrote = ApplyGamma(src, dst, dstW, dstH, config.gamma, config.brightness);
                 break;
             case EffectKind::Smaa:
-                wrote = ApplySmaa(src, dst, width, height);
+                wrote = ApplySmaa(src, dst, dstW, dstH);
                 break;
             case EffectKind::Nr:
-                wrote = ApplyNr(src, dst, width, height, config.nrIntensity, config.nrPasses,
+                wrote = ApplyNr(src, dst, dstW, dstH, config.nrIntensity, config.nrPasses,
                                  config.nrColorStrength, config.nrTonePreservation,
                                  config.nrGrainPreservation);
                 break;
             case EffectKind::LocalContrast:
-                wrote = ApplyLocalContrast(src, dst, width, height, config.localStructureStrength,
+                wrote = ApplyLocalContrast(src, dst, dstW, dstH, config.localStructureStrength,
                                             config.localToneStrength);
                 break;
             case EffectKind::DepthVignette:
-                wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, width, height,
+                wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, dstW, dstH,
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold);
                 break;
@@ -421,29 +575,58 @@ void ApplySelectedEffect() {
                 // 3D view (menu-only frames), which no-ops the stage rather than guessing.
                 ProjectionParams projection;
                 wrote = depthCaptured && GetCapturedProjection(projection) &&
-                         ApplySsao(src, dst, g_pipeline.depthTex, width, height, projection,
+                         ApplySsao(src, dst, g_pipeline.depthTex, dstW, dstH, projection,
                                    config.ssaoRadius, config.ssaoIntensity, config.ssaoBias);
                 break;
             }
         }
         if (wrote) {
-            cur = 1 - cur;
+            if (doRealUpscale) {
+                pair = g_pipeline.tex;
+                cur = 0;
+                curWidth = dstWidth;
+                curHeight = dstHeight;
+                atNativeRes = false;
+            } else {
+                cur = 1 - cur;
+            }
+        }
+    }
+
+    // No listed stage performed the resolution change - effect=none, an all-no-op pipeline, or
+    // simply no bilinear/nvscaler/fsr stage in the list. Stretch the native image up to fill the
+    // real window anyway: without this, a window forced bigger than the game's own render
+    // resolution would show the game's frame in only one corner, the rest left showing whatever
+    // was there before.
+    if (hasRealUpscale && atNativeRes) {
+        float autoRatio = (float)nativeWidth / (float)dstWidth;
+        bool wrote = ApplyBilinearUpscale(pair[cur], g_pipeline.tex[0], dstWidth, dstHeight, autoRatio);
+        if (wrote) {
+            pair = g_pipeline.tex;
+            cur = 0;
+            curWidth = dstWidth;
+            curHeight = dstHeight;
+            atNativeRes = false;
         }
     }
 
     // Draws directly on top of the final texture, unconditionally - not a stage, doesn't
-    // participate in the src/dst chain above. Reaching this point already means
-    // config.stageCount > 0 and the frame was captured/processed, which is exactly what the
-    // badge is meant to confirm happened.
-    if (config.fxIndicator) {
-        DrawFxIndicator(g_pipeline.tex[cur], width, height);
+    // participate in the src/dst chain above. Gated on stageCount rather than just reaching this
+    // point, since the implicit stretch above can also get here with an empty effect= list (only
+    // windowWidth/windowHeight configured) - the badge is specifically about the effect=
+    // pipeline having run, not about this proxy having touched the frame at all.
+    if (config.fxIndicator && config.stageCount > 0) {
+        DrawFxIndicator(pair[cur], curWidth, curHeight);
     }
 
-    // Present: blit whichever texture ended up final back onto the real back buffer.
+    // Present: blit whichever texture ended up final back onto the real back buffer, at
+    // whichever resolution it ended up at - curWidth/curHeight is dstWidth/dstHeight once a real
+    // upscale (explicit or the implicit stretch above) has run, or nativeWidth/nativeHeight
+    // (== dstWidth/dstHeight when there's no real upscale in play) if it never did.
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
-    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_pipeline.tex[cur], 0);
+    gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pair[cur], 0);
     gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, curWidth, curHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {

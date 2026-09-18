@@ -277,7 +277,7 @@ sharpness=0.6
 ditherStrength=0.7
 ```
 
-**Upscale from a lower internal resolution with FSR 1:**
+**Preview a lower-res look with FSR 1** (no performance change - see below):
 
 ```ini
 effect=fsr, dither
@@ -285,6 +285,34 @@ scale=0.75
 sharpness=0.75
 fsrDenoise=1
 ```
+
+This resamples-then-reconstructs a frame the game already rendered at full
+resolution, so it's a way to preview what a given `scale` would look like, not
+an actual performance/quality tradeoff - the game still does the same amount
+of rendering work either way.
+
+**Real upscaling** — the game renders smaller, this proxy reconstructs it up
+to fill a bigger window:
+
+```ini
+effect=fsr, dither
+windowWidth=800
+windowHeight=600
+sharpness=0.75
+fsrDenoise=1
+```
+
+Set the game's own video mode to the SMALLER resolution (e.g. Anachronox's
+400x300 preset) separately, in-game - `windowWidth`/`windowHeight` above then
+forces the actual window bigger, and an upscale-capable stage (`bilinear`,
+`nvscaler` or `fsr`) automatically reconstructs the smaller rendered frame up
+to fill it; `scale` above is ignored in favor of the real, detected ratio.
+Keep windowWidth/windowHeight at the same aspect ratio as the game's chosen
+resolution (an exact multiple, as 800x600 is of 400x300) or the image comes
+out stretched on one axis. This also works with `effect=none` (just a plain
+stretch, no reconstruction quality) - list an upscale stage for a real one.
+`ssao`/`depthvignette` only see the game's own native-resolution depth
+buffer, so list them BEFORE the upscale stage if you use both.
 
 **Clean up noisy/grainy source, then add some punch:**
 

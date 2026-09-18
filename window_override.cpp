@@ -25,6 +25,7 @@ extern "C" {
     __declspec(dllimport) LONG __stdcall GetWindowLongA(HWND hWnd, int nIndex);
     __declspec(dllimport) BOOL __stdcall AdjustWindowRectEx(RECT* lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
     __declspec(dllimport) BOOL __stdcall SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y, int cx, int cy, UINT uFlags);
+    __declspec(dllimport) BOOL __stdcall GetClientRect(HWND hWnd, RECT* lpRect);
 }
 
 namespace {
@@ -68,4 +69,19 @@ void ApplyWindowSizeOverride(void* hdcRaw) {
 
     printf("[opengl32_enh_cpp] windowSize: overrode window client size to %dx%d\n",
            config.windowWidth, config.windowHeight);
+}
+
+bool GetWindowClientSize(void* hdcRaw, int& outWidth, int& outHeight) {
+    HDC hdc = (HDC)hdcRaw;
+    HWND hwnd = WindowFromDC(hdc);
+    if (hwnd == nullptr) {
+        return false;
+    }
+    RECT rect = {};
+    if (!GetClientRect(hwnd, &rect)) {
+        return false;
+    }
+    outWidth = (int)(rect.right - rect.left);
+    outHeight = (int)(rect.bottom - rect.top);
+    return true;
 }

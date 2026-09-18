@@ -235,7 +235,7 @@ def emit_cpp(funcs):
         lines.append("        }")
         lines.append("    }")
         if name == "wglSwapBuffers":
-            lines.append("    ApplySelectedEffect();")
+            lines.append(f"    ApplySelectedEffect({params_call});")
         if name == "wglCreateContext":
             # See window_override.h: resizes the game's window to config.h's
             # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
