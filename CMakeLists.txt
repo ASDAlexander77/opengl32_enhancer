@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -83,6 +83,11 @@ add_custom_command(TARGET config_writer_test POST_BUILD
         $<TARGET_FILE_DIR:config_writer_test>
 )
 
+# No GL and no GPU: re-executes itself as a console-less child and checks a printf from that
+# child lands in the log file beside the module - see debug_log_test.cpp.
+add_executable(debug_log_test debug_log_test.cpp debug_log.cpp)
+target_link_libraries(debug_log_test user32)
+
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
 add_executable(depth_view_test depth_view_test.cpp depth_view.cpp frame_dump.cpp)
@@ -95,7 +100,7 @@ target_link_libraries(gl_loader_test opengl32 gdi32 user32)
 # Creates a real window (no GL context - this module never touches rendering) and checks
 # ApplyWindowSizeOverride() resizes its client area to config.h's windowWidth/windowHeight, only
 # when both are set - see window_override_test.cpp.
-add_executable(window_override_test window_override_test.cpp window_override.cpp config.cpp)
+add_executable(window_override_test window_override_test.cpp window_override.cpp config.cpp debug_log.cpp)
 target_link_libraries(window_override_test gdi32 user32)
 
 # Creates a real GL context and checks ApplyCas() reproduces a flat image and sharpens a
@@ -262,7 +267,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # config actually looks right (an aesthetic call no automated assertion can make) - see
 # post_effects_test.cpp's header comment. Links the same stage sources as ${WRAPPER_NAME_CXX}
 # (everything except wrapper.cpp itself, which this doesn't need).
-add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp gl_loader.cpp
+add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp debug_log.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp projection_capture.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
@@ -289,7 +294,7 @@ add_custom_command(TARGET post_effects_test POST_BUILD
 # ${WRAPPER_NAME_CXX} plus vendored ImGui; NOT registered with CTest, since it is an interactive
 # tool rather than something that can pass or fail unattended.
 add_executable(config_editor WIN32
-    config_editor.cpp editor_scene.cpp config_writer.cpp
+    config_editor.cpp editor_scene.cpp config_writer.cpp debug_log.cpp
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
@@ -359,7 +364,8 @@ foreach(test_target
     config_test
     config_writer_test
     window_override_test
-    depth_view_test)
+    depth_view_test
+    debug_log_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()

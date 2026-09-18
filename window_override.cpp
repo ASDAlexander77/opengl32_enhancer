@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "config.h"
+#include "debug_log.h"
 #include "window_override.h"
 
 // Same no-<windows.h> discipline as the rest of this DLL - see wrapper.cpp's header comment.
@@ -39,6 +40,11 @@ const UINT SWP_NOACTIVATE = 0x0010;
 }  // namespace
 
 void ApplyWindowSizeOverride(void* hdcRaw) {
+    // The earliest point this DLL runs any of its own logic in a game - wglCreateContext comes
+    // before the first wglSwapBuffers - so this is where the log starts, early enough to capture
+    // the config load that GetAnaxConfig() triggers on the line below. No-ops outside a game.
+    RedirectStdoutToDebugLog();
+
     const AnaxConfig& config = GetAnaxConfig();
     if (config.windowWidth <= 0 || config.windowHeight <= 0) {
         return;

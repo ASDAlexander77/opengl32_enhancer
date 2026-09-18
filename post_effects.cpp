@@ -17,6 +17,7 @@
 
 #include "post_effects.h"
 #include "config.h"
+#include "debug_log.h"
 #include "pixel_invert.h"
 #include "bilinear_upscale.h"
 #include "nis_effect.h"
@@ -285,6 +286,10 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
 }  // namespace
 
 void ApplySelectedEffect(void* hdc) {
+    // Idempotent, and cheap after the first call. Also covers the case where a game somehow
+    // reaches a swap without ApplyWindowSizeOverride having run first.
+    RedirectStdoutToDebugLog();
+
     const AnaxConfig& config = GetAnaxConfig();
 
     // Nothing to do at all - don't even reach GetGlComputeApi(). windowWidth/windowHeight being
@@ -497,7 +502,7 @@ void ApplySelectedEffect(void* hdc) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
                        "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/depthvignette BEFORE "
+                       "stage is being skipped. List ssao/dof/depthvignette BEFORE "
                        "bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
                 warnedDepthAfterUpscale = true;
             }

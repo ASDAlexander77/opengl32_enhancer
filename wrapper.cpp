@@ -42,6 +42,27 @@ typedef double GLclampd;
 
 const int MAX_PATH = 260;
 
+// Per-call tracing, OFF by default and deliberately so.
+//
+// Every exported entry point below can announce itself, which is invaluable when working out
+// what a game actually calls - but there are ~370 of them and an id Tech 2-era engine drives
+// immediate mode, so glVertex3f alone runs per vertex per frame. Once debug_log.h started
+// routing stdout to a real file, an unconditional trace wrote ~3.5 MB/s (about 12 GB/hour) and
+// put a formatted file write in the hottest path in the process. It was only ever harmless
+// because the output had nowhere to go.
+//
+// Compile-time rather than a config key: this must cost exactly nothing when off, and a runtime
+// check inside glVertex3f is not nothing. Build with -DANAX_TRACE_CALLS=1 when you need it.
+#ifndef ANAX_TRACE_CALLS
+#define ANAX_TRACE_CALLS 0
+#endif
+
+#if ANAX_TRACE_CALLS
+#define ANAX_TRACE(name) printf("[opengl32_enh_cpp] call " name "\n")
+#else
+#define ANAX_TRACE(name) ((void)0)
+#endif
+
 extern "C" {
     __declspec(dllimport) void* __stdcall LoadLibraryA(const char* lpLibFileName);
     __declspec(dllimport) void* __stdcall GetProcAddress(void* hModule, const char* lpProcName);
@@ -85,7 +106,7 @@ typedef void (__stdcall *__pfn_glAccum)(GLenum, GLfloat);
 static __pfn_glAccum __proc_glAccum = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glAccum(GLenum op, GLfloat value) {
-    printf("[opengl32_enh_cpp] call glAccum\n");
+    ANAX_TRACE("glAccum");
     if (__proc_glAccum == nullptr) {
         __proc_glAccum = (__pfn_glAccum)GetProcAddress(EnsureRealOpenGL32(), "glAccum");
         if (__proc_glAccum == nullptr) {
@@ -101,7 +122,7 @@ typedef void (__stdcall *__pfn_glAlphaFunc)(GLenum, GLclampf);
 static __pfn_glAlphaFunc __proc_glAlphaFunc = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glAlphaFunc(GLenum func, GLclampf ref) {
-    printf("[opengl32_enh_cpp] call glAlphaFunc\n");
+    ANAX_TRACE("glAlphaFunc");
     if (__proc_glAlphaFunc == nullptr) {
         __proc_glAlphaFunc = (__pfn_glAlphaFunc)GetProcAddress(EnsureRealOpenGL32(), "glAlphaFunc");
         if (__proc_glAlphaFunc == nullptr) {
@@ -117,7 +138,7 @@ typedef GLboolean (__stdcall *__pfn_glAreTexturesResident)(GLsizei, void*, void*
 static __pfn_glAreTexturesResident __proc_glAreTexturesResident = nullptr;
 
 extern "C" __declspec(dllexport) GLboolean __stdcall glAreTexturesResident(GLsizei n, void* textures, void* residences) {
-    printf("[opengl32_enh_cpp] call glAreTexturesResident\n");
+    ANAX_TRACE("glAreTexturesResident");
     if (__proc_glAreTexturesResident == nullptr) {
         __proc_glAreTexturesResident = (__pfn_glAreTexturesResident)GetProcAddress(EnsureRealOpenGL32(), "glAreTexturesResident");
         if (__proc_glAreTexturesResident == nullptr) {
@@ -133,7 +154,7 @@ typedef void (__stdcall *__pfn_glArrayElement)(GLint);
 static __pfn_glArrayElement __proc_glArrayElement = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glArrayElement(GLint i) {
-    printf("[opengl32_enh_cpp] call glArrayElement\n");
+    ANAX_TRACE("glArrayElement");
     if (__proc_glArrayElement == nullptr) {
         __proc_glArrayElement = (__pfn_glArrayElement)GetProcAddress(EnsureRealOpenGL32(), "glArrayElement");
         if (__proc_glArrayElement == nullptr) {
@@ -149,7 +170,7 @@ typedef void (__stdcall *__pfn_glBegin)(GLenum);
 static __pfn_glBegin __proc_glBegin = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glBegin(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glBegin\n");
+    ANAX_TRACE("glBegin");
     if (__proc_glBegin == nullptr) {
         __proc_glBegin = (__pfn_glBegin)GetProcAddress(EnsureRealOpenGL32(), "glBegin");
         if (__proc_glBegin == nullptr) {
@@ -165,7 +186,7 @@ typedef void (__stdcall *__pfn_glBindTexture)(GLenum, GLuint);
 static __pfn_glBindTexture __proc_glBindTexture = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glBindTexture(GLenum target, GLuint texture) {
-    printf("[opengl32_enh_cpp] call glBindTexture\n");
+    ANAX_TRACE("glBindTexture");
     if (__proc_glBindTexture == nullptr) {
         __proc_glBindTexture = (__pfn_glBindTexture)GetProcAddress(EnsureRealOpenGL32(), "glBindTexture");
         if (__proc_glBindTexture == nullptr) {
@@ -181,7 +202,7 @@ typedef void (__stdcall *__pfn_glBitmap)(GLsizei, GLsizei, GLfloat, GLfloat, GLf
 static __pfn_glBitmap __proc_glBitmap = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glBitmap(GLsizei width, GLsizei height, GLfloat xorig, GLfloat yorig, GLfloat xmove, GLfloat ymove, void* bitmap) {
-    printf("[opengl32_enh_cpp] call glBitmap\n");
+    ANAX_TRACE("glBitmap");
     if (__proc_glBitmap == nullptr) {
         __proc_glBitmap = (__pfn_glBitmap)GetProcAddress(EnsureRealOpenGL32(), "glBitmap");
         if (__proc_glBitmap == nullptr) {
@@ -197,7 +218,7 @@ typedef void (__stdcall *__pfn_glBlendFunc)(GLenum, GLenum);
 static __pfn_glBlendFunc __proc_glBlendFunc = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glBlendFunc(GLenum sfactor, GLenum dfactor) {
-    printf("[opengl32_enh_cpp] call glBlendFunc\n");
+    ANAX_TRACE("glBlendFunc");
     if (__proc_glBlendFunc == nullptr) {
         __proc_glBlendFunc = (__pfn_glBlendFunc)GetProcAddress(EnsureRealOpenGL32(), "glBlendFunc");
         if (__proc_glBlendFunc == nullptr) {
@@ -213,7 +234,7 @@ typedef void (__stdcall *__pfn_glCallList)(GLuint);
 static __pfn_glCallList __proc_glCallList = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCallList(GLuint list) {
-    printf("[opengl32_enh_cpp] call glCallList\n");
+    ANAX_TRACE("glCallList");
     if (__proc_glCallList == nullptr) {
         __proc_glCallList = (__pfn_glCallList)GetProcAddress(EnsureRealOpenGL32(), "glCallList");
         if (__proc_glCallList == nullptr) {
@@ -229,7 +250,7 @@ typedef void (__stdcall *__pfn_glCallLists)(GLsizei, GLenum, void*);
 static __pfn_glCallLists __proc_glCallLists = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCallLists(GLsizei n, GLenum type, void* lists) {
-    printf("[opengl32_enh_cpp] call glCallLists\n");
+    ANAX_TRACE("glCallLists");
     if (__proc_glCallLists == nullptr) {
         __proc_glCallLists = (__pfn_glCallLists)GetProcAddress(EnsureRealOpenGL32(), "glCallLists");
         if (__proc_glCallLists == nullptr) {
@@ -245,7 +266,7 @@ typedef void (__stdcall *__pfn_glClear)(GLbitfield);
 static __pfn_glClear __proc_glClear = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClear(GLbitfield mask) {
-    printf("[opengl32_enh_cpp] call glClear\n");
+    ANAX_TRACE("glClear");
     if (__proc_glClear == nullptr) {
         __proc_glClear = (__pfn_glClear)GetProcAddress(EnsureRealOpenGL32(), "glClear");
         if (__proc_glClear == nullptr) {
@@ -261,7 +282,7 @@ typedef void (__stdcall *__pfn_glClearAccum)(GLfloat, GLfloat, GLfloat, GLfloat)
 static __pfn_glClearAccum __proc_glClearAccum = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClearAccum(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    printf("[opengl32_enh_cpp] call glClearAccum\n");
+    ANAX_TRACE("glClearAccum");
     if (__proc_glClearAccum == nullptr) {
         __proc_glClearAccum = (__pfn_glClearAccum)GetProcAddress(EnsureRealOpenGL32(), "glClearAccum");
         if (__proc_glClearAccum == nullptr) {
@@ -277,7 +298,7 @@ typedef void (__stdcall *__pfn_glClearColor)(GLclampf, GLclampf, GLclampf, GLcla
 static __pfn_glClearColor __proc_glClearColor = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha) {
-    printf("[opengl32_enh_cpp] call glClearColor\n");
+    ANAX_TRACE("glClearColor");
     if (__proc_glClearColor == nullptr) {
         __proc_glClearColor = (__pfn_glClearColor)GetProcAddress(EnsureRealOpenGL32(), "glClearColor");
         if (__proc_glClearColor == nullptr) {
@@ -293,7 +314,7 @@ typedef void (__stdcall *__pfn_glClearDepth)(GLclampd);
 static __pfn_glClearDepth __proc_glClearDepth = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClearDepth(GLclampd depth) {
-    printf("[opengl32_enh_cpp] call glClearDepth\n");
+    ANAX_TRACE("glClearDepth");
     if (__proc_glClearDepth == nullptr) {
         __proc_glClearDepth = (__pfn_glClearDepth)GetProcAddress(EnsureRealOpenGL32(), "glClearDepth");
         if (__proc_glClearDepth == nullptr) {
@@ -309,7 +330,7 @@ typedef void (__stdcall *__pfn_glClearIndex)(GLfloat);
 static __pfn_glClearIndex __proc_glClearIndex = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClearIndex(GLfloat c) {
-    printf("[opengl32_enh_cpp] call glClearIndex\n");
+    ANAX_TRACE("glClearIndex");
     if (__proc_glClearIndex == nullptr) {
         __proc_glClearIndex = (__pfn_glClearIndex)GetProcAddress(EnsureRealOpenGL32(), "glClearIndex");
         if (__proc_glClearIndex == nullptr) {
@@ -325,7 +346,7 @@ typedef void (__stdcall *__pfn_glClearStencil)(GLint);
 static __pfn_glClearStencil __proc_glClearStencil = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClearStencil(GLint s) {
-    printf("[opengl32_enh_cpp] call glClearStencil\n");
+    ANAX_TRACE("glClearStencil");
     if (__proc_glClearStencil == nullptr) {
         __proc_glClearStencil = (__pfn_glClearStencil)GetProcAddress(EnsureRealOpenGL32(), "glClearStencil");
         if (__proc_glClearStencil == nullptr) {
@@ -341,7 +362,7 @@ typedef void (__stdcall *__pfn_glClipPlane)(GLenum, void*);
 static __pfn_glClipPlane __proc_glClipPlane = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glClipPlane(GLenum plane, void* equation) {
-    printf("[opengl32_enh_cpp] call glClipPlane\n");
+    ANAX_TRACE("glClipPlane");
     if (__proc_glClipPlane == nullptr) {
         __proc_glClipPlane = (__pfn_glClipPlane)GetProcAddress(EnsureRealOpenGL32(), "glClipPlane");
         if (__proc_glClipPlane == nullptr) {
@@ -357,7 +378,7 @@ typedef void (__stdcall *__pfn_glColor3b)(GLbyte, GLbyte, GLbyte);
 static __pfn_glColor3b __proc_glColor3b = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3b(GLbyte red, GLbyte green, GLbyte blue) {
-    printf("[opengl32_enh_cpp] call glColor3b\n");
+    ANAX_TRACE("glColor3b");
     if (__proc_glColor3b == nullptr) {
         __proc_glColor3b = (__pfn_glColor3b)GetProcAddress(EnsureRealOpenGL32(), "glColor3b");
         if (__proc_glColor3b == nullptr) {
@@ -373,7 +394,7 @@ typedef void (__stdcall *__pfn_glColor3bv)(void*);
 static __pfn_glColor3bv __proc_glColor3bv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3bv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3bv\n");
+    ANAX_TRACE("glColor3bv");
     if (__proc_glColor3bv == nullptr) {
         __proc_glColor3bv = (__pfn_glColor3bv)GetProcAddress(EnsureRealOpenGL32(), "glColor3bv");
         if (__proc_glColor3bv == nullptr) {
@@ -389,7 +410,7 @@ typedef void (__stdcall *__pfn_glColor3d)(GLdouble, GLdouble, GLdouble);
 static __pfn_glColor3d __proc_glColor3d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3d(GLdouble red, GLdouble green, GLdouble blue) {
-    printf("[opengl32_enh_cpp] call glColor3d\n");
+    ANAX_TRACE("glColor3d");
     if (__proc_glColor3d == nullptr) {
         __proc_glColor3d = (__pfn_glColor3d)GetProcAddress(EnsureRealOpenGL32(), "glColor3d");
         if (__proc_glColor3d == nullptr) {
@@ -405,7 +426,7 @@ typedef void (__stdcall *__pfn_glColor3dv)(void*);
 static __pfn_glColor3dv __proc_glColor3dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3dv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3dv\n");
+    ANAX_TRACE("glColor3dv");
     if (__proc_glColor3dv == nullptr) {
         __proc_glColor3dv = (__pfn_glColor3dv)GetProcAddress(EnsureRealOpenGL32(), "glColor3dv");
         if (__proc_glColor3dv == nullptr) {
@@ -421,7 +442,7 @@ typedef void (__stdcall *__pfn_glColor3f)(GLfloat, GLfloat, GLfloat);
 static __pfn_glColor3f __proc_glColor3f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3f(GLfloat red, GLfloat green, GLfloat blue) {
-    printf("[opengl32_enh_cpp] call glColor3f\n");
+    ANAX_TRACE("glColor3f");
     if (__proc_glColor3f == nullptr) {
         __proc_glColor3f = (__pfn_glColor3f)GetProcAddress(EnsureRealOpenGL32(), "glColor3f");
         if (__proc_glColor3f == nullptr) {
@@ -437,7 +458,7 @@ typedef void (__stdcall *__pfn_glColor3fv)(void*);
 static __pfn_glColor3fv __proc_glColor3fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3fv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3fv\n");
+    ANAX_TRACE("glColor3fv");
     if (__proc_glColor3fv == nullptr) {
         __proc_glColor3fv = (__pfn_glColor3fv)GetProcAddress(EnsureRealOpenGL32(), "glColor3fv");
         if (__proc_glColor3fv == nullptr) {
@@ -453,7 +474,7 @@ typedef void (__stdcall *__pfn_glColor3i)(GLint, GLint, GLint);
 static __pfn_glColor3i __proc_glColor3i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3i(GLint red, GLint green, GLint blue) {
-    printf("[opengl32_enh_cpp] call glColor3i\n");
+    ANAX_TRACE("glColor3i");
     if (__proc_glColor3i == nullptr) {
         __proc_glColor3i = (__pfn_glColor3i)GetProcAddress(EnsureRealOpenGL32(), "glColor3i");
         if (__proc_glColor3i == nullptr) {
@@ -469,7 +490,7 @@ typedef void (__stdcall *__pfn_glColor3iv)(void*);
 static __pfn_glColor3iv __proc_glColor3iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3iv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3iv\n");
+    ANAX_TRACE("glColor3iv");
     if (__proc_glColor3iv == nullptr) {
         __proc_glColor3iv = (__pfn_glColor3iv)GetProcAddress(EnsureRealOpenGL32(), "glColor3iv");
         if (__proc_glColor3iv == nullptr) {
@@ -485,7 +506,7 @@ typedef void (__stdcall *__pfn_glColor3s)(GLshort, GLshort, GLshort);
 static __pfn_glColor3s __proc_glColor3s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3s(GLshort red, GLshort green, GLshort blue) {
-    printf("[opengl32_enh_cpp] call glColor3s\n");
+    ANAX_TRACE("glColor3s");
     if (__proc_glColor3s == nullptr) {
         __proc_glColor3s = (__pfn_glColor3s)GetProcAddress(EnsureRealOpenGL32(), "glColor3s");
         if (__proc_glColor3s == nullptr) {
@@ -501,7 +522,7 @@ typedef void (__stdcall *__pfn_glColor3sv)(void*);
 static __pfn_glColor3sv __proc_glColor3sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3sv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3sv\n");
+    ANAX_TRACE("glColor3sv");
     if (__proc_glColor3sv == nullptr) {
         __proc_glColor3sv = (__pfn_glColor3sv)GetProcAddress(EnsureRealOpenGL32(), "glColor3sv");
         if (__proc_glColor3sv == nullptr) {
@@ -517,7 +538,7 @@ typedef void (__stdcall *__pfn_glColor3ub)(GLubyte, GLubyte, GLubyte);
 static __pfn_glColor3ub __proc_glColor3ub = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3ub(GLubyte red, GLubyte green, GLubyte blue) {
-    printf("[opengl32_enh_cpp] call glColor3ub\n");
+    ANAX_TRACE("glColor3ub");
     if (__proc_glColor3ub == nullptr) {
         __proc_glColor3ub = (__pfn_glColor3ub)GetProcAddress(EnsureRealOpenGL32(), "glColor3ub");
         if (__proc_glColor3ub == nullptr) {
@@ -533,7 +554,7 @@ typedef void (__stdcall *__pfn_glColor3ubv)(void*);
 static __pfn_glColor3ubv __proc_glColor3ubv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3ubv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3ubv\n");
+    ANAX_TRACE("glColor3ubv");
     if (__proc_glColor3ubv == nullptr) {
         __proc_glColor3ubv = (__pfn_glColor3ubv)GetProcAddress(EnsureRealOpenGL32(), "glColor3ubv");
         if (__proc_glColor3ubv == nullptr) {
@@ -549,7 +570,7 @@ typedef void (__stdcall *__pfn_glColor3ui)(GLuint, GLuint, GLuint);
 static __pfn_glColor3ui __proc_glColor3ui = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3ui(GLuint red, GLuint green, GLuint blue) {
-    printf("[opengl32_enh_cpp] call glColor3ui\n");
+    ANAX_TRACE("glColor3ui");
     if (__proc_glColor3ui == nullptr) {
         __proc_glColor3ui = (__pfn_glColor3ui)GetProcAddress(EnsureRealOpenGL32(), "glColor3ui");
         if (__proc_glColor3ui == nullptr) {
@@ -565,7 +586,7 @@ typedef void (__stdcall *__pfn_glColor3uiv)(void*);
 static __pfn_glColor3uiv __proc_glColor3uiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3uiv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3uiv\n");
+    ANAX_TRACE("glColor3uiv");
     if (__proc_glColor3uiv == nullptr) {
         __proc_glColor3uiv = (__pfn_glColor3uiv)GetProcAddress(EnsureRealOpenGL32(), "glColor3uiv");
         if (__proc_glColor3uiv == nullptr) {
@@ -581,7 +602,7 @@ typedef void (__stdcall *__pfn_glColor3us)(GLushort, GLushort, GLushort);
 static __pfn_glColor3us __proc_glColor3us = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3us(GLushort red, GLushort green, GLushort blue) {
-    printf("[opengl32_enh_cpp] call glColor3us\n");
+    ANAX_TRACE("glColor3us");
     if (__proc_glColor3us == nullptr) {
         __proc_glColor3us = (__pfn_glColor3us)GetProcAddress(EnsureRealOpenGL32(), "glColor3us");
         if (__proc_glColor3us == nullptr) {
@@ -597,7 +618,7 @@ typedef void (__stdcall *__pfn_glColor3usv)(void*);
 static __pfn_glColor3usv __proc_glColor3usv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor3usv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor3usv\n");
+    ANAX_TRACE("glColor3usv");
     if (__proc_glColor3usv == nullptr) {
         __proc_glColor3usv = (__pfn_glColor3usv)GetProcAddress(EnsureRealOpenGL32(), "glColor3usv");
         if (__proc_glColor3usv == nullptr) {
@@ -613,7 +634,7 @@ typedef void (__stdcall *__pfn_glColor4b)(GLbyte, GLbyte, GLbyte, GLbyte);
 static __pfn_glColor4b __proc_glColor4b = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4b(GLbyte red, GLbyte green, GLbyte blue, GLbyte alpha) {
-    printf("[opengl32_enh_cpp] call glColor4b\n");
+    ANAX_TRACE("glColor4b");
     if (__proc_glColor4b == nullptr) {
         __proc_glColor4b = (__pfn_glColor4b)GetProcAddress(EnsureRealOpenGL32(), "glColor4b");
         if (__proc_glColor4b == nullptr) {
@@ -629,7 +650,7 @@ typedef void (__stdcall *__pfn_glColor4bv)(void*);
 static __pfn_glColor4bv __proc_glColor4bv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4bv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4bv\n");
+    ANAX_TRACE("glColor4bv");
     if (__proc_glColor4bv == nullptr) {
         __proc_glColor4bv = (__pfn_glColor4bv)GetProcAddress(EnsureRealOpenGL32(), "glColor4bv");
         if (__proc_glColor4bv == nullptr) {
@@ -645,7 +666,7 @@ typedef void (__stdcall *__pfn_glColor4d)(GLdouble, GLdouble, GLdouble, GLdouble
 static __pfn_glColor4d __proc_glColor4d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4d(GLdouble red, GLdouble green, GLdouble blue, GLdouble alpha) {
-    printf("[opengl32_enh_cpp] call glColor4d\n");
+    ANAX_TRACE("glColor4d");
     if (__proc_glColor4d == nullptr) {
         __proc_glColor4d = (__pfn_glColor4d)GetProcAddress(EnsureRealOpenGL32(), "glColor4d");
         if (__proc_glColor4d == nullptr) {
@@ -661,7 +682,7 @@ typedef void (__stdcall *__pfn_glColor4dv)(void*);
 static __pfn_glColor4dv __proc_glColor4dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4dv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4dv\n");
+    ANAX_TRACE("glColor4dv");
     if (__proc_glColor4dv == nullptr) {
         __proc_glColor4dv = (__pfn_glColor4dv)GetProcAddress(EnsureRealOpenGL32(), "glColor4dv");
         if (__proc_glColor4dv == nullptr) {
@@ -677,7 +698,7 @@ typedef void (__stdcall *__pfn_glColor4f)(GLfloat, GLfloat, GLfloat, GLfloat);
 static __pfn_glColor4f __proc_glColor4f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4f(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    printf("[opengl32_enh_cpp] call glColor4f\n");
+    ANAX_TRACE("glColor4f");
     if (__proc_glColor4f == nullptr) {
         __proc_glColor4f = (__pfn_glColor4f)GetProcAddress(EnsureRealOpenGL32(), "glColor4f");
         if (__proc_glColor4f == nullptr) {
@@ -693,7 +714,7 @@ typedef void (__stdcall *__pfn_glColor4fv)(void*);
 static __pfn_glColor4fv __proc_glColor4fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4fv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4fv\n");
+    ANAX_TRACE("glColor4fv");
     if (__proc_glColor4fv == nullptr) {
         __proc_glColor4fv = (__pfn_glColor4fv)GetProcAddress(EnsureRealOpenGL32(), "glColor4fv");
         if (__proc_glColor4fv == nullptr) {
@@ -709,7 +730,7 @@ typedef void (__stdcall *__pfn_glColor4i)(GLint, GLint, GLint, GLint);
 static __pfn_glColor4i __proc_glColor4i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4i(GLint red, GLint green, GLint blue, GLint alpha) {
-    printf("[opengl32_enh_cpp] call glColor4i\n");
+    ANAX_TRACE("glColor4i");
     if (__proc_glColor4i == nullptr) {
         __proc_glColor4i = (__pfn_glColor4i)GetProcAddress(EnsureRealOpenGL32(), "glColor4i");
         if (__proc_glColor4i == nullptr) {
@@ -725,7 +746,7 @@ typedef void (__stdcall *__pfn_glColor4iv)(void*);
 static __pfn_glColor4iv __proc_glColor4iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4iv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4iv\n");
+    ANAX_TRACE("glColor4iv");
     if (__proc_glColor4iv == nullptr) {
         __proc_glColor4iv = (__pfn_glColor4iv)GetProcAddress(EnsureRealOpenGL32(), "glColor4iv");
         if (__proc_glColor4iv == nullptr) {
@@ -741,7 +762,7 @@ typedef void (__stdcall *__pfn_glColor4s)(GLshort, GLshort, GLshort, GLshort);
 static __pfn_glColor4s __proc_glColor4s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4s(GLshort red, GLshort green, GLshort blue, GLshort alpha) {
-    printf("[opengl32_enh_cpp] call glColor4s\n");
+    ANAX_TRACE("glColor4s");
     if (__proc_glColor4s == nullptr) {
         __proc_glColor4s = (__pfn_glColor4s)GetProcAddress(EnsureRealOpenGL32(), "glColor4s");
         if (__proc_glColor4s == nullptr) {
@@ -757,7 +778,7 @@ typedef void (__stdcall *__pfn_glColor4sv)(void*);
 static __pfn_glColor4sv __proc_glColor4sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4sv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4sv\n");
+    ANAX_TRACE("glColor4sv");
     if (__proc_glColor4sv == nullptr) {
         __proc_glColor4sv = (__pfn_glColor4sv)GetProcAddress(EnsureRealOpenGL32(), "glColor4sv");
         if (__proc_glColor4sv == nullptr) {
@@ -773,7 +794,7 @@ typedef void (__stdcall *__pfn_glColor4ub)(GLubyte, GLubyte, GLubyte, GLubyte);
 static __pfn_glColor4ub __proc_glColor4ub = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4ub(GLubyte red, GLubyte green, GLubyte blue, GLubyte alpha) {
-    printf("[opengl32_enh_cpp] call glColor4ub\n");
+    ANAX_TRACE("glColor4ub");
     if (__proc_glColor4ub == nullptr) {
         __proc_glColor4ub = (__pfn_glColor4ub)GetProcAddress(EnsureRealOpenGL32(), "glColor4ub");
         if (__proc_glColor4ub == nullptr) {
@@ -789,7 +810,7 @@ typedef void (__stdcall *__pfn_glColor4ubv)(void*);
 static __pfn_glColor4ubv __proc_glColor4ubv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4ubv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4ubv\n");
+    ANAX_TRACE("glColor4ubv");
     if (__proc_glColor4ubv == nullptr) {
         __proc_glColor4ubv = (__pfn_glColor4ubv)GetProcAddress(EnsureRealOpenGL32(), "glColor4ubv");
         if (__proc_glColor4ubv == nullptr) {
@@ -805,7 +826,7 @@ typedef void (__stdcall *__pfn_glColor4ui)(GLuint, GLuint, GLuint, GLuint);
 static __pfn_glColor4ui __proc_glColor4ui = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4ui(GLuint red, GLuint green, GLuint blue, GLuint alpha) {
-    printf("[opengl32_enh_cpp] call glColor4ui\n");
+    ANAX_TRACE("glColor4ui");
     if (__proc_glColor4ui == nullptr) {
         __proc_glColor4ui = (__pfn_glColor4ui)GetProcAddress(EnsureRealOpenGL32(), "glColor4ui");
         if (__proc_glColor4ui == nullptr) {
@@ -821,7 +842,7 @@ typedef void (__stdcall *__pfn_glColor4uiv)(void*);
 static __pfn_glColor4uiv __proc_glColor4uiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4uiv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4uiv\n");
+    ANAX_TRACE("glColor4uiv");
     if (__proc_glColor4uiv == nullptr) {
         __proc_glColor4uiv = (__pfn_glColor4uiv)GetProcAddress(EnsureRealOpenGL32(), "glColor4uiv");
         if (__proc_glColor4uiv == nullptr) {
@@ -837,7 +858,7 @@ typedef void (__stdcall *__pfn_glColor4us)(GLushort, GLushort, GLushort, GLushor
 static __pfn_glColor4us __proc_glColor4us = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4us(GLushort red, GLushort green, GLushort blue, GLushort alpha) {
-    printf("[opengl32_enh_cpp] call glColor4us\n");
+    ANAX_TRACE("glColor4us");
     if (__proc_glColor4us == nullptr) {
         __proc_glColor4us = (__pfn_glColor4us)GetProcAddress(EnsureRealOpenGL32(), "glColor4us");
         if (__proc_glColor4us == nullptr) {
@@ -853,7 +874,7 @@ typedef void (__stdcall *__pfn_glColor4usv)(void*);
 static __pfn_glColor4usv __proc_glColor4usv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColor4usv(void* v) {
-    printf("[opengl32_enh_cpp] call glColor4usv\n");
+    ANAX_TRACE("glColor4usv");
     if (__proc_glColor4usv == nullptr) {
         __proc_glColor4usv = (__pfn_glColor4usv)GetProcAddress(EnsureRealOpenGL32(), "glColor4usv");
         if (__proc_glColor4usv == nullptr) {
@@ -869,7 +890,7 @@ typedef void (__stdcall *__pfn_glColorMask)(GLboolean, GLboolean, GLboolean, GLb
 static __pfn_glColorMask __proc_glColorMask = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {
-    printf("[opengl32_enh_cpp] call glColorMask\n");
+    ANAX_TRACE("glColorMask");
     if (__proc_glColorMask == nullptr) {
         __proc_glColorMask = (__pfn_glColorMask)GetProcAddress(EnsureRealOpenGL32(), "glColorMask");
         if (__proc_glColorMask == nullptr) {
@@ -885,7 +906,7 @@ typedef void (__stdcall *__pfn_glColorMaterial)(GLenum, GLenum);
 static __pfn_glColorMaterial __proc_glColorMaterial = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColorMaterial(GLenum face, GLenum mode) {
-    printf("[opengl32_enh_cpp] call glColorMaterial\n");
+    ANAX_TRACE("glColorMaterial");
     if (__proc_glColorMaterial == nullptr) {
         __proc_glColorMaterial = (__pfn_glColorMaterial)GetProcAddress(EnsureRealOpenGL32(), "glColorMaterial");
         if (__proc_glColorMaterial == nullptr) {
@@ -901,7 +922,7 @@ typedef void (__stdcall *__pfn_glColorPointer)(GLint, GLenum, GLsizei, void*);
 static __pfn_glColorPointer __proc_glColorPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glColorPointer(GLint size, GLenum type, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glColorPointer\n");
+    ANAX_TRACE("glColorPointer");
     if (__proc_glColorPointer == nullptr) {
         __proc_glColorPointer = (__pfn_glColorPointer)GetProcAddress(EnsureRealOpenGL32(), "glColorPointer");
         if (__proc_glColorPointer == nullptr) {
@@ -917,7 +938,7 @@ typedef void (__stdcall *__pfn_glCopyPixels)(GLint, GLint, GLsizei, GLsizei, GLe
 static __pfn_glCopyPixels __proc_glCopyPixels = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCopyPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum type) {
-    printf("[opengl32_enh_cpp] call glCopyPixels\n");
+    ANAX_TRACE("glCopyPixels");
     if (__proc_glCopyPixels == nullptr) {
         __proc_glCopyPixels = (__pfn_glCopyPixels)GetProcAddress(EnsureRealOpenGL32(), "glCopyPixels");
         if (__proc_glCopyPixels == nullptr) {
@@ -933,7 +954,7 @@ typedef void (__stdcall *__pfn_glCopyTexImage1D)(GLenum, GLint, GLenum, GLint, G
 static __pfn_glCopyTexImage1D __proc_glCopyTexImage1D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCopyTexImage1D(GLenum target, GLint level, GLenum internalFormat, GLint x, GLint y, GLsizei width, GLint border) {
-    printf("[opengl32_enh_cpp] call glCopyTexImage1D\n");
+    ANAX_TRACE("glCopyTexImage1D");
     if (__proc_glCopyTexImage1D == nullptr) {
         __proc_glCopyTexImage1D = (__pfn_glCopyTexImage1D)GetProcAddress(EnsureRealOpenGL32(), "glCopyTexImage1D");
         if (__proc_glCopyTexImage1D == nullptr) {
@@ -949,7 +970,7 @@ typedef void (__stdcall *__pfn_glCopyTexImage2D)(GLenum, GLint, GLenum, GLint, G
 static __pfn_glCopyTexImage2D __proc_glCopyTexImage2D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCopyTexImage2D(GLenum target, GLint level, GLenum internalFormat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border) {
-    printf("[opengl32_enh_cpp] call glCopyTexImage2D\n");
+    ANAX_TRACE("glCopyTexImage2D");
     if (__proc_glCopyTexImage2D == nullptr) {
         __proc_glCopyTexImage2D = (__pfn_glCopyTexImage2D)GetProcAddress(EnsureRealOpenGL32(), "glCopyTexImage2D");
         if (__proc_glCopyTexImage2D == nullptr) {
@@ -965,7 +986,7 @@ typedef void (__stdcall *__pfn_glCopyTexSubImage1D)(GLenum, GLint, GLint, GLint,
 static __pfn_glCopyTexSubImage1D __proc_glCopyTexSubImage1D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCopyTexSubImage1D(GLenum target, GLint level, GLint xoffset, GLint x, GLint y, GLsizei width) {
-    printf("[opengl32_enh_cpp] call glCopyTexSubImage1D\n");
+    ANAX_TRACE("glCopyTexSubImage1D");
     if (__proc_glCopyTexSubImage1D == nullptr) {
         __proc_glCopyTexSubImage1D = (__pfn_glCopyTexSubImage1D)GetProcAddress(EnsureRealOpenGL32(), "glCopyTexSubImage1D");
         if (__proc_glCopyTexSubImage1D == nullptr) {
@@ -981,7 +1002,7 @@ typedef void (__stdcall *__pfn_glCopyTexSubImage2D)(GLenum, GLint, GLint, GLint,
 static __pfn_glCopyTexSubImage2D __proc_glCopyTexSubImage2D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height) {
-    printf("[opengl32_enh_cpp] call glCopyTexSubImage2D\n");
+    ANAX_TRACE("glCopyTexSubImage2D");
     if (__proc_glCopyTexSubImage2D == nullptr) {
         __proc_glCopyTexSubImage2D = (__pfn_glCopyTexSubImage2D)GetProcAddress(EnsureRealOpenGL32(), "glCopyTexSubImage2D");
         if (__proc_glCopyTexSubImage2D == nullptr) {
@@ -997,7 +1018,7 @@ typedef void (__stdcall *__pfn_glCullFace)(GLenum);
 static __pfn_glCullFace __proc_glCullFace = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glCullFace(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glCullFace\n");
+    ANAX_TRACE("glCullFace");
     if (__proc_glCullFace == nullptr) {
         __proc_glCullFace = (__pfn_glCullFace)GetProcAddress(EnsureRealOpenGL32(), "glCullFace");
         if (__proc_glCullFace == nullptr) {
@@ -1013,7 +1034,7 @@ typedef void (__stdcall *__pfn_glDeleteLists)(GLuint, GLsizei);
 static __pfn_glDeleteLists __proc_glDeleteLists = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDeleteLists(GLuint list, GLsizei range) {
-    printf("[opengl32_enh_cpp] call glDeleteLists\n");
+    ANAX_TRACE("glDeleteLists");
     if (__proc_glDeleteLists == nullptr) {
         __proc_glDeleteLists = (__pfn_glDeleteLists)GetProcAddress(EnsureRealOpenGL32(), "glDeleteLists");
         if (__proc_glDeleteLists == nullptr) {
@@ -1029,7 +1050,7 @@ typedef void (__stdcall *__pfn_glDeleteTextures)(GLsizei, void*);
 static __pfn_glDeleteTextures __proc_glDeleteTextures = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDeleteTextures(GLsizei n, void* textures) {
-    printf("[opengl32_enh_cpp] call glDeleteTextures\n");
+    ANAX_TRACE("glDeleteTextures");
     if (__proc_glDeleteTextures == nullptr) {
         __proc_glDeleteTextures = (__pfn_glDeleteTextures)GetProcAddress(EnsureRealOpenGL32(), "glDeleteTextures");
         if (__proc_glDeleteTextures == nullptr) {
@@ -1045,7 +1066,7 @@ typedef void (__stdcall *__pfn_glDepthFunc)(GLenum);
 static __pfn_glDepthFunc __proc_glDepthFunc = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDepthFunc(GLenum func) {
-    printf("[opengl32_enh_cpp] call glDepthFunc\n");
+    ANAX_TRACE("glDepthFunc");
     if (__proc_glDepthFunc == nullptr) {
         __proc_glDepthFunc = (__pfn_glDepthFunc)GetProcAddress(EnsureRealOpenGL32(), "glDepthFunc");
         if (__proc_glDepthFunc == nullptr) {
@@ -1061,7 +1082,7 @@ typedef void (__stdcall *__pfn_glDepthMask)(GLboolean);
 static __pfn_glDepthMask __proc_glDepthMask = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDepthMask(GLboolean flag) {
-    printf("[opengl32_enh_cpp] call glDepthMask\n");
+    ANAX_TRACE("glDepthMask");
     if (__proc_glDepthMask == nullptr) {
         __proc_glDepthMask = (__pfn_glDepthMask)GetProcAddress(EnsureRealOpenGL32(), "glDepthMask");
         if (__proc_glDepthMask == nullptr) {
@@ -1077,7 +1098,7 @@ typedef void (__stdcall *__pfn_glDepthRange)(GLclampd, GLclampd);
 static __pfn_glDepthRange __proc_glDepthRange = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDepthRange(GLclampd zNear, GLclampd zFar) {
-    printf("[opengl32_enh_cpp] call glDepthRange\n");
+    ANAX_TRACE("glDepthRange");
     if (__proc_glDepthRange == nullptr) {
         __proc_glDepthRange = (__pfn_glDepthRange)GetProcAddress(EnsureRealOpenGL32(), "glDepthRange");
         if (__proc_glDepthRange == nullptr) {
@@ -1093,7 +1114,7 @@ typedef void (__stdcall *__pfn_glDisable)(GLenum);
 static __pfn_glDisable __proc_glDisable = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDisable(GLenum cap) {
-    printf("[opengl32_enh_cpp] call glDisable\n");
+    ANAX_TRACE("glDisable");
     if (__proc_glDisable == nullptr) {
         __proc_glDisable = (__pfn_glDisable)GetProcAddress(EnsureRealOpenGL32(), "glDisable");
         if (__proc_glDisable == nullptr) {
@@ -1109,7 +1130,7 @@ typedef void (__stdcall *__pfn_glDisableClientState)(GLenum);
 static __pfn_glDisableClientState __proc_glDisableClientState = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDisableClientState(GLenum array) {
-    printf("[opengl32_enh_cpp] call glDisableClientState\n");
+    ANAX_TRACE("glDisableClientState");
     if (__proc_glDisableClientState == nullptr) {
         __proc_glDisableClientState = (__pfn_glDisableClientState)GetProcAddress(EnsureRealOpenGL32(), "glDisableClientState");
         if (__proc_glDisableClientState == nullptr) {
@@ -1125,7 +1146,7 @@ typedef void (__stdcall *__pfn_glDrawArrays)(GLenum, GLint, GLsizei);
 static __pfn_glDrawArrays __proc_glDrawArrays = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDrawArrays(GLenum mode, GLint first, GLsizei count) {
-    printf("[opengl32_enh_cpp] call glDrawArrays\n");
+    ANAX_TRACE("glDrawArrays");
     if (__proc_glDrawArrays == nullptr) {
         __proc_glDrawArrays = (__pfn_glDrawArrays)GetProcAddress(EnsureRealOpenGL32(), "glDrawArrays");
         if (__proc_glDrawArrays == nullptr) {
@@ -1141,7 +1162,7 @@ typedef void (__stdcall *__pfn_glDrawBuffer)(GLenum);
 static __pfn_glDrawBuffer __proc_glDrawBuffer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDrawBuffer(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glDrawBuffer\n");
+    ANAX_TRACE("glDrawBuffer");
     if (__proc_glDrawBuffer == nullptr) {
         __proc_glDrawBuffer = (__pfn_glDrawBuffer)GetProcAddress(EnsureRealOpenGL32(), "glDrawBuffer");
         if (__proc_glDrawBuffer == nullptr) {
@@ -1157,7 +1178,7 @@ typedef void (__stdcall *__pfn_glDrawElements)(GLenum, GLsizei, GLenum, void*);
 static __pfn_glDrawElements __proc_glDrawElements = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDrawElements(GLenum mode, GLsizei count, GLenum type, void* indices) {
-    printf("[opengl32_enh_cpp] call glDrawElements\n");
+    ANAX_TRACE("glDrawElements");
     if (__proc_glDrawElements == nullptr) {
         __proc_glDrawElements = (__pfn_glDrawElements)GetProcAddress(EnsureRealOpenGL32(), "glDrawElements");
         if (__proc_glDrawElements == nullptr) {
@@ -1173,7 +1194,7 @@ typedef void (__stdcall *__pfn_glDrawPixels)(GLsizei, GLsizei, GLenum, GLenum, v
 static __pfn_glDrawPixels __proc_glDrawPixels = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glDrawPixels(GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glDrawPixels\n");
+    ANAX_TRACE("glDrawPixels");
     if (__proc_glDrawPixels == nullptr) {
         __proc_glDrawPixels = (__pfn_glDrawPixels)GetProcAddress(EnsureRealOpenGL32(), "glDrawPixels");
         if (__proc_glDrawPixels == nullptr) {
@@ -1189,7 +1210,7 @@ typedef void (__stdcall *__pfn_glEdgeFlag)(GLboolean);
 static __pfn_glEdgeFlag __proc_glEdgeFlag = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEdgeFlag(GLboolean flag) {
-    printf("[opengl32_enh_cpp] call glEdgeFlag\n");
+    ANAX_TRACE("glEdgeFlag");
     if (__proc_glEdgeFlag == nullptr) {
         __proc_glEdgeFlag = (__pfn_glEdgeFlag)GetProcAddress(EnsureRealOpenGL32(), "glEdgeFlag");
         if (__proc_glEdgeFlag == nullptr) {
@@ -1205,7 +1226,7 @@ typedef void (__stdcall *__pfn_glEdgeFlagPointer)(GLsizei, void*);
 static __pfn_glEdgeFlagPointer __proc_glEdgeFlagPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEdgeFlagPointer(GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glEdgeFlagPointer\n");
+    ANAX_TRACE("glEdgeFlagPointer");
     if (__proc_glEdgeFlagPointer == nullptr) {
         __proc_glEdgeFlagPointer = (__pfn_glEdgeFlagPointer)GetProcAddress(EnsureRealOpenGL32(), "glEdgeFlagPointer");
         if (__proc_glEdgeFlagPointer == nullptr) {
@@ -1221,7 +1242,7 @@ typedef void (__stdcall *__pfn_glEdgeFlagv)(void*);
 static __pfn_glEdgeFlagv __proc_glEdgeFlagv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEdgeFlagv(void* flag) {
-    printf("[opengl32_enh_cpp] call glEdgeFlagv\n");
+    ANAX_TRACE("glEdgeFlagv");
     if (__proc_glEdgeFlagv == nullptr) {
         __proc_glEdgeFlagv = (__pfn_glEdgeFlagv)GetProcAddress(EnsureRealOpenGL32(), "glEdgeFlagv");
         if (__proc_glEdgeFlagv == nullptr) {
@@ -1237,7 +1258,7 @@ typedef void (__stdcall *__pfn_glEnable)(GLenum);
 static __pfn_glEnable __proc_glEnable = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEnable(GLenum cap) {
-    printf("[opengl32_enh_cpp] call glEnable\n");
+    ANAX_TRACE("glEnable");
     if (__proc_glEnable == nullptr) {
         __proc_glEnable = (__pfn_glEnable)GetProcAddress(EnsureRealOpenGL32(), "glEnable");
         if (__proc_glEnable == nullptr) {
@@ -1253,7 +1274,7 @@ typedef void (__stdcall *__pfn_glEnableClientState)(GLenum);
 static __pfn_glEnableClientState __proc_glEnableClientState = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEnableClientState(GLenum array) {
-    printf("[opengl32_enh_cpp] call glEnableClientState\n");
+    ANAX_TRACE("glEnableClientState");
     if (__proc_glEnableClientState == nullptr) {
         __proc_glEnableClientState = (__pfn_glEnableClientState)GetProcAddress(EnsureRealOpenGL32(), "glEnableClientState");
         if (__proc_glEnableClientState == nullptr) {
@@ -1269,7 +1290,7 @@ typedef void (__stdcall *__pfn_glEnd)(void);
 static __pfn_glEnd __proc_glEnd = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEnd(void) {
-    printf("[opengl32_enh_cpp] call glEnd\n");
+    ANAX_TRACE("glEnd");
     if (__proc_glEnd == nullptr) {
         __proc_glEnd = (__pfn_glEnd)GetProcAddress(EnsureRealOpenGL32(), "glEnd");
         if (__proc_glEnd == nullptr) {
@@ -1285,7 +1306,7 @@ typedef void (__stdcall *__pfn_glEndList)(void);
 static __pfn_glEndList __proc_glEndList = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEndList(void) {
-    printf("[opengl32_enh_cpp] call glEndList\n");
+    ANAX_TRACE("glEndList");
     if (__proc_glEndList == nullptr) {
         __proc_glEndList = (__pfn_glEndList)GetProcAddress(EnsureRealOpenGL32(), "glEndList");
         if (__proc_glEndList == nullptr) {
@@ -1301,7 +1322,7 @@ typedef void (__stdcall *__pfn_glEvalCoord1d)(GLdouble);
 static __pfn_glEvalCoord1d __proc_glEvalCoord1d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord1d(GLdouble u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord1d\n");
+    ANAX_TRACE("glEvalCoord1d");
     if (__proc_glEvalCoord1d == nullptr) {
         __proc_glEvalCoord1d = (__pfn_glEvalCoord1d)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord1d");
         if (__proc_glEvalCoord1d == nullptr) {
@@ -1317,7 +1338,7 @@ typedef void (__stdcall *__pfn_glEvalCoord1dv)(void*);
 static __pfn_glEvalCoord1dv __proc_glEvalCoord1dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord1dv(void* u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord1dv\n");
+    ANAX_TRACE("glEvalCoord1dv");
     if (__proc_glEvalCoord1dv == nullptr) {
         __proc_glEvalCoord1dv = (__pfn_glEvalCoord1dv)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord1dv");
         if (__proc_glEvalCoord1dv == nullptr) {
@@ -1333,7 +1354,7 @@ typedef void (__stdcall *__pfn_glEvalCoord1f)(GLfloat);
 static __pfn_glEvalCoord1f __proc_glEvalCoord1f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord1f(GLfloat u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord1f\n");
+    ANAX_TRACE("glEvalCoord1f");
     if (__proc_glEvalCoord1f == nullptr) {
         __proc_glEvalCoord1f = (__pfn_glEvalCoord1f)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord1f");
         if (__proc_glEvalCoord1f == nullptr) {
@@ -1349,7 +1370,7 @@ typedef void (__stdcall *__pfn_glEvalCoord1fv)(void*);
 static __pfn_glEvalCoord1fv __proc_glEvalCoord1fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord1fv(void* u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord1fv\n");
+    ANAX_TRACE("glEvalCoord1fv");
     if (__proc_glEvalCoord1fv == nullptr) {
         __proc_glEvalCoord1fv = (__pfn_glEvalCoord1fv)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord1fv");
         if (__proc_glEvalCoord1fv == nullptr) {
@@ -1365,7 +1386,7 @@ typedef void (__stdcall *__pfn_glEvalCoord2d)(GLdouble, GLdouble);
 static __pfn_glEvalCoord2d __proc_glEvalCoord2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord2d(GLdouble u, GLdouble v) {
-    printf("[opengl32_enh_cpp] call glEvalCoord2d\n");
+    ANAX_TRACE("glEvalCoord2d");
     if (__proc_glEvalCoord2d == nullptr) {
         __proc_glEvalCoord2d = (__pfn_glEvalCoord2d)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord2d");
         if (__proc_glEvalCoord2d == nullptr) {
@@ -1381,7 +1402,7 @@ typedef void (__stdcall *__pfn_glEvalCoord2dv)(void*);
 static __pfn_glEvalCoord2dv __proc_glEvalCoord2dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord2dv(void* u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord2dv\n");
+    ANAX_TRACE("glEvalCoord2dv");
     if (__proc_glEvalCoord2dv == nullptr) {
         __proc_glEvalCoord2dv = (__pfn_glEvalCoord2dv)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord2dv");
         if (__proc_glEvalCoord2dv == nullptr) {
@@ -1397,7 +1418,7 @@ typedef void (__stdcall *__pfn_glEvalCoord2f)(GLfloat, GLfloat);
 static __pfn_glEvalCoord2f __proc_glEvalCoord2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord2f(GLfloat u, GLfloat v) {
-    printf("[opengl32_enh_cpp] call glEvalCoord2f\n");
+    ANAX_TRACE("glEvalCoord2f");
     if (__proc_glEvalCoord2f == nullptr) {
         __proc_glEvalCoord2f = (__pfn_glEvalCoord2f)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord2f");
         if (__proc_glEvalCoord2f == nullptr) {
@@ -1413,7 +1434,7 @@ typedef void (__stdcall *__pfn_glEvalCoord2fv)(void*);
 static __pfn_glEvalCoord2fv __proc_glEvalCoord2fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalCoord2fv(void* u) {
-    printf("[opengl32_enh_cpp] call glEvalCoord2fv\n");
+    ANAX_TRACE("glEvalCoord2fv");
     if (__proc_glEvalCoord2fv == nullptr) {
         __proc_glEvalCoord2fv = (__pfn_glEvalCoord2fv)GetProcAddress(EnsureRealOpenGL32(), "glEvalCoord2fv");
         if (__proc_glEvalCoord2fv == nullptr) {
@@ -1429,7 +1450,7 @@ typedef void (__stdcall *__pfn_glEvalMesh1)(GLenum, GLint, GLint);
 static __pfn_glEvalMesh1 __proc_glEvalMesh1 = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalMesh1(GLenum mode, GLint i1, GLint i2) {
-    printf("[opengl32_enh_cpp] call glEvalMesh1\n");
+    ANAX_TRACE("glEvalMesh1");
     if (__proc_glEvalMesh1 == nullptr) {
         __proc_glEvalMesh1 = (__pfn_glEvalMesh1)GetProcAddress(EnsureRealOpenGL32(), "glEvalMesh1");
         if (__proc_glEvalMesh1 == nullptr) {
@@ -1445,7 +1466,7 @@ typedef void (__stdcall *__pfn_glEvalMesh2)(GLenum, GLint, GLint, GLint, GLint);
 static __pfn_glEvalMesh2 __proc_glEvalMesh2 = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalMesh2(GLenum mode, GLint i1, GLint i2, GLint j1, GLint j2) {
-    printf("[opengl32_enh_cpp] call glEvalMesh2\n");
+    ANAX_TRACE("glEvalMesh2");
     if (__proc_glEvalMesh2 == nullptr) {
         __proc_glEvalMesh2 = (__pfn_glEvalMesh2)GetProcAddress(EnsureRealOpenGL32(), "glEvalMesh2");
         if (__proc_glEvalMesh2 == nullptr) {
@@ -1461,7 +1482,7 @@ typedef void (__stdcall *__pfn_glEvalPoint1)(GLint);
 static __pfn_glEvalPoint1 __proc_glEvalPoint1 = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalPoint1(GLint i) {
-    printf("[opengl32_enh_cpp] call glEvalPoint1\n");
+    ANAX_TRACE("glEvalPoint1");
     if (__proc_glEvalPoint1 == nullptr) {
         __proc_glEvalPoint1 = (__pfn_glEvalPoint1)GetProcAddress(EnsureRealOpenGL32(), "glEvalPoint1");
         if (__proc_glEvalPoint1 == nullptr) {
@@ -1477,7 +1498,7 @@ typedef void (__stdcall *__pfn_glEvalPoint2)(GLint, GLint);
 static __pfn_glEvalPoint2 __proc_glEvalPoint2 = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glEvalPoint2(GLint i, GLint j) {
-    printf("[opengl32_enh_cpp] call glEvalPoint2\n");
+    ANAX_TRACE("glEvalPoint2");
     if (__proc_glEvalPoint2 == nullptr) {
         __proc_glEvalPoint2 = (__pfn_glEvalPoint2)GetProcAddress(EnsureRealOpenGL32(), "glEvalPoint2");
         if (__proc_glEvalPoint2 == nullptr) {
@@ -1493,7 +1514,7 @@ typedef void (__stdcall *__pfn_glFeedbackBuffer)(GLsizei, GLenum, void*);
 static __pfn_glFeedbackBuffer __proc_glFeedbackBuffer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFeedbackBuffer(GLsizei size, GLenum type, void* buffer) {
-    printf("[opengl32_enh_cpp] call glFeedbackBuffer\n");
+    ANAX_TRACE("glFeedbackBuffer");
     if (__proc_glFeedbackBuffer == nullptr) {
         __proc_glFeedbackBuffer = (__pfn_glFeedbackBuffer)GetProcAddress(EnsureRealOpenGL32(), "glFeedbackBuffer");
         if (__proc_glFeedbackBuffer == nullptr) {
@@ -1509,7 +1530,7 @@ typedef void (__stdcall *__pfn_glFinish)(void);
 static __pfn_glFinish __proc_glFinish = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFinish(void) {
-    printf("[opengl32_enh_cpp] call glFinish\n");
+    ANAX_TRACE("glFinish");
     if (__proc_glFinish == nullptr) {
         __proc_glFinish = (__pfn_glFinish)GetProcAddress(EnsureRealOpenGL32(), "glFinish");
         if (__proc_glFinish == nullptr) {
@@ -1525,7 +1546,7 @@ typedef void (__stdcall *__pfn_glFlush)(void);
 static __pfn_glFlush __proc_glFlush = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFlush(void) {
-    printf("[opengl32_enh_cpp] call glFlush\n");
+    ANAX_TRACE("glFlush");
     if (__proc_glFlush == nullptr) {
         __proc_glFlush = (__pfn_glFlush)GetProcAddress(EnsureRealOpenGL32(), "glFlush");
         if (__proc_glFlush == nullptr) {
@@ -1541,7 +1562,7 @@ typedef void (__stdcall *__pfn_glFogf)(GLenum, GLfloat);
 static __pfn_glFogf __proc_glFogf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFogf(GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glFogf\n");
+    ANAX_TRACE("glFogf");
     if (__proc_glFogf == nullptr) {
         __proc_glFogf = (__pfn_glFogf)GetProcAddress(EnsureRealOpenGL32(), "glFogf");
         if (__proc_glFogf == nullptr) {
@@ -1557,7 +1578,7 @@ typedef void (__stdcall *__pfn_glFogfv)(GLenum, void*);
 static __pfn_glFogfv __proc_glFogfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFogfv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glFogfv\n");
+    ANAX_TRACE("glFogfv");
     if (__proc_glFogfv == nullptr) {
         __proc_glFogfv = (__pfn_glFogfv)GetProcAddress(EnsureRealOpenGL32(), "glFogfv");
         if (__proc_glFogfv == nullptr) {
@@ -1573,7 +1594,7 @@ typedef void (__stdcall *__pfn_glFogi)(GLenum, GLint);
 static __pfn_glFogi __proc_glFogi = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFogi(GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glFogi\n");
+    ANAX_TRACE("glFogi");
     if (__proc_glFogi == nullptr) {
         __proc_glFogi = (__pfn_glFogi)GetProcAddress(EnsureRealOpenGL32(), "glFogi");
         if (__proc_glFogi == nullptr) {
@@ -1589,7 +1610,7 @@ typedef void (__stdcall *__pfn_glFogiv)(GLenum, void*);
 static __pfn_glFogiv __proc_glFogiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFogiv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glFogiv\n");
+    ANAX_TRACE("glFogiv");
     if (__proc_glFogiv == nullptr) {
         __proc_glFogiv = (__pfn_glFogiv)GetProcAddress(EnsureRealOpenGL32(), "glFogiv");
         if (__proc_glFogiv == nullptr) {
@@ -1605,7 +1626,7 @@ typedef void (__stdcall *__pfn_glFrontFace)(GLenum);
 static __pfn_glFrontFace __proc_glFrontFace = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFrontFace(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glFrontFace\n");
+    ANAX_TRACE("glFrontFace");
     if (__proc_glFrontFace == nullptr) {
         __proc_glFrontFace = (__pfn_glFrontFace)GetProcAddress(EnsureRealOpenGL32(), "glFrontFace");
         if (__proc_glFrontFace == nullptr) {
@@ -1621,7 +1642,7 @@ typedef void (__stdcall *__pfn_glFrustum)(GLdouble, GLdouble, GLdouble, GLdouble
 static __pfn_glFrustum __proc_glFrustum = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble zNear, GLdouble zFar) {
-    printf("[opengl32_enh_cpp] call glFrustum\n");
+    ANAX_TRACE("glFrustum");
     if (__proc_glFrustum == nullptr) {
         __proc_glFrustum = (__pfn_glFrustum)GetProcAddress(EnsureRealOpenGL32(), "glFrustum");
         if (__proc_glFrustum == nullptr) {
@@ -1638,7 +1659,7 @@ typedef GLuint (__stdcall *__pfn_glGenLists)(GLsizei);
 static __pfn_glGenLists __proc_glGenLists = nullptr;
 
 extern "C" __declspec(dllexport) GLuint __stdcall glGenLists(GLsizei range) {
-    printf("[opengl32_enh_cpp] call glGenLists\n");
+    ANAX_TRACE("glGenLists");
     if (__proc_glGenLists == nullptr) {
         __proc_glGenLists = (__pfn_glGenLists)GetProcAddress(EnsureRealOpenGL32(), "glGenLists");
         if (__proc_glGenLists == nullptr) {
@@ -1654,7 +1675,7 @@ typedef void (__stdcall *__pfn_glGenTextures)(GLsizei, void*);
 static __pfn_glGenTextures __proc_glGenTextures = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGenTextures(GLsizei n, void* textures) {
-    printf("[opengl32_enh_cpp] call glGenTextures\n");
+    ANAX_TRACE("glGenTextures");
     if (__proc_glGenTextures == nullptr) {
         __proc_glGenTextures = (__pfn_glGenTextures)GetProcAddress(EnsureRealOpenGL32(), "glGenTextures");
         if (__proc_glGenTextures == nullptr) {
@@ -1670,7 +1691,7 @@ typedef void (__stdcall *__pfn_glGetBooleanv)(GLenum, void*);
 static __pfn_glGetBooleanv __proc_glGetBooleanv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetBooleanv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetBooleanv\n");
+    ANAX_TRACE("glGetBooleanv");
     if (__proc_glGetBooleanv == nullptr) {
         __proc_glGetBooleanv = (__pfn_glGetBooleanv)GetProcAddress(EnsureRealOpenGL32(), "glGetBooleanv");
         if (__proc_glGetBooleanv == nullptr) {
@@ -1686,7 +1707,7 @@ typedef void (__stdcall *__pfn_glGetClipPlane)(GLenum, void*);
 static __pfn_glGetClipPlane __proc_glGetClipPlane = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetClipPlane(GLenum plane, void* equation) {
-    printf("[opengl32_enh_cpp] call glGetClipPlane\n");
+    ANAX_TRACE("glGetClipPlane");
     if (__proc_glGetClipPlane == nullptr) {
         __proc_glGetClipPlane = (__pfn_glGetClipPlane)GetProcAddress(EnsureRealOpenGL32(), "glGetClipPlane");
         if (__proc_glGetClipPlane == nullptr) {
@@ -1702,7 +1723,7 @@ typedef void (__stdcall *__pfn_glGetDoublev)(GLenum, void*);
 static __pfn_glGetDoublev __proc_glGetDoublev = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetDoublev(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetDoublev\n");
+    ANAX_TRACE("glGetDoublev");
     if (__proc_glGetDoublev == nullptr) {
         __proc_glGetDoublev = (__pfn_glGetDoublev)GetProcAddress(EnsureRealOpenGL32(), "glGetDoublev");
         if (__proc_glGetDoublev == nullptr) {
@@ -1718,7 +1739,7 @@ typedef GLenum (__stdcall *__pfn_glGetError)(void);
 static __pfn_glGetError __proc_glGetError = nullptr;
 
 extern "C" __declspec(dllexport) GLenum __stdcall glGetError(void) {
-    printf("[opengl32_enh_cpp] call glGetError\n");
+    ANAX_TRACE("glGetError");
     if (__proc_glGetError == nullptr) {
         __proc_glGetError = (__pfn_glGetError)GetProcAddress(EnsureRealOpenGL32(), "glGetError");
         if (__proc_glGetError == nullptr) {
@@ -1734,7 +1755,7 @@ typedef void (__stdcall *__pfn_glGetFloatv)(GLenum, void*);
 static __pfn_glGetFloatv __proc_glGetFloatv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetFloatv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetFloatv\n");
+    ANAX_TRACE("glGetFloatv");
     if (__proc_glGetFloatv == nullptr) {
         __proc_glGetFloatv = (__pfn_glGetFloatv)GetProcAddress(EnsureRealOpenGL32(), "glGetFloatv");
         if (__proc_glGetFloatv == nullptr) {
@@ -1750,7 +1771,7 @@ typedef void (__stdcall *__pfn_glGetIntegerv)(GLenum, void*);
 static __pfn_glGetIntegerv __proc_glGetIntegerv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetIntegerv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetIntegerv\n");
+    ANAX_TRACE("glGetIntegerv");
     if (__proc_glGetIntegerv == nullptr) {
         __proc_glGetIntegerv = (__pfn_glGetIntegerv)GetProcAddress(EnsureRealOpenGL32(), "glGetIntegerv");
         if (__proc_glGetIntegerv == nullptr) {
@@ -1766,7 +1787,7 @@ typedef void (__stdcall *__pfn_glGetLightfv)(GLenum, GLenum, void*);
 static __pfn_glGetLightfv __proc_glGetLightfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetLightfv(GLenum light, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetLightfv\n");
+    ANAX_TRACE("glGetLightfv");
     if (__proc_glGetLightfv == nullptr) {
         __proc_glGetLightfv = (__pfn_glGetLightfv)GetProcAddress(EnsureRealOpenGL32(), "glGetLightfv");
         if (__proc_glGetLightfv == nullptr) {
@@ -1782,7 +1803,7 @@ typedef void (__stdcall *__pfn_glGetLightiv)(GLenum, GLenum, void*);
 static __pfn_glGetLightiv __proc_glGetLightiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetLightiv(GLenum light, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetLightiv\n");
+    ANAX_TRACE("glGetLightiv");
     if (__proc_glGetLightiv == nullptr) {
         __proc_glGetLightiv = (__pfn_glGetLightiv)GetProcAddress(EnsureRealOpenGL32(), "glGetLightiv");
         if (__proc_glGetLightiv == nullptr) {
@@ -1798,7 +1819,7 @@ typedef void (__stdcall *__pfn_glGetMapdv)(GLenum, GLenum, void*);
 static __pfn_glGetMapdv __proc_glGetMapdv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetMapdv(GLenum target, GLenum query, void* v) {
-    printf("[opengl32_enh_cpp] call glGetMapdv\n");
+    ANAX_TRACE("glGetMapdv");
     if (__proc_glGetMapdv == nullptr) {
         __proc_glGetMapdv = (__pfn_glGetMapdv)GetProcAddress(EnsureRealOpenGL32(), "glGetMapdv");
         if (__proc_glGetMapdv == nullptr) {
@@ -1814,7 +1835,7 @@ typedef void (__stdcall *__pfn_glGetMapfv)(GLenum, GLenum, void*);
 static __pfn_glGetMapfv __proc_glGetMapfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetMapfv(GLenum target, GLenum query, void* v) {
-    printf("[opengl32_enh_cpp] call glGetMapfv\n");
+    ANAX_TRACE("glGetMapfv");
     if (__proc_glGetMapfv == nullptr) {
         __proc_glGetMapfv = (__pfn_glGetMapfv)GetProcAddress(EnsureRealOpenGL32(), "glGetMapfv");
         if (__proc_glGetMapfv == nullptr) {
@@ -1830,7 +1851,7 @@ typedef void (__stdcall *__pfn_glGetMapiv)(GLenum, GLenum, void*);
 static __pfn_glGetMapiv __proc_glGetMapiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetMapiv(GLenum target, GLenum query, void* v) {
-    printf("[opengl32_enh_cpp] call glGetMapiv\n");
+    ANAX_TRACE("glGetMapiv");
     if (__proc_glGetMapiv == nullptr) {
         __proc_glGetMapiv = (__pfn_glGetMapiv)GetProcAddress(EnsureRealOpenGL32(), "glGetMapiv");
         if (__proc_glGetMapiv == nullptr) {
@@ -1846,7 +1867,7 @@ typedef void (__stdcall *__pfn_glGetMaterialfv)(GLenum, GLenum, void*);
 static __pfn_glGetMaterialfv __proc_glGetMaterialfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetMaterialfv(GLenum face, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetMaterialfv\n");
+    ANAX_TRACE("glGetMaterialfv");
     if (__proc_glGetMaterialfv == nullptr) {
         __proc_glGetMaterialfv = (__pfn_glGetMaterialfv)GetProcAddress(EnsureRealOpenGL32(), "glGetMaterialfv");
         if (__proc_glGetMaterialfv == nullptr) {
@@ -1862,7 +1883,7 @@ typedef void (__stdcall *__pfn_glGetMaterialiv)(GLenum, GLenum, void*);
 static __pfn_glGetMaterialiv __proc_glGetMaterialiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetMaterialiv(GLenum face, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetMaterialiv\n");
+    ANAX_TRACE("glGetMaterialiv");
     if (__proc_glGetMaterialiv == nullptr) {
         __proc_glGetMaterialiv = (__pfn_glGetMaterialiv)GetProcAddress(EnsureRealOpenGL32(), "glGetMaterialiv");
         if (__proc_glGetMaterialiv == nullptr) {
@@ -1878,7 +1899,7 @@ typedef void (__stdcall *__pfn_glGetPixelMapfv)(GLenum, void*);
 static __pfn_glGetPixelMapfv __proc_glGetPixelMapfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetPixelMapfv(GLenum map, void* values) {
-    printf("[opengl32_enh_cpp] call glGetPixelMapfv\n");
+    ANAX_TRACE("glGetPixelMapfv");
     if (__proc_glGetPixelMapfv == nullptr) {
         __proc_glGetPixelMapfv = (__pfn_glGetPixelMapfv)GetProcAddress(EnsureRealOpenGL32(), "glGetPixelMapfv");
         if (__proc_glGetPixelMapfv == nullptr) {
@@ -1894,7 +1915,7 @@ typedef void (__stdcall *__pfn_glGetPixelMapuiv)(GLenum, void*);
 static __pfn_glGetPixelMapuiv __proc_glGetPixelMapuiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetPixelMapuiv(GLenum map, void* values) {
-    printf("[opengl32_enh_cpp] call glGetPixelMapuiv\n");
+    ANAX_TRACE("glGetPixelMapuiv");
     if (__proc_glGetPixelMapuiv == nullptr) {
         __proc_glGetPixelMapuiv = (__pfn_glGetPixelMapuiv)GetProcAddress(EnsureRealOpenGL32(), "glGetPixelMapuiv");
         if (__proc_glGetPixelMapuiv == nullptr) {
@@ -1910,7 +1931,7 @@ typedef void (__stdcall *__pfn_glGetPixelMapusv)(GLenum, void*);
 static __pfn_glGetPixelMapusv __proc_glGetPixelMapusv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetPixelMapusv(GLenum map, void* values) {
-    printf("[opengl32_enh_cpp] call glGetPixelMapusv\n");
+    ANAX_TRACE("glGetPixelMapusv");
     if (__proc_glGetPixelMapusv == nullptr) {
         __proc_glGetPixelMapusv = (__pfn_glGetPixelMapusv)GetProcAddress(EnsureRealOpenGL32(), "glGetPixelMapusv");
         if (__proc_glGetPixelMapusv == nullptr) {
@@ -1926,7 +1947,7 @@ typedef void (__stdcall *__pfn_glGetPointerv)(GLenum, void*);
 static __pfn_glGetPointerv __proc_glGetPointerv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetPointerv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetPointerv\n");
+    ANAX_TRACE("glGetPointerv");
     if (__proc_glGetPointerv == nullptr) {
         __proc_glGetPointerv = (__pfn_glGetPointerv)GetProcAddress(EnsureRealOpenGL32(), "glGetPointerv");
         if (__proc_glGetPointerv == nullptr) {
@@ -1942,7 +1963,7 @@ typedef void (__stdcall *__pfn_glGetPolygonStipple)(void*);
 static __pfn_glGetPolygonStipple __proc_glGetPolygonStipple = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetPolygonStipple(void* mask) {
-    printf("[opengl32_enh_cpp] call glGetPolygonStipple\n");
+    ANAX_TRACE("glGetPolygonStipple");
     if (__proc_glGetPolygonStipple == nullptr) {
         __proc_glGetPolygonStipple = (__pfn_glGetPolygonStipple)GetProcAddress(EnsureRealOpenGL32(), "glGetPolygonStipple");
         if (__proc_glGetPolygonStipple == nullptr) {
@@ -1958,7 +1979,7 @@ typedef void* (__stdcall *__pfn_glGetString)(GLenum);
 static __pfn_glGetString __proc_glGetString = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall glGetString(GLenum name) {
-    printf("[opengl32_enh_cpp] call glGetString\n");
+    ANAX_TRACE("glGetString");
     if (__proc_glGetString == nullptr) {
         __proc_glGetString = (__pfn_glGetString)GetProcAddress(EnsureRealOpenGL32(), "glGetString");
         if (__proc_glGetString == nullptr) {
@@ -1974,7 +1995,7 @@ typedef void (__stdcall *__pfn_glGetTexEnvfv)(GLenum, GLenum, void*);
 static __pfn_glGetTexEnvfv __proc_glGetTexEnvfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexEnvfv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexEnvfv\n");
+    ANAX_TRACE("glGetTexEnvfv");
     if (__proc_glGetTexEnvfv == nullptr) {
         __proc_glGetTexEnvfv = (__pfn_glGetTexEnvfv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexEnvfv");
         if (__proc_glGetTexEnvfv == nullptr) {
@@ -1990,7 +2011,7 @@ typedef void (__stdcall *__pfn_glGetTexEnviv)(GLenum, GLenum, void*);
 static __pfn_glGetTexEnviv __proc_glGetTexEnviv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexEnviv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexEnviv\n");
+    ANAX_TRACE("glGetTexEnviv");
     if (__proc_glGetTexEnviv == nullptr) {
         __proc_glGetTexEnviv = (__pfn_glGetTexEnviv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexEnviv");
         if (__proc_glGetTexEnviv == nullptr) {
@@ -2006,7 +2027,7 @@ typedef void (__stdcall *__pfn_glGetTexGendv)(GLenum, GLenum, void*);
 static __pfn_glGetTexGendv __proc_glGetTexGendv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexGendv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexGendv\n");
+    ANAX_TRACE("glGetTexGendv");
     if (__proc_glGetTexGendv == nullptr) {
         __proc_glGetTexGendv = (__pfn_glGetTexGendv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexGendv");
         if (__proc_glGetTexGendv == nullptr) {
@@ -2022,7 +2043,7 @@ typedef void (__stdcall *__pfn_glGetTexGenfv)(GLenum, GLenum, void*);
 static __pfn_glGetTexGenfv __proc_glGetTexGenfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexGenfv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexGenfv\n");
+    ANAX_TRACE("glGetTexGenfv");
     if (__proc_glGetTexGenfv == nullptr) {
         __proc_glGetTexGenfv = (__pfn_glGetTexGenfv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexGenfv");
         if (__proc_glGetTexGenfv == nullptr) {
@@ -2038,7 +2059,7 @@ typedef void (__stdcall *__pfn_glGetTexGeniv)(GLenum, GLenum, void*);
 static __pfn_glGetTexGeniv __proc_glGetTexGeniv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexGeniv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexGeniv\n");
+    ANAX_TRACE("glGetTexGeniv");
     if (__proc_glGetTexGeniv == nullptr) {
         __proc_glGetTexGeniv = (__pfn_glGetTexGeniv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexGeniv");
         if (__proc_glGetTexGeniv == nullptr) {
@@ -2054,7 +2075,7 @@ typedef void (__stdcall *__pfn_glGetTexImage)(GLenum, GLint, GLenum, GLenum, voi
 static __pfn_glGetTexImage __proc_glGetTexImage = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexImage(GLenum target, GLint level, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glGetTexImage\n");
+    ANAX_TRACE("glGetTexImage");
     if (__proc_glGetTexImage == nullptr) {
         __proc_glGetTexImage = (__pfn_glGetTexImage)GetProcAddress(EnsureRealOpenGL32(), "glGetTexImage");
         if (__proc_glGetTexImage == nullptr) {
@@ -2070,7 +2091,7 @@ typedef void (__stdcall *__pfn_glGetTexLevelParameterfv)(GLenum, GLint, GLenum, 
 static __pfn_glGetTexLevelParameterfv __proc_glGetTexLevelParameterfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexLevelParameterfv\n");
+    ANAX_TRACE("glGetTexLevelParameterfv");
     if (__proc_glGetTexLevelParameterfv == nullptr) {
         __proc_glGetTexLevelParameterfv = (__pfn_glGetTexLevelParameterfv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexLevelParameterfv");
         if (__proc_glGetTexLevelParameterfv == nullptr) {
@@ -2086,7 +2107,7 @@ typedef void (__stdcall *__pfn_glGetTexLevelParameteriv)(GLenum, GLint, GLenum, 
 static __pfn_glGetTexLevelParameteriv __proc_glGetTexLevelParameteriv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexLevelParameteriv\n");
+    ANAX_TRACE("glGetTexLevelParameteriv");
     if (__proc_glGetTexLevelParameteriv == nullptr) {
         __proc_glGetTexLevelParameteriv = (__pfn_glGetTexLevelParameteriv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexLevelParameteriv");
         if (__proc_glGetTexLevelParameteriv == nullptr) {
@@ -2102,7 +2123,7 @@ typedef void (__stdcall *__pfn_glGetTexParameterfv)(GLenum, GLenum, void*);
 static __pfn_glGetTexParameterfv __proc_glGetTexParameterfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexParameterfv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexParameterfv\n");
+    ANAX_TRACE("glGetTexParameterfv");
     if (__proc_glGetTexParameterfv == nullptr) {
         __proc_glGetTexParameterfv = (__pfn_glGetTexParameterfv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexParameterfv");
         if (__proc_glGetTexParameterfv == nullptr) {
@@ -2118,7 +2139,7 @@ typedef void (__stdcall *__pfn_glGetTexParameteriv)(GLenum, GLenum, void*);
 static __pfn_glGetTexParameteriv __proc_glGetTexParameteriv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glGetTexParameteriv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glGetTexParameteriv\n");
+    ANAX_TRACE("glGetTexParameteriv");
     if (__proc_glGetTexParameteriv == nullptr) {
         __proc_glGetTexParameteriv = (__pfn_glGetTexParameteriv)GetProcAddress(EnsureRealOpenGL32(), "glGetTexParameteriv");
         if (__proc_glGetTexParameteriv == nullptr) {
@@ -2134,7 +2155,7 @@ typedef void (__stdcall *__pfn_glHint)(GLenum, GLenum);
 static __pfn_glHint __proc_glHint = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glHint(GLenum target, GLenum mode) {
-    printf("[opengl32_enh_cpp] call glHint\n");
+    ANAX_TRACE("glHint");
     if (__proc_glHint == nullptr) {
         __proc_glHint = (__pfn_glHint)GetProcAddress(EnsureRealOpenGL32(), "glHint");
         if (__proc_glHint == nullptr) {
@@ -2150,7 +2171,7 @@ typedef void (__stdcall *__pfn_glIndexMask)(GLuint);
 static __pfn_glIndexMask __proc_glIndexMask = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexMask(GLuint mask) {
-    printf("[opengl32_enh_cpp] call glIndexMask\n");
+    ANAX_TRACE("glIndexMask");
     if (__proc_glIndexMask == nullptr) {
         __proc_glIndexMask = (__pfn_glIndexMask)GetProcAddress(EnsureRealOpenGL32(), "glIndexMask");
         if (__proc_glIndexMask == nullptr) {
@@ -2166,7 +2187,7 @@ typedef void (__stdcall *__pfn_glIndexPointer)(GLenum, GLsizei, void*);
 static __pfn_glIndexPointer __proc_glIndexPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexPointer(GLenum type, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glIndexPointer\n");
+    ANAX_TRACE("glIndexPointer");
     if (__proc_glIndexPointer == nullptr) {
         __proc_glIndexPointer = (__pfn_glIndexPointer)GetProcAddress(EnsureRealOpenGL32(), "glIndexPointer");
         if (__proc_glIndexPointer == nullptr) {
@@ -2182,7 +2203,7 @@ typedef void (__stdcall *__pfn_glIndexd)(GLdouble);
 static __pfn_glIndexd __proc_glIndexd = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexd(GLdouble c) {
-    printf("[opengl32_enh_cpp] call glIndexd\n");
+    ANAX_TRACE("glIndexd");
     if (__proc_glIndexd == nullptr) {
         __proc_glIndexd = (__pfn_glIndexd)GetProcAddress(EnsureRealOpenGL32(), "glIndexd");
         if (__proc_glIndexd == nullptr) {
@@ -2198,7 +2219,7 @@ typedef void (__stdcall *__pfn_glIndexdv)(void*);
 static __pfn_glIndexdv __proc_glIndexdv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexdv(void* c) {
-    printf("[opengl32_enh_cpp] call glIndexdv\n");
+    ANAX_TRACE("glIndexdv");
     if (__proc_glIndexdv == nullptr) {
         __proc_glIndexdv = (__pfn_glIndexdv)GetProcAddress(EnsureRealOpenGL32(), "glIndexdv");
         if (__proc_glIndexdv == nullptr) {
@@ -2214,7 +2235,7 @@ typedef void (__stdcall *__pfn_glIndexf)(GLfloat);
 static __pfn_glIndexf __proc_glIndexf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexf(GLfloat c) {
-    printf("[opengl32_enh_cpp] call glIndexf\n");
+    ANAX_TRACE("glIndexf");
     if (__proc_glIndexf == nullptr) {
         __proc_glIndexf = (__pfn_glIndexf)GetProcAddress(EnsureRealOpenGL32(), "glIndexf");
         if (__proc_glIndexf == nullptr) {
@@ -2230,7 +2251,7 @@ typedef void (__stdcall *__pfn_glIndexfv)(void*);
 static __pfn_glIndexfv __proc_glIndexfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexfv(void* c) {
-    printf("[opengl32_enh_cpp] call glIndexfv\n");
+    ANAX_TRACE("glIndexfv");
     if (__proc_glIndexfv == nullptr) {
         __proc_glIndexfv = (__pfn_glIndexfv)GetProcAddress(EnsureRealOpenGL32(), "glIndexfv");
         if (__proc_glIndexfv == nullptr) {
@@ -2246,7 +2267,7 @@ typedef void (__stdcall *__pfn_glIndexi)(GLint);
 static __pfn_glIndexi __proc_glIndexi = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexi(GLint c) {
-    printf("[opengl32_enh_cpp] call glIndexi\n");
+    ANAX_TRACE("glIndexi");
     if (__proc_glIndexi == nullptr) {
         __proc_glIndexi = (__pfn_glIndexi)GetProcAddress(EnsureRealOpenGL32(), "glIndexi");
         if (__proc_glIndexi == nullptr) {
@@ -2262,7 +2283,7 @@ typedef void (__stdcall *__pfn_glIndexiv)(void*);
 static __pfn_glIndexiv __proc_glIndexiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexiv(void* c) {
-    printf("[opengl32_enh_cpp] call glIndexiv\n");
+    ANAX_TRACE("glIndexiv");
     if (__proc_glIndexiv == nullptr) {
         __proc_glIndexiv = (__pfn_glIndexiv)GetProcAddress(EnsureRealOpenGL32(), "glIndexiv");
         if (__proc_glIndexiv == nullptr) {
@@ -2278,7 +2299,7 @@ typedef void (__stdcall *__pfn_glIndexs)(GLshort);
 static __pfn_glIndexs __proc_glIndexs = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexs(GLshort c) {
-    printf("[opengl32_enh_cpp] call glIndexs\n");
+    ANAX_TRACE("glIndexs");
     if (__proc_glIndexs == nullptr) {
         __proc_glIndexs = (__pfn_glIndexs)GetProcAddress(EnsureRealOpenGL32(), "glIndexs");
         if (__proc_glIndexs == nullptr) {
@@ -2294,7 +2315,7 @@ typedef void (__stdcall *__pfn_glIndexsv)(void*);
 static __pfn_glIndexsv __proc_glIndexsv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexsv(void* c) {
-    printf("[opengl32_enh_cpp] call glIndexsv\n");
+    ANAX_TRACE("glIndexsv");
     if (__proc_glIndexsv == nullptr) {
         __proc_glIndexsv = (__pfn_glIndexsv)GetProcAddress(EnsureRealOpenGL32(), "glIndexsv");
         if (__proc_glIndexsv == nullptr) {
@@ -2310,7 +2331,7 @@ typedef void (__stdcall *__pfn_glIndexub)(GLubyte);
 static __pfn_glIndexub __proc_glIndexub = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexub(GLubyte c) {
-    printf("[opengl32_enh_cpp] call glIndexub\n");
+    ANAX_TRACE("glIndexub");
     if (__proc_glIndexub == nullptr) {
         __proc_glIndexub = (__pfn_glIndexub)GetProcAddress(EnsureRealOpenGL32(), "glIndexub");
         if (__proc_glIndexub == nullptr) {
@@ -2326,7 +2347,7 @@ typedef void (__stdcall *__pfn_glIndexubv)(void*);
 static __pfn_glIndexubv __proc_glIndexubv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glIndexubv(void* c) {
-    printf("[opengl32_enh_cpp] call glIndexubv\n");
+    ANAX_TRACE("glIndexubv");
     if (__proc_glIndexubv == nullptr) {
         __proc_glIndexubv = (__pfn_glIndexubv)GetProcAddress(EnsureRealOpenGL32(), "glIndexubv");
         if (__proc_glIndexubv == nullptr) {
@@ -2342,7 +2363,7 @@ typedef void (__stdcall *__pfn_glInitNames)(void);
 static __pfn_glInitNames __proc_glInitNames = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glInitNames(void) {
-    printf("[opengl32_enh_cpp] call glInitNames\n");
+    ANAX_TRACE("glInitNames");
     if (__proc_glInitNames == nullptr) {
         __proc_glInitNames = (__pfn_glInitNames)GetProcAddress(EnsureRealOpenGL32(), "glInitNames");
         if (__proc_glInitNames == nullptr) {
@@ -2358,7 +2379,7 @@ typedef void (__stdcall *__pfn_glInterleavedArrays)(GLenum, GLsizei, void*);
 static __pfn_glInterleavedArrays __proc_glInterleavedArrays = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glInterleavedArrays(GLenum format, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glInterleavedArrays\n");
+    ANAX_TRACE("glInterleavedArrays");
     if (__proc_glInterleavedArrays == nullptr) {
         __proc_glInterleavedArrays = (__pfn_glInterleavedArrays)GetProcAddress(EnsureRealOpenGL32(), "glInterleavedArrays");
         if (__proc_glInterleavedArrays == nullptr) {
@@ -2374,7 +2395,7 @@ typedef GLboolean (__stdcall *__pfn_glIsEnabled)(GLenum);
 static __pfn_glIsEnabled __proc_glIsEnabled = nullptr;
 
 extern "C" __declspec(dllexport) GLboolean __stdcall glIsEnabled(GLenum cap) {
-    printf("[opengl32_enh_cpp] call glIsEnabled\n");
+    ANAX_TRACE("glIsEnabled");
     if (__proc_glIsEnabled == nullptr) {
         __proc_glIsEnabled = (__pfn_glIsEnabled)GetProcAddress(EnsureRealOpenGL32(), "glIsEnabled");
         if (__proc_glIsEnabled == nullptr) {
@@ -2390,7 +2411,7 @@ typedef GLboolean (__stdcall *__pfn_glIsList)(GLuint);
 static __pfn_glIsList __proc_glIsList = nullptr;
 
 extern "C" __declspec(dllexport) GLboolean __stdcall glIsList(GLuint list) {
-    printf("[opengl32_enh_cpp] call glIsList\n");
+    ANAX_TRACE("glIsList");
     if (__proc_glIsList == nullptr) {
         __proc_glIsList = (__pfn_glIsList)GetProcAddress(EnsureRealOpenGL32(), "glIsList");
         if (__proc_glIsList == nullptr) {
@@ -2406,7 +2427,7 @@ typedef GLboolean (__stdcall *__pfn_glIsTexture)(GLuint);
 static __pfn_glIsTexture __proc_glIsTexture = nullptr;
 
 extern "C" __declspec(dllexport) GLboolean __stdcall glIsTexture(GLuint texture) {
-    printf("[opengl32_enh_cpp] call glIsTexture\n");
+    ANAX_TRACE("glIsTexture");
     if (__proc_glIsTexture == nullptr) {
         __proc_glIsTexture = (__pfn_glIsTexture)GetProcAddress(EnsureRealOpenGL32(), "glIsTexture");
         if (__proc_glIsTexture == nullptr) {
@@ -2422,7 +2443,7 @@ typedef void (__stdcall *__pfn_glLightModelf)(GLenum, GLfloat);
 static __pfn_glLightModelf __proc_glLightModelf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightModelf(GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glLightModelf\n");
+    ANAX_TRACE("glLightModelf");
     if (__proc_glLightModelf == nullptr) {
         __proc_glLightModelf = (__pfn_glLightModelf)GetProcAddress(EnsureRealOpenGL32(), "glLightModelf");
         if (__proc_glLightModelf == nullptr) {
@@ -2438,7 +2459,7 @@ typedef void (__stdcall *__pfn_glLightModelfv)(GLenum, void*);
 static __pfn_glLightModelfv __proc_glLightModelfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightModelfv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glLightModelfv\n");
+    ANAX_TRACE("glLightModelfv");
     if (__proc_glLightModelfv == nullptr) {
         __proc_glLightModelfv = (__pfn_glLightModelfv)GetProcAddress(EnsureRealOpenGL32(), "glLightModelfv");
         if (__proc_glLightModelfv == nullptr) {
@@ -2454,7 +2475,7 @@ typedef void (__stdcall *__pfn_glLightModeli)(GLenum, GLint);
 static __pfn_glLightModeli __proc_glLightModeli = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightModeli(GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glLightModeli\n");
+    ANAX_TRACE("glLightModeli");
     if (__proc_glLightModeli == nullptr) {
         __proc_glLightModeli = (__pfn_glLightModeli)GetProcAddress(EnsureRealOpenGL32(), "glLightModeli");
         if (__proc_glLightModeli == nullptr) {
@@ -2470,7 +2491,7 @@ typedef void (__stdcall *__pfn_glLightModeliv)(GLenum, void*);
 static __pfn_glLightModeliv __proc_glLightModeliv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightModeliv(GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glLightModeliv\n");
+    ANAX_TRACE("glLightModeliv");
     if (__proc_glLightModeliv == nullptr) {
         __proc_glLightModeliv = (__pfn_glLightModeliv)GetProcAddress(EnsureRealOpenGL32(), "glLightModeliv");
         if (__proc_glLightModeliv == nullptr) {
@@ -2486,7 +2507,7 @@ typedef void (__stdcall *__pfn_glLightf)(GLenum, GLenum, GLfloat);
 static __pfn_glLightf __proc_glLightf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightf(GLenum light, GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glLightf\n");
+    ANAX_TRACE("glLightf");
     if (__proc_glLightf == nullptr) {
         __proc_glLightf = (__pfn_glLightf)GetProcAddress(EnsureRealOpenGL32(), "glLightf");
         if (__proc_glLightf == nullptr) {
@@ -2502,7 +2523,7 @@ typedef void (__stdcall *__pfn_glLightfv)(GLenum, GLenum, void*);
 static __pfn_glLightfv __proc_glLightfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightfv(GLenum light, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glLightfv\n");
+    ANAX_TRACE("glLightfv");
     if (__proc_glLightfv == nullptr) {
         __proc_glLightfv = (__pfn_glLightfv)GetProcAddress(EnsureRealOpenGL32(), "glLightfv");
         if (__proc_glLightfv == nullptr) {
@@ -2518,7 +2539,7 @@ typedef void (__stdcall *__pfn_glLighti)(GLenum, GLenum, GLint);
 static __pfn_glLighti __proc_glLighti = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLighti(GLenum light, GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glLighti\n");
+    ANAX_TRACE("glLighti");
     if (__proc_glLighti == nullptr) {
         __proc_glLighti = (__pfn_glLighti)GetProcAddress(EnsureRealOpenGL32(), "glLighti");
         if (__proc_glLighti == nullptr) {
@@ -2534,7 +2555,7 @@ typedef void (__stdcall *__pfn_glLightiv)(GLenum, GLenum, void*);
 static __pfn_glLightiv __proc_glLightiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLightiv(GLenum light, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glLightiv\n");
+    ANAX_TRACE("glLightiv");
     if (__proc_glLightiv == nullptr) {
         __proc_glLightiv = (__pfn_glLightiv)GetProcAddress(EnsureRealOpenGL32(), "glLightiv");
         if (__proc_glLightiv == nullptr) {
@@ -2550,7 +2571,7 @@ typedef void (__stdcall *__pfn_glLineStipple)(GLint, GLushort);
 static __pfn_glLineStipple __proc_glLineStipple = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLineStipple(GLint factor, GLushort pattern) {
-    printf("[opengl32_enh_cpp] call glLineStipple\n");
+    ANAX_TRACE("glLineStipple");
     if (__proc_glLineStipple == nullptr) {
         __proc_glLineStipple = (__pfn_glLineStipple)GetProcAddress(EnsureRealOpenGL32(), "glLineStipple");
         if (__proc_glLineStipple == nullptr) {
@@ -2566,7 +2587,7 @@ typedef void (__stdcall *__pfn_glLineWidth)(GLfloat);
 static __pfn_glLineWidth __proc_glLineWidth = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLineWidth(GLfloat width) {
-    printf("[opengl32_enh_cpp] call glLineWidth\n");
+    ANAX_TRACE("glLineWidth");
     if (__proc_glLineWidth == nullptr) {
         __proc_glLineWidth = (__pfn_glLineWidth)GetProcAddress(EnsureRealOpenGL32(), "glLineWidth");
         if (__proc_glLineWidth == nullptr) {
@@ -2582,7 +2603,7 @@ typedef void (__stdcall *__pfn_glListBase)(GLuint);
 static __pfn_glListBase __proc_glListBase = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glListBase(GLuint base) {
-    printf("[opengl32_enh_cpp] call glListBase\n");
+    ANAX_TRACE("glListBase");
     if (__proc_glListBase == nullptr) {
         __proc_glListBase = (__pfn_glListBase)GetProcAddress(EnsureRealOpenGL32(), "glListBase");
         if (__proc_glListBase == nullptr) {
@@ -2598,7 +2619,7 @@ typedef void (__stdcall *__pfn_glLoadIdentity)(void);
 static __pfn_glLoadIdentity __proc_glLoadIdentity = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLoadIdentity(void) {
-    printf("[opengl32_enh_cpp] call glLoadIdentity\n");
+    ANAX_TRACE("glLoadIdentity");
     if (__proc_glLoadIdentity == nullptr) {
         __proc_glLoadIdentity = (__pfn_glLoadIdentity)GetProcAddress(EnsureRealOpenGL32(), "glLoadIdentity");
         if (__proc_glLoadIdentity == nullptr) {
@@ -2614,7 +2635,7 @@ typedef void (__stdcall *__pfn_glLoadMatrixd)(void*);
 static __pfn_glLoadMatrixd __proc_glLoadMatrixd = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLoadMatrixd(void* m) {
-    printf("[opengl32_enh_cpp] call glLoadMatrixd\n");
+    ANAX_TRACE("glLoadMatrixd");
     if (__proc_glLoadMatrixd == nullptr) {
         __proc_glLoadMatrixd = (__pfn_glLoadMatrixd)GetProcAddress(EnsureRealOpenGL32(), "glLoadMatrixd");
         if (__proc_glLoadMatrixd == nullptr) {
@@ -2630,7 +2651,7 @@ typedef void (__stdcall *__pfn_glLoadMatrixf)(void*);
 static __pfn_glLoadMatrixf __proc_glLoadMatrixf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLoadMatrixf(void* m) {
-    printf("[opengl32_enh_cpp] call glLoadMatrixf\n");
+    ANAX_TRACE("glLoadMatrixf");
     if (__proc_glLoadMatrixf == nullptr) {
         __proc_glLoadMatrixf = (__pfn_glLoadMatrixf)GetProcAddress(EnsureRealOpenGL32(), "glLoadMatrixf");
         if (__proc_glLoadMatrixf == nullptr) {
@@ -2646,7 +2667,7 @@ typedef void (__stdcall *__pfn_glLoadName)(GLuint);
 static __pfn_glLoadName __proc_glLoadName = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLoadName(GLuint name) {
-    printf("[opengl32_enh_cpp] call glLoadName\n");
+    ANAX_TRACE("glLoadName");
     if (__proc_glLoadName == nullptr) {
         __proc_glLoadName = (__pfn_glLoadName)GetProcAddress(EnsureRealOpenGL32(), "glLoadName");
         if (__proc_glLoadName == nullptr) {
@@ -2662,7 +2683,7 @@ typedef void (__stdcall *__pfn_glLogicOp)(GLenum);
 static __pfn_glLogicOp __proc_glLogicOp = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glLogicOp(GLenum opcode) {
-    printf("[opengl32_enh_cpp] call glLogicOp\n");
+    ANAX_TRACE("glLogicOp");
     if (__proc_glLogicOp == nullptr) {
         __proc_glLogicOp = (__pfn_glLogicOp)GetProcAddress(EnsureRealOpenGL32(), "glLogicOp");
         if (__proc_glLogicOp == nullptr) {
@@ -2678,7 +2699,7 @@ typedef void (__stdcall *__pfn_glMap1d)(GLenum, GLdouble, GLdouble, GLint, GLint
 static __pfn_glMap1d __proc_glMap1d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMap1d(GLenum target, GLdouble u1, GLdouble u2, GLint stride, GLint order, void* points) {
-    printf("[opengl32_enh_cpp] call glMap1d\n");
+    ANAX_TRACE("glMap1d");
     if (__proc_glMap1d == nullptr) {
         __proc_glMap1d = (__pfn_glMap1d)GetProcAddress(EnsureRealOpenGL32(), "glMap1d");
         if (__proc_glMap1d == nullptr) {
@@ -2694,7 +2715,7 @@ typedef void (__stdcall *__pfn_glMap1f)(GLenum, GLfloat, GLfloat, GLint, GLint, 
 static __pfn_glMap1f __proc_glMap1f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMap1f(GLenum target, GLfloat u1, GLfloat u2, GLint stride, GLint order, void* points) {
-    printf("[opengl32_enh_cpp] call glMap1f\n");
+    ANAX_TRACE("glMap1f");
     if (__proc_glMap1f == nullptr) {
         __proc_glMap1f = (__pfn_glMap1f)GetProcAddress(EnsureRealOpenGL32(), "glMap1f");
         if (__proc_glMap1f == nullptr) {
@@ -2710,7 +2731,7 @@ typedef void (__stdcall *__pfn_glMap2d)(GLenum, GLdouble, GLdouble, GLint, GLint
 static __pfn_glMap2d __proc_glMap2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMap2d(GLenum target, GLdouble u1, GLdouble u2, GLint ustride, GLint uorder, GLdouble v1, GLdouble v2, GLint vstride, GLint vorder, void* points) {
-    printf("[opengl32_enh_cpp] call glMap2d\n");
+    ANAX_TRACE("glMap2d");
     if (__proc_glMap2d == nullptr) {
         __proc_glMap2d = (__pfn_glMap2d)GetProcAddress(EnsureRealOpenGL32(), "glMap2d");
         if (__proc_glMap2d == nullptr) {
@@ -2726,7 +2747,7 @@ typedef void (__stdcall *__pfn_glMap2f)(GLenum, GLfloat, GLfloat, GLint, GLint, 
 static __pfn_glMap2f __proc_glMap2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMap2f(GLenum target, GLfloat u1, GLfloat u2, GLint ustride, GLint uorder, GLfloat v1, GLfloat v2, GLint vstride, GLint vorder, void* points) {
-    printf("[opengl32_enh_cpp] call glMap2f\n");
+    ANAX_TRACE("glMap2f");
     if (__proc_glMap2f == nullptr) {
         __proc_glMap2f = (__pfn_glMap2f)GetProcAddress(EnsureRealOpenGL32(), "glMap2f");
         if (__proc_glMap2f == nullptr) {
@@ -2742,7 +2763,7 @@ typedef void (__stdcall *__pfn_glMapGrid1d)(GLint, GLdouble, GLdouble);
 static __pfn_glMapGrid1d __proc_glMapGrid1d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMapGrid1d(GLint un, GLdouble u1, GLdouble u2) {
-    printf("[opengl32_enh_cpp] call glMapGrid1d\n");
+    ANAX_TRACE("glMapGrid1d");
     if (__proc_glMapGrid1d == nullptr) {
         __proc_glMapGrid1d = (__pfn_glMapGrid1d)GetProcAddress(EnsureRealOpenGL32(), "glMapGrid1d");
         if (__proc_glMapGrid1d == nullptr) {
@@ -2758,7 +2779,7 @@ typedef void (__stdcall *__pfn_glMapGrid1f)(GLint, GLfloat, GLfloat);
 static __pfn_glMapGrid1f __proc_glMapGrid1f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMapGrid1f(GLint un, GLfloat u1, GLfloat u2) {
-    printf("[opengl32_enh_cpp] call glMapGrid1f\n");
+    ANAX_TRACE("glMapGrid1f");
     if (__proc_glMapGrid1f == nullptr) {
         __proc_glMapGrid1f = (__pfn_glMapGrid1f)GetProcAddress(EnsureRealOpenGL32(), "glMapGrid1f");
         if (__proc_glMapGrid1f == nullptr) {
@@ -2774,7 +2795,7 @@ typedef void (__stdcall *__pfn_glMapGrid2d)(GLint, GLdouble, GLdouble, GLint, GL
 static __pfn_glMapGrid2d __proc_glMapGrid2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMapGrid2d(GLint un, GLdouble u1, GLdouble u2, GLint vn, GLdouble v1, GLdouble v2) {
-    printf("[opengl32_enh_cpp] call glMapGrid2d\n");
+    ANAX_TRACE("glMapGrid2d");
     if (__proc_glMapGrid2d == nullptr) {
         __proc_glMapGrid2d = (__pfn_glMapGrid2d)GetProcAddress(EnsureRealOpenGL32(), "glMapGrid2d");
         if (__proc_glMapGrid2d == nullptr) {
@@ -2790,7 +2811,7 @@ typedef void (__stdcall *__pfn_glMapGrid2f)(GLint, GLfloat, GLfloat, GLint, GLfl
 static __pfn_glMapGrid2f __proc_glMapGrid2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMapGrid2f(GLint un, GLfloat u1, GLfloat u2, GLint vn, GLfloat v1, GLfloat v2) {
-    printf("[opengl32_enh_cpp] call glMapGrid2f\n");
+    ANAX_TRACE("glMapGrid2f");
     if (__proc_glMapGrid2f == nullptr) {
         __proc_glMapGrid2f = (__pfn_glMapGrid2f)GetProcAddress(EnsureRealOpenGL32(), "glMapGrid2f");
         if (__proc_glMapGrid2f == nullptr) {
@@ -2806,7 +2827,7 @@ typedef void (__stdcall *__pfn_glMaterialf)(GLenum, GLenum, GLfloat);
 static __pfn_glMaterialf __proc_glMaterialf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMaterialf(GLenum face, GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glMaterialf\n");
+    ANAX_TRACE("glMaterialf");
     if (__proc_glMaterialf == nullptr) {
         __proc_glMaterialf = (__pfn_glMaterialf)GetProcAddress(EnsureRealOpenGL32(), "glMaterialf");
         if (__proc_glMaterialf == nullptr) {
@@ -2822,7 +2843,7 @@ typedef void (__stdcall *__pfn_glMaterialfv)(GLenum, GLenum, void*);
 static __pfn_glMaterialfv __proc_glMaterialfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMaterialfv(GLenum face, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glMaterialfv\n");
+    ANAX_TRACE("glMaterialfv");
     if (__proc_glMaterialfv == nullptr) {
         __proc_glMaterialfv = (__pfn_glMaterialfv)GetProcAddress(EnsureRealOpenGL32(), "glMaterialfv");
         if (__proc_glMaterialfv == nullptr) {
@@ -2838,7 +2859,7 @@ typedef void (__stdcall *__pfn_glMateriali)(GLenum, GLenum, GLint);
 static __pfn_glMateriali __proc_glMateriali = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMateriali(GLenum face, GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glMateriali\n");
+    ANAX_TRACE("glMateriali");
     if (__proc_glMateriali == nullptr) {
         __proc_glMateriali = (__pfn_glMateriali)GetProcAddress(EnsureRealOpenGL32(), "glMateriali");
         if (__proc_glMateriali == nullptr) {
@@ -2854,7 +2875,7 @@ typedef void (__stdcall *__pfn_glMaterialiv)(GLenum, GLenum, void*);
 static __pfn_glMaterialiv __proc_glMaterialiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMaterialiv(GLenum face, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glMaterialiv\n");
+    ANAX_TRACE("glMaterialiv");
     if (__proc_glMaterialiv == nullptr) {
         __proc_glMaterialiv = (__pfn_glMaterialiv)GetProcAddress(EnsureRealOpenGL32(), "glMaterialiv");
         if (__proc_glMaterialiv == nullptr) {
@@ -2870,7 +2891,7 @@ typedef void (__stdcall *__pfn_glMatrixMode)(GLenum);
 static __pfn_glMatrixMode __proc_glMatrixMode = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMatrixMode(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glMatrixMode\n");
+    ANAX_TRACE("glMatrixMode");
     if (__proc_glMatrixMode == nullptr) {
         __proc_glMatrixMode = (__pfn_glMatrixMode)GetProcAddress(EnsureRealOpenGL32(), "glMatrixMode");
         if (__proc_glMatrixMode == nullptr) {
@@ -2886,7 +2907,7 @@ typedef void (__stdcall *__pfn_glMultMatrixd)(void*);
 static __pfn_glMultMatrixd __proc_glMultMatrixd = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMultMatrixd(void* m) {
-    printf("[opengl32_enh_cpp] call glMultMatrixd\n");
+    ANAX_TRACE("glMultMatrixd");
     if (__proc_glMultMatrixd == nullptr) {
         __proc_glMultMatrixd = (__pfn_glMultMatrixd)GetProcAddress(EnsureRealOpenGL32(), "glMultMatrixd");
         if (__proc_glMultMatrixd == nullptr) {
@@ -2902,7 +2923,7 @@ typedef void (__stdcall *__pfn_glMultMatrixf)(void*);
 static __pfn_glMultMatrixf __proc_glMultMatrixf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glMultMatrixf(void* m) {
-    printf("[opengl32_enh_cpp] call glMultMatrixf\n");
+    ANAX_TRACE("glMultMatrixf");
     if (__proc_glMultMatrixf == nullptr) {
         __proc_glMultMatrixf = (__pfn_glMultMatrixf)GetProcAddress(EnsureRealOpenGL32(), "glMultMatrixf");
         if (__proc_glMultMatrixf == nullptr) {
@@ -2918,7 +2939,7 @@ typedef void (__stdcall *__pfn_glNewList)(GLuint, GLenum);
 static __pfn_glNewList __proc_glNewList = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNewList(GLuint list, GLenum mode) {
-    printf("[opengl32_enh_cpp] call glNewList\n");
+    ANAX_TRACE("glNewList");
     if (__proc_glNewList == nullptr) {
         __proc_glNewList = (__pfn_glNewList)GetProcAddress(EnsureRealOpenGL32(), "glNewList");
         if (__proc_glNewList == nullptr) {
@@ -2934,7 +2955,7 @@ typedef void (__stdcall *__pfn_glNormal3b)(GLbyte, GLbyte, GLbyte);
 static __pfn_glNormal3b __proc_glNormal3b = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3b(GLbyte nx, GLbyte ny, GLbyte nz) {
-    printf("[opengl32_enh_cpp] call glNormal3b\n");
+    ANAX_TRACE("glNormal3b");
     if (__proc_glNormal3b == nullptr) {
         __proc_glNormal3b = (__pfn_glNormal3b)GetProcAddress(EnsureRealOpenGL32(), "glNormal3b");
         if (__proc_glNormal3b == nullptr) {
@@ -2950,7 +2971,7 @@ typedef void (__stdcall *__pfn_glNormal3bv)(void*);
 static __pfn_glNormal3bv __proc_glNormal3bv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3bv(void* v) {
-    printf("[opengl32_enh_cpp] call glNormal3bv\n");
+    ANAX_TRACE("glNormal3bv");
     if (__proc_glNormal3bv == nullptr) {
         __proc_glNormal3bv = (__pfn_glNormal3bv)GetProcAddress(EnsureRealOpenGL32(), "glNormal3bv");
         if (__proc_glNormal3bv == nullptr) {
@@ -2966,7 +2987,7 @@ typedef void (__stdcall *__pfn_glNormal3d)(GLdouble, GLdouble, GLdouble);
 static __pfn_glNormal3d __proc_glNormal3d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3d(GLdouble nx, GLdouble ny, GLdouble nz) {
-    printf("[opengl32_enh_cpp] call glNormal3d\n");
+    ANAX_TRACE("glNormal3d");
     if (__proc_glNormal3d == nullptr) {
         __proc_glNormal3d = (__pfn_glNormal3d)GetProcAddress(EnsureRealOpenGL32(), "glNormal3d");
         if (__proc_glNormal3d == nullptr) {
@@ -2982,7 +3003,7 @@ typedef void (__stdcall *__pfn_glNormal3dv)(void*);
 static __pfn_glNormal3dv __proc_glNormal3dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3dv(void* v) {
-    printf("[opengl32_enh_cpp] call glNormal3dv\n");
+    ANAX_TRACE("glNormal3dv");
     if (__proc_glNormal3dv == nullptr) {
         __proc_glNormal3dv = (__pfn_glNormal3dv)GetProcAddress(EnsureRealOpenGL32(), "glNormal3dv");
         if (__proc_glNormal3dv == nullptr) {
@@ -2998,7 +3019,7 @@ typedef void (__stdcall *__pfn_glNormal3f)(GLfloat, GLfloat, GLfloat);
 static __pfn_glNormal3f __proc_glNormal3f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz) {
-    printf("[opengl32_enh_cpp] call glNormal3f\n");
+    ANAX_TRACE("glNormal3f");
     if (__proc_glNormal3f == nullptr) {
         __proc_glNormal3f = (__pfn_glNormal3f)GetProcAddress(EnsureRealOpenGL32(), "glNormal3f");
         if (__proc_glNormal3f == nullptr) {
@@ -3014,7 +3035,7 @@ typedef void (__stdcall *__pfn_glNormal3fv)(void*);
 static __pfn_glNormal3fv __proc_glNormal3fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3fv(void* v) {
-    printf("[opengl32_enh_cpp] call glNormal3fv\n");
+    ANAX_TRACE("glNormal3fv");
     if (__proc_glNormal3fv == nullptr) {
         __proc_glNormal3fv = (__pfn_glNormal3fv)GetProcAddress(EnsureRealOpenGL32(), "glNormal3fv");
         if (__proc_glNormal3fv == nullptr) {
@@ -3030,7 +3051,7 @@ typedef void (__stdcall *__pfn_glNormal3i)(GLint, GLint, GLint);
 static __pfn_glNormal3i __proc_glNormal3i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3i(GLint nx, GLint ny, GLint nz) {
-    printf("[opengl32_enh_cpp] call glNormal3i\n");
+    ANAX_TRACE("glNormal3i");
     if (__proc_glNormal3i == nullptr) {
         __proc_glNormal3i = (__pfn_glNormal3i)GetProcAddress(EnsureRealOpenGL32(), "glNormal3i");
         if (__proc_glNormal3i == nullptr) {
@@ -3046,7 +3067,7 @@ typedef void (__stdcall *__pfn_glNormal3iv)(void*);
 static __pfn_glNormal3iv __proc_glNormal3iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3iv(void* v) {
-    printf("[opengl32_enh_cpp] call glNormal3iv\n");
+    ANAX_TRACE("glNormal3iv");
     if (__proc_glNormal3iv == nullptr) {
         __proc_glNormal3iv = (__pfn_glNormal3iv)GetProcAddress(EnsureRealOpenGL32(), "glNormal3iv");
         if (__proc_glNormal3iv == nullptr) {
@@ -3062,7 +3083,7 @@ typedef void (__stdcall *__pfn_glNormal3s)(GLshort, GLshort, GLshort);
 static __pfn_glNormal3s __proc_glNormal3s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3s(GLshort nx, GLshort ny, GLshort nz) {
-    printf("[opengl32_enh_cpp] call glNormal3s\n");
+    ANAX_TRACE("glNormal3s");
     if (__proc_glNormal3s == nullptr) {
         __proc_glNormal3s = (__pfn_glNormal3s)GetProcAddress(EnsureRealOpenGL32(), "glNormal3s");
         if (__proc_glNormal3s == nullptr) {
@@ -3078,7 +3099,7 @@ typedef void (__stdcall *__pfn_glNormal3sv)(void*);
 static __pfn_glNormal3sv __proc_glNormal3sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormal3sv(void* v) {
-    printf("[opengl32_enh_cpp] call glNormal3sv\n");
+    ANAX_TRACE("glNormal3sv");
     if (__proc_glNormal3sv == nullptr) {
         __proc_glNormal3sv = (__pfn_glNormal3sv)GetProcAddress(EnsureRealOpenGL32(), "glNormal3sv");
         if (__proc_glNormal3sv == nullptr) {
@@ -3094,7 +3115,7 @@ typedef void (__stdcall *__pfn_glNormalPointer)(GLenum, GLsizei, void*);
 static __pfn_glNormalPointer __proc_glNormalPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glNormalPointer(GLenum type, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glNormalPointer\n");
+    ANAX_TRACE("glNormalPointer");
     if (__proc_glNormalPointer == nullptr) {
         __proc_glNormalPointer = (__pfn_glNormalPointer)GetProcAddress(EnsureRealOpenGL32(), "glNormalPointer");
         if (__proc_glNormalPointer == nullptr) {
@@ -3110,7 +3131,7 @@ typedef void (__stdcall *__pfn_glOrtho)(GLdouble, GLdouble, GLdouble, GLdouble, 
 static __pfn_glOrtho __proc_glOrtho = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble zNear, GLdouble zFar) {
-    printf("[opengl32_enh_cpp] call glOrtho\n");
+    ANAX_TRACE("glOrtho");
     if (__proc_glOrtho == nullptr) {
         __proc_glOrtho = (__pfn_glOrtho)GetProcAddress(EnsureRealOpenGL32(), "glOrtho");
         if (__proc_glOrtho == nullptr) {
@@ -3126,7 +3147,7 @@ typedef void (__stdcall *__pfn_glPassThrough)(GLfloat);
 static __pfn_glPassThrough __proc_glPassThrough = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPassThrough(GLfloat token) {
-    printf("[opengl32_enh_cpp] call glPassThrough\n");
+    ANAX_TRACE("glPassThrough");
     if (__proc_glPassThrough == nullptr) {
         __proc_glPassThrough = (__pfn_glPassThrough)GetProcAddress(EnsureRealOpenGL32(), "glPassThrough");
         if (__proc_glPassThrough == nullptr) {
@@ -3142,7 +3163,7 @@ typedef void (__stdcall *__pfn_glPixelMapfv)(GLenum, GLsizei, void*);
 static __pfn_glPixelMapfv __proc_glPixelMapfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelMapfv(GLenum map, GLsizei mapsize, void* values) {
-    printf("[opengl32_enh_cpp] call glPixelMapfv\n");
+    ANAX_TRACE("glPixelMapfv");
     if (__proc_glPixelMapfv == nullptr) {
         __proc_glPixelMapfv = (__pfn_glPixelMapfv)GetProcAddress(EnsureRealOpenGL32(), "glPixelMapfv");
         if (__proc_glPixelMapfv == nullptr) {
@@ -3158,7 +3179,7 @@ typedef void (__stdcall *__pfn_glPixelMapuiv)(GLenum, GLsizei, void*);
 static __pfn_glPixelMapuiv __proc_glPixelMapuiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelMapuiv(GLenum map, GLsizei mapsize, void* values) {
-    printf("[opengl32_enh_cpp] call glPixelMapuiv\n");
+    ANAX_TRACE("glPixelMapuiv");
     if (__proc_glPixelMapuiv == nullptr) {
         __proc_glPixelMapuiv = (__pfn_glPixelMapuiv)GetProcAddress(EnsureRealOpenGL32(), "glPixelMapuiv");
         if (__proc_glPixelMapuiv == nullptr) {
@@ -3174,7 +3195,7 @@ typedef void (__stdcall *__pfn_glPixelMapusv)(GLenum, GLsizei, void*);
 static __pfn_glPixelMapusv __proc_glPixelMapusv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelMapusv(GLenum map, GLsizei mapsize, void* values) {
-    printf("[opengl32_enh_cpp] call glPixelMapusv\n");
+    ANAX_TRACE("glPixelMapusv");
     if (__proc_glPixelMapusv == nullptr) {
         __proc_glPixelMapusv = (__pfn_glPixelMapusv)GetProcAddress(EnsureRealOpenGL32(), "glPixelMapusv");
         if (__proc_glPixelMapusv == nullptr) {
@@ -3190,7 +3211,7 @@ typedef void (__stdcall *__pfn_glPixelStoref)(GLenum, GLfloat);
 static __pfn_glPixelStoref __proc_glPixelStoref = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelStoref(GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glPixelStoref\n");
+    ANAX_TRACE("glPixelStoref");
     if (__proc_glPixelStoref == nullptr) {
         __proc_glPixelStoref = (__pfn_glPixelStoref)GetProcAddress(EnsureRealOpenGL32(), "glPixelStoref");
         if (__proc_glPixelStoref == nullptr) {
@@ -3206,7 +3227,7 @@ typedef void (__stdcall *__pfn_glPixelStorei)(GLenum, GLint);
 static __pfn_glPixelStorei __proc_glPixelStorei = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelStorei(GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glPixelStorei\n");
+    ANAX_TRACE("glPixelStorei");
     if (__proc_glPixelStorei == nullptr) {
         __proc_glPixelStorei = (__pfn_glPixelStorei)GetProcAddress(EnsureRealOpenGL32(), "glPixelStorei");
         if (__proc_glPixelStorei == nullptr) {
@@ -3222,7 +3243,7 @@ typedef void (__stdcall *__pfn_glPixelTransferf)(GLenum, GLfloat);
 static __pfn_glPixelTransferf __proc_glPixelTransferf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelTransferf(GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glPixelTransferf\n");
+    ANAX_TRACE("glPixelTransferf");
     if (__proc_glPixelTransferf == nullptr) {
         __proc_glPixelTransferf = (__pfn_glPixelTransferf)GetProcAddress(EnsureRealOpenGL32(), "glPixelTransferf");
         if (__proc_glPixelTransferf == nullptr) {
@@ -3238,7 +3259,7 @@ typedef void (__stdcall *__pfn_glPixelTransferi)(GLenum, GLint);
 static __pfn_glPixelTransferi __proc_glPixelTransferi = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelTransferi(GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glPixelTransferi\n");
+    ANAX_TRACE("glPixelTransferi");
     if (__proc_glPixelTransferi == nullptr) {
         __proc_glPixelTransferi = (__pfn_glPixelTransferi)GetProcAddress(EnsureRealOpenGL32(), "glPixelTransferi");
         if (__proc_glPixelTransferi == nullptr) {
@@ -3254,7 +3275,7 @@ typedef void (__stdcall *__pfn_glPixelZoom)(GLfloat, GLfloat);
 static __pfn_glPixelZoom __proc_glPixelZoom = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPixelZoom(GLfloat xfactor, GLfloat yfactor) {
-    printf("[opengl32_enh_cpp] call glPixelZoom\n");
+    ANAX_TRACE("glPixelZoom");
     if (__proc_glPixelZoom == nullptr) {
         __proc_glPixelZoom = (__pfn_glPixelZoom)GetProcAddress(EnsureRealOpenGL32(), "glPixelZoom");
         if (__proc_glPixelZoom == nullptr) {
@@ -3270,7 +3291,7 @@ typedef void (__stdcall *__pfn_glPointSize)(GLfloat);
 static __pfn_glPointSize __proc_glPointSize = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPointSize(GLfloat size) {
-    printf("[opengl32_enh_cpp] call glPointSize\n");
+    ANAX_TRACE("glPointSize");
     if (__proc_glPointSize == nullptr) {
         __proc_glPointSize = (__pfn_glPointSize)GetProcAddress(EnsureRealOpenGL32(), "glPointSize");
         if (__proc_glPointSize == nullptr) {
@@ -3286,7 +3307,7 @@ typedef void (__stdcall *__pfn_glPolygonMode)(GLenum, GLenum);
 static __pfn_glPolygonMode __proc_glPolygonMode = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPolygonMode(GLenum face, GLenum mode) {
-    printf("[opengl32_enh_cpp] call glPolygonMode\n");
+    ANAX_TRACE("glPolygonMode");
     if (__proc_glPolygonMode == nullptr) {
         __proc_glPolygonMode = (__pfn_glPolygonMode)GetProcAddress(EnsureRealOpenGL32(), "glPolygonMode");
         if (__proc_glPolygonMode == nullptr) {
@@ -3302,7 +3323,7 @@ typedef void (__stdcall *__pfn_glPolygonOffset)(GLfloat, GLfloat);
 static __pfn_glPolygonOffset __proc_glPolygonOffset = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPolygonOffset(GLfloat factor, GLfloat units) {
-    printf("[opengl32_enh_cpp] call glPolygonOffset\n");
+    ANAX_TRACE("glPolygonOffset");
     if (__proc_glPolygonOffset == nullptr) {
         __proc_glPolygonOffset = (__pfn_glPolygonOffset)GetProcAddress(EnsureRealOpenGL32(), "glPolygonOffset");
         if (__proc_glPolygonOffset == nullptr) {
@@ -3318,7 +3339,7 @@ typedef void (__stdcall *__pfn_glPolygonStipple)(void*);
 static __pfn_glPolygonStipple __proc_glPolygonStipple = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPolygonStipple(void* mask) {
-    printf("[opengl32_enh_cpp] call glPolygonStipple\n");
+    ANAX_TRACE("glPolygonStipple");
     if (__proc_glPolygonStipple == nullptr) {
         __proc_glPolygonStipple = (__pfn_glPolygonStipple)GetProcAddress(EnsureRealOpenGL32(), "glPolygonStipple");
         if (__proc_glPolygonStipple == nullptr) {
@@ -3334,7 +3355,7 @@ typedef void (__stdcall *__pfn_glPopAttrib)(void);
 static __pfn_glPopAttrib __proc_glPopAttrib = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPopAttrib(void) {
-    printf("[opengl32_enh_cpp] call glPopAttrib\n");
+    ANAX_TRACE("glPopAttrib");
     if (__proc_glPopAttrib == nullptr) {
         __proc_glPopAttrib = (__pfn_glPopAttrib)GetProcAddress(EnsureRealOpenGL32(), "glPopAttrib");
         if (__proc_glPopAttrib == nullptr) {
@@ -3350,7 +3371,7 @@ typedef void (__stdcall *__pfn_glPopClientAttrib)(void);
 static __pfn_glPopClientAttrib __proc_glPopClientAttrib = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPopClientAttrib(void) {
-    printf("[opengl32_enh_cpp] call glPopClientAttrib\n");
+    ANAX_TRACE("glPopClientAttrib");
     if (__proc_glPopClientAttrib == nullptr) {
         __proc_glPopClientAttrib = (__pfn_glPopClientAttrib)GetProcAddress(EnsureRealOpenGL32(), "glPopClientAttrib");
         if (__proc_glPopClientAttrib == nullptr) {
@@ -3366,7 +3387,7 @@ typedef void (__stdcall *__pfn_glPopMatrix)(void);
 static __pfn_glPopMatrix __proc_glPopMatrix = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPopMatrix(void) {
-    printf("[opengl32_enh_cpp] call glPopMatrix\n");
+    ANAX_TRACE("glPopMatrix");
     if (__proc_glPopMatrix == nullptr) {
         __proc_glPopMatrix = (__pfn_glPopMatrix)GetProcAddress(EnsureRealOpenGL32(), "glPopMatrix");
         if (__proc_glPopMatrix == nullptr) {
@@ -3382,7 +3403,7 @@ typedef void (__stdcall *__pfn_glPopName)(void);
 static __pfn_glPopName __proc_glPopName = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPopName(void) {
-    printf("[opengl32_enh_cpp] call glPopName\n");
+    ANAX_TRACE("glPopName");
     if (__proc_glPopName == nullptr) {
         __proc_glPopName = (__pfn_glPopName)GetProcAddress(EnsureRealOpenGL32(), "glPopName");
         if (__proc_glPopName == nullptr) {
@@ -3398,7 +3419,7 @@ typedef void (__stdcall *__pfn_glPrioritizeTextures)(GLsizei, void*, void*);
 static __pfn_glPrioritizeTextures __proc_glPrioritizeTextures = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPrioritizeTextures(GLsizei n, void* textures, void* priorities) {
-    printf("[opengl32_enh_cpp] call glPrioritizeTextures\n");
+    ANAX_TRACE("glPrioritizeTextures");
     if (__proc_glPrioritizeTextures == nullptr) {
         __proc_glPrioritizeTextures = (__pfn_glPrioritizeTextures)GetProcAddress(EnsureRealOpenGL32(), "glPrioritizeTextures");
         if (__proc_glPrioritizeTextures == nullptr) {
@@ -3414,7 +3435,7 @@ typedef void (__stdcall *__pfn_glPushAttrib)(GLbitfield);
 static __pfn_glPushAttrib __proc_glPushAttrib = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPushAttrib(GLbitfield mask) {
-    printf("[opengl32_enh_cpp] call glPushAttrib\n");
+    ANAX_TRACE("glPushAttrib");
     if (__proc_glPushAttrib == nullptr) {
         __proc_glPushAttrib = (__pfn_glPushAttrib)GetProcAddress(EnsureRealOpenGL32(), "glPushAttrib");
         if (__proc_glPushAttrib == nullptr) {
@@ -3430,7 +3451,7 @@ typedef void (__stdcall *__pfn_glPushClientAttrib)(GLbitfield);
 static __pfn_glPushClientAttrib __proc_glPushClientAttrib = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPushClientAttrib(GLbitfield mask) {
-    printf("[opengl32_enh_cpp] call glPushClientAttrib\n");
+    ANAX_TRACE("glPushClientAttrib");
     if (__proc_glPushClientAttrib == nullptr) {
         __proc_glPushClientAttrib = (__pfn_glPushClientAttrib)GetProcAddress(EnsureRealOpenGL32(), "glPushClientAttrib");
         if (__proc_glPushClientAttrib == nullptr) {
@@ -3446,7 +3467,7 @@ typedef void (__stdcall *__pfn_glPushMatrix)(void);
 static __pfn_glPushMatrix __proc_glPushMatrix = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPushMatrix(void) {
-    printf("[opengl32_enh_cpp] call glPushMatrix\n");
+    ANAX_TRACE("glPushMatrix");
     if (__proc_glPushMatrix == nullptr) {
         __proc_glPushMatrix = (__pfn_glPushMatrix)GetProcAddress(EnsureRealOpenGL32(), "glPushMatrix");
         if (__proc_glPushMatrix == nullptr) {
@@ -3462,7 +3483,7 @@ typedef void (__stdcall *__pfn_glPushName)(GLuint);
 static __pfn_glPushName __proc_glPushName = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glPushName(GLuint name) {
-    printf("[opengl32_enh_cpp] call glPushName\n");
+    ANAX_TRACE("glPushName");
     if (__proc_glPushName == nullptr) {
         __proc_glPushName = (__pfn_glPushName)GetProcAddress(EnsureRealOpenGL32(), "glPushName");
         if (__proc_glPushName == nullptr) {
@@ -3478,7 +3499,7 @@ typedef void (__stdcall *__pfn_glRasterPos2d)(GLdouble, GLdouble);
 static __pfn_glRasterPos2d __proc_glRasterPos2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2d(GLdouble x, GLdouble y) {
-    printf("[opengl32_enh_cpp] call glRasterPos2d\n");
+    ANAX_TRACE("glRasterPos2d");
     if (__proc_glRasterPos2d == nullptr) {
         __proc_glRasterPos2d = (__pfn_glRasterPos2d)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2d");
         if (__proc_glRasterPos2d == nullptr) {
@@ -3494,7 +3515,7 @@ typedef void (__stdcall *__pfn_glRasterPos2dv)(void*);
 static __pfn_glRasterPos2dv __proc_glRasterPos2dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2dv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos2dv\n");
+    ANAX_TRACE("glRasterPos2dv");
     if (__proc_glRasterPos2dv == nullptr) {
         __proc_glRasterPos2dv = (__pfn_glRasterPos2dv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2dv");
         if (__proc_glRasterPos2dv == nullptr) {
@@ -3510,7 +3531,7 @@ typedef void (__stdcall *__pfn_glRasterPos2f)(GLfloat, GLfloat);
 static __pfn_glRasterPos2f __proc_glRasterPos2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2f(GLfloat x, GLfloat y) {
-    printf("[opengl32_enh_cpp] call glRasterPos2f\n");
+    ANAX_TRACE("glRasterPos2f");
     if (__proc_glRasterPos2f == nullptr) {
         __proc_glRasterPos2f = (__pfn_glRasterPos2f)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2f");
         if (__proc_glRasterPos2f == nullptr) {
@@ -3526,7 +3547,7 @@ typedef void (__stdcall *__pfn_glRasterPos2fv)(void*);
 static __pfn_glRasterPos2fv __proc_glRasterPos2fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2fv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos2fv\n");
+    ANAX_TRACE("glRasterPos2fv");
     if (__proc_glRasterPos2fv == nullptr) {
         __proc_glRasterPos2fv = (__pfn_glRasterPos2fv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2fv");
         if (__proc_glRasterPos2fv == nullptr) {
@@ -3542,7 +3563,7 @@ typedef void (__stdcall *__pfn_glRasterPos2i)(GLint, GLint);
 static __pfn_glRasterPos2i __proc_glRasterPos2i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2i(GLint x, GLint y) {
-    printf("[opengl32_enh_cpp] call glRasterPos2i\n");
+    ANAX_TRACE("glRasterPos2i");
     if (__proc_glRasterPos2i == nullptr) {
         __proc_glRasterPos2i = (__pfn_glRasterPos2i)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2i");
         if (__proc_glRasterPos2i == nullptr) {
@@ -3558,7 +3579,7 @@ typedef void (__stdcall *__pfn_glRasterPos2iv)(void*);
 static __pfn_glRasterPos2iv __proc_glRasterPos2iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2iv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos2iv\n");
+    ANAX_TRACE("glRasterPos2iv");
     if (__proc_glRasterPos2iv == nullptr) {
         __proc_glRasterPos2iv = (__pfn_glRasterPos2iv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2iv");
         if (__proc_glRasterPos2iv == nullptr) {
@@ -3574,7 +3595,7 @@ typedef void (__stdcall *__pfn_glRasterPos2s)(GLshort, GLshort);
 static __pfn_glRasterPos2s __proc_glRasterPos2s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2s(GLshort x, GLshort y) {
-    printf("[opengl32_enh_cpp] call glRasterPos2s\n");
+    ANAX_TRACE("glRasterPos2s");
     if (__proc_glRasterPos2s == nullptr) {
         __proc_glRasterPos2s = (__pfn_glRasterPos2s)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2s");
         if (__proc_glRasterPos2s == nullptr) {
@@ -3590,7 +3611,7 @@ typedef void (__stdcall *__pfn_glRasterPos2sv)(void*);
 static __pfn_glRasterPos2sv __proc_glRasterPos2sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos2sv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos2sv\n");
+    ANAX_TRACE("glRasterPos2sv");
     if (__proc_glRasterPos2sv == nullptr) {
         __proc_glRasterPos2sv = (__pfn_glRasterPos2sv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos2sv");
         if (__proc_glRasterPos2sv == nullptr) {
@@ -3606,7 +3627,7 @@ typedef void (__stdcall *__pfn_glRasterPos3d)(GLdouble, GLdouble, GLdouble);
 static __pfn_glRasterPos3d __proc_glRasterPos3d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3d(GLdouble x, GLdouble y, GLdouble z) {
-    printf("[opengl32_enh_cpp] call glRasterPos3d\n");
+    ANAX_TRACE("glRasterPos3d");
     if (__proc_glRasterPos3d == nullptr) {
         __proc_glRasterPos3d = (__pfn_glRasterPos3d)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3d");
         if (__proc_glRasterPos3d == nullptr) {
@@ -3622,7 +3643,7 @@ typedef void (__stdcall *__pfn_glRasterPos3dv)(void*);
 static __pfn_glRasterPos3dv __proc_glRasterPos3dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3dv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos3dv\n");
+    ANAX_TRACE("glRasterPos3dv");
     if (__proc_glRasterPos3dv == nullptr) {
         __proc_glRasterPos3dv = (__pfn_glRasterPos3dv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3dv");
         if (__proc_glRasterPos3dv == nullptr) {
@@ -3638,7 +3659,7 @@ typedef void (__stdcall *__pfn_glRasterPos3f)(GLfloat, GLfloat, GLfloat);
 static __pfn_glRasterPos3f __proc_glRasterPos3f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3f(GLfloat x, GLfloat y, GLfloat z) {
-    printf("[opengl32_enh_cpp] call glRasterPos3f\n");
+    ANAX_TRACE("glRasterPos3f");
     if (__proc_glRasterPos3f == nullptr) {
         __proc_glRasterPos3f = (__pfn_glRasterPos3f)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3f");
         if (__proc_glRasterPos3f == nullptr) {
@@ -3654,7 +3675,7 @@ typedef void (__stdcall *__pfn_glRasterPos3fv)(void*);
 static __pfn_glRasterPos3fv __proc_glRasterPos3fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3fv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos3fv\n");
+    ANAX_TRACE("glRasterPos3fv");
     if (__proc_glRasterPos3fv == nullptr) {
         __proc_glRasterPos3fv = (__pfn_glRasterPos3fv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3fv");
         if (__proc_glRasterPos3fv == nullptr) {
@@ -3670,7 +3691,7 @@ typedef void (__stdcall *__pfn_glRasterPos3i)(GLint, GLint, GLint);
 static __pfn_glRasterPos3i __proc_glRasterPos3i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3i(GLint x, GLint y, GLint z) {
-    printf("[opengl32_enh_cpp] call glRasterPos3i\n");
+    ANAX_TRACE("glRasterPos3i");
     if (__proc_glRasterPos3i == nullptr) {
         __proc_glRasterPos3i = (__pfn_glRasterPos3i)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3i");
         if (__proc_glRasterPos3i == nullptr) {
@@ -3686,7 +3707,7 @@ typedef void (__stdcall *__pfn_glRasterPos3iv)(void*);
 static __pfn_glRasterPos3iv __proc_glRasterPos3iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3iv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos3iv\n");
+    ANAX_TRACE("glRasterPos3iv");
     if (__proc_glRasterPos3iv == nullptr) {
         __proc_glRasterPos3iv = (__pfn_glRasterPos3iv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3iv");
         if (__proc_glRasterPos3iv == nullptr) {
@@ -3702,7 +3723,7 @@ typedef void (__stdcall *__pfn_glRasterPos3s)(GLshort, GLshort, GLshort);
 static __pfn_glRasterPos3s __proc_glRasterPos3s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3s(GLshort x, GLshort y, GLshort z) {
-    printf("[opengl32_enh_cpp] call glRasterPos3s\n");
+    ANAX_TRACE("glRasterPos3s");
     if (__proc_glRasterPos3s == nullptr) {
         __proc_glRasterPos3s = (__pfn_glRasterPos3s)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3s");
         if (__proc_glRasterPos3s == nullptr) {
@@ -3718,7 +3739,7 @@ typedef void (__stdcall *__pfn_glRasterPos3sv)(void*);
 static __pfn_glRasterPos3sv __proc_glRasterPos3sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos3sv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos3sv\n");
+    ANAX_TRACE("glRasterPos3sv");
     if (__proc_glRasterPos3sv == nullptr) {
         __proc_glRasterPos3sv = (__pfn_glRasterPos3sv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos3sv");
         if (__proc_glRasterPos3sv == nullptr) {
@@ -3734,7 +3755,7 @@ typedef void (__stdcall *__pfn_glRasterPos4d)(GLdouble, GLdouble, GLdouble, GLdo
 static __pfn_glRasterPos4d __proc_glRasterPos4d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4d(GLdouble x, GLdouble y, GLdouble z, GLdouble w) {
-    printf("[opengl32_enh_cpp] call glRasterPos4d\n");
+    ANAX_TRACE("glRasterPos4d");
     if (__proc_glRasterPos4d == nullptr) {
         __proc_glRasterPos4d = (__pfn_glRasterPos4d)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4d");
         if (__proc_glRasterPos4d == nullptr) {
@@ -3750,7 +3771,7 @@ typedef void (__stdcall *__pfn_glRasterPos4dv)(void*);
 static __pfn_glRasterPos4dv __proc_glRasterPos4dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4dv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos4dv\n");
+    ANAX_TRACE("glRasterPos4dv");
     if (__proc_glRasterPos4dv == nullptr) {
         __proc_glRasterPos4dv = (__pfn_glRasterPos4dv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4dv");
         if (__proc_glRasterPos4dv == nullptr) {
@@ -3766,7 +3787,7 @@ typedef void (__stdcall *__pfn_glRasterPos4f)(GLfloat, GLfloat, GLfloat, GLfloat
 static __pfn_glRasterPos4f __proc_glRasterPos4f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    printf("[opengl32_enh_cpp] call glRasterPos4f\n");
+    ANAX_TRACE("glRasterPos4f");
     if (__proc_glRasterPos4f == nullptr) {
         __proc_glRasterPos4f = (__pfn_glRasterPos4f)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4f");
         if (__proc_glRasterPos4f == nullptr) {
@@ -3782,7 +3803,7 @@ typedef void (__stdcall *__pfn_glRasterPos4fv)(void*);
 static __pfn_glRasterPos4fv __proc_glRasterPos4fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4fv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos4fv\n");
+    ANAX_TRACE("glRasterPos4fv");
     if (__proc_glRasterPos4fv == nullptr) {
         __proc_glRasterPos4fv = (__pfn_glRasterPos4fv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4fv");
         if (__proc_glRasterPos4fv == nullptr) {
@@ -3798,7 +3819,7 @@ typedef void (__stdcall *__pfn_glRasterPos4i)(GLint, GLint, GLint, GLint);
 static __pfn_glRasterPos4i __proc_glRasterPos4i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4i(GLint x, GLint y, GLint z, GLint w) {
-    printf("[opengl32_enh_cpp] call glRasterPos4i\n");
+    ANAX_TRACE("glRasterPos4i");
     if (__proc_glRasterPos4i == nullptr) {
         __proc_glRasterPos4i = (__pfn_glRasterPos4i)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4i");
         if (__proc_glRasterPos4i == nullptr) {
@@ -3814,7 +3835,7 @@ typedef void (__stdcall *__pfn_glRasterPos4iv)(void*);
 static __pfn_glRasterPos4iv __proc_glRasterPos4iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4iv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos4iv\n");
+    ANAX_TRACE("glRasterPos4iv");
     if (__proc_glRasterPos4iv == nullptr) {
         __proc_glRasterPos4iv = (__pfn_glRasterPos4iv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4iv");
         if (__proc_glRasterPos4iv == nullptr) {
@@ -3830,7 +3851,7 @@ typedef void (__stdcall *__pfn_glRasterPos4s)(GLshort, GLshort, GLshort, GLshort
 static __pfn_glRasterPos4s __proc_glRasterPos4s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4s(GLshort x, GLshort y, GLshort z, GLshort w) {
-    printf("[opengl32_enh_cpp] call glRasterPos4s\n");
+    ANAX_TRACE("glRasterPos4s");
     if (__proc_glRasterPos4s == nullptr) {
         __proc_glRasterPos4s = (__pfn_glRasterPos4s)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4s");
         if (__proc_glRasterPos4s == nullptr) {
@@ -3846,7 +3867,7 @@ typedef void (__stdcall *__pfn_glRasterPos4sv)(void*);
 static __pfn_glRasterPos4sv __proc_glRasterPos4sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRasterPos4sv(void* v) {
-    printf("[opengl32_enh_cpp] call glRasterPos4sv\n");
+    ANAX_TRACE("glRasterPos4sv");
     if (__proc_glRasterPos4sv == nullptr) {
         __proc_glRasterPos4sv = (__pfn_glRasterPos4sv)GetProcAddress(EnsureRealOpenGL32(), "glRasterPos4sv");
         if (__proc_glRasterPos4sv == nullptr) {
@@ -3862,7 +3883,7 @@ typedef void (__stdcall *__pfn_glReadBuffer)(GLenum);
 static __pfn_glReadBuffer __proc_glReadBuffer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glReadBuffer(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glReadBuffer\n");
+    ANAX_TRACE("glReadBuffer");
     if (__proc_glReadBuffer == nullptr) {
         __proc_glReadBuffer = (__pfn_glReadBuffer)GetProcAddress(EnsureRealOpenGL32(), "glReadBuffer");
         if (__proc_glReadBuffer == nullptr) {
@@ -3878,7 +3899,7 @@ typedef void (__stdcall *__pfn_glReadPixels)(GLint, GLint, GLsizei, GLsizei, GLe
 static __pfn_glReadPixels __proc_glReadPixels = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glReadPixels\n");
+    ANAX_TRACE("glReadPixels");
     if (__proc_glReadPixels == nullptr) {
         __proc_glReadPixels = (__pfn_glReadPixels)GetProcAddress(EnsureRealOpenGL32(), "glReadPixels");
         if (__proc_glReadPixels == nullptr) {
@@ -3894,7 +3915,7 @@ typedef void (__stdcall *__pfn_glRectd)(GLdouble, GLdouble, GLdouble, GLdouble);
 static __pfn_glRectd __proc_glRectd = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectd(GLdouble x1, GLdouble y1, GLdouble x2, GLdouble y2) {
-    printf("[opengl32_enh_cpp] call glRectd\n");
+    ANAX_TRACE("glRectd");
     if (__proc_glRectd == nullptr) {
         __proc_glRectd = (__pfn_glRectd)GetProcAddress(EnsureRealOpenGL32(), "glRectd");
         if (__proc_glRectd == nullptr) {
@@ -3910,7 +3931,7 @@ typedef void (__stdcall *__pfn_glRectdv)(void*, void*);
 static __pfn_glRectdv __proc_glRectdv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectdv(void* v1, void* v2) {
-    printf("[opengl32_enh_cpp] call glRectdv\n");
+    ANAX_TRACE("glRectdv");
     if (__proc_glRectdv == nullptr) {
         __proc_glRectdv = (__pfn_glRectdv)GetProcAddress(EnsureRealOpenGL32(), "glRectdv");
         if (__proc_glRectdv == nullptr) {
@@ -3926,7 +3947,7 @@ typedef void (__stdcall *__pfn_glRectf)(GLfloat, GLfloat, GLfloat, GLfloat);
 static __pfn_glRectf __proc_glRectf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectf(GLfloat x1, GLfloat y1, GLfloat x2, GLfloat y2) {
-    printf("[opengl32_enh_cpp] call glRectf\n");
+    ANAX_TRACE("glRectf");
     if (__proc_glRectf == nullptr) {
         __proc_glRectf = (__pfn_glRectf)GetProcAddress(EnsureRealOpenGL32(), "glRectf");
         if (__proc_glRectf == nullptr) {
@@ -3942,7 +3963,7 @@ typedef void (__stdcall *__pfn_glRectfv)(void*, void*);
 static __pfn_glRectfv __proc_glRectfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectfv(void* v1, void* v2) {
-    printf("[opengl32_enh_cpp] call glRectfv\n");
+    ANAX_TRACE("glRectfv");
     if (__proc_glRectfv == nullptr) {
         __proc_glRectfv = (__pfn_glRectfv)GetProcAddress(EnsureRealOpenGL32(), "glRectfv");
         if (__proc_glRectfv == nullptr) {
@@ -3958,7 +3979,7 @@ typedef void (__stdcall *__pfn_glRecti)(GLint, GLint, GLint, GLint);
 static __pfn_glRecti __proc_glRecti = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRecti(GLint x1, GLint y1, GLint x2, GLint y2) {
-    printf("[opengl32_enh_cpp] call glRecti\n");
+    ANAX_TRACE("glRecti");
     if (__proc_glRecti == nullptr) {
         __proc_glRecti = (__pfn_glRecti)GetProcAddress(EnsureRealOpenGL32(), "glRecti");
         if (__proc_glRecti == nullptr) {
@@ -3974,7 +3995,7 @@ typedef void (__stdcall *__pfn_glRectiv)(void*, void*);
 static __pfn_glRectiv __proc_glRectiv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectiv(void* v1, void* v2) {
-    printf("[opengl32_enh_cpp] call glRectiv\n");
+    ANAX_TRACE("glRectiv");
     if (__proc_glRectiv == nullptr) {
         __proc_glRectiv = (__pfn_glRectiv)GetProcAddress(EnsureRealOpenGL32(), "glRectiv");
         if (__proc_glRectiv == nullptr) {
@@ -3990,7 +4011,7 @@ typedef void (__stdcall *__pfn_glRects)(GLshort, GLshort, GLshort, GLshort);
 static __pfn_glRects __proc_glRects = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRects(GLshort x1, GLshort y1, GLshort x2, GLshort y2) {
-    printf("[opengl32_enh_cpp] call glRects\n");
+    ANAX_TRACE("glRects");
     if (__proc_glRects == nullptr) {
         __proc_glRects = (__pfn_glRects)GetProcAddress(EnsureRealOpenGL32(), "glRects");
         if (__proc_glRects == nullptr) {
@@ -4006,7 +4027,7 @@ typedef void (__stdcall *__pfn_glRectsv)(void*, void*);
 static __pfn_glRectsv __proc_glRectsv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRectsv(void* v1, void* v2) {
-    printf("[opengl32_enh_cpp] call glRectsv\n");
+    ANAX_TRACE("glRectsv");
     if (__proc_glRectsv == nullptr) {
         __proc_glRectsv = (__pfn_glRectsv)GetProcAddress(EnsureRealOpenGL32(), "glRectsv");
         if (__proc_glRectsv == nullptr) {
@@ -4022,7 +4043,7 @@ typedef GLint (__stdcall *__pfn_glRenderMode)(GLenum);
 static __pfn_glRenderMode __proc_glRenderMode = nullptr;
 
 extern "C" __declspec(dllexport) GLint __stdcall glRenderMode(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glRenderMode\n");
+    ANAX_TRACE("glRenderMode");
     if (__proc_glRenderMode == nullptr) {
         __proc_glRenderMode = (__pfn_glRenderMode)GetProcAddress(EnsureRealOpenGL32(), "glRenderMode");
         if (__proc_glRenderMode == nullptr) {
@@ -4038,7 +4059,7 @@ typedef void (__stdcall *__pfn_glRotated)(GLdouble, GLdouble, GLdouble, GLdouble
 static __pfn_glRotated __proc_glRotated = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRotated(GLdouble angle, GLdouble x, GLdouble y, GLdouble z) {
-    printf("[opengl32_enh_cpp] call glRotated\n");
+    ANAX_TRACE("glRotated");
     if (__proc_glRotated == nullptr) {
         __proc_glRotated = (__pfn_glRotated)GetProcAddress(EnsureRealOpenGL32(), "glRotated");
         if (__proc_glRotated == nullptr) {
@@ -4054,7 +4075,7 @@ typedef void (__stdcall *__pfn_glRotatef)(GLfloat, GLfloat, GLfloat, GLfloat);
 static __pfn_glRotatef __proc_glRotatef = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glRotatef(GLfloat angle, GLfloat x, GLfloat y, GLfloat z) {
-    printf("[opengl32_enh_cpp] call glRotatef\n");
+    ANAX_TRACE("glRotatef");
     if (__proc_glRotatef == nullptr) {
         __proc_glRotatef = (__pfn_glRotatef)GetProcAddress(EnsureRealOpenGL32(), "glRotatef");
         if (__proc_glRotatef == nullptr) {
@@ -4070,7 +4091,7 @@ typedef void (__stdcall *__pfn_glScaled)(GLdouble, GLdouble, GLdouble);
 static __pfn_glScaled __proc_glScaled = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glScaled(GLdouble x, GLdouble y, GLdouble z) {
-    printf("[opengl32_enh_cpp] call glScaled\n");
+    ANAX_TRACE("glScaled");
     if (__proc_glScaled == nullptr) {
         __proc_glScaled = (__pfn_glScaled)GetProcAddress(EnsureRealOpenGL32(), "glScaled");
         if (__proc_glScaled == nullptr) {
@@ -4086,7 +4107,7 @@ typedef void (__stdcall *__pfn_glScalef)(GLfloat, GLfloat, GLfloat);
 static __pfn_glScalef __proc_glScalef = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glScalef(GLfloat x, GLfloat y, GLfloat z) {
-    printf("[opengl32_enh_cpp] call glScalef\n");
+    ANAX_TRACE("glScalef");
     if (__proc_glScalef == nullptr) {
         __proc_glScalef = (__pfn_glScalef)GetProcAddress(EnsureRealOpenGL32(), "glScalef");
         if (__proc_glScalef == nullptr) {
@@ -4102,7 +4123,7 @@ typedef void (__stdcall *__pfn_glScissor)(GLint, GLint, GLsizei, GLsizei);
 static __pfn_glScissor __proc_glScissor = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
-    printf("[opengl32_enh_cpp] call glScissor\n");
+    ANAX_TRACE("glScissor");
     if (__proc_glScissor == nullptr) {
         __proc_glScissor = (__pfn_glScissor)GetProcAddress(EnsureRealOpenGL32(), "glScissor");
         if (__proc_glScissor == nullptr) {
@@ -4118,7 +4139,7 @@ typedef void (__stdcall *__pfn_glSelectBuffer)(GLsizei, void*);
 static __pfn_glSelectBuffer __proc_glSelectBuffer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glSelectBuffer(GLsizei size, void* buffer) {
-    printf("[opengl32_enh_cpp] call glSelectBuffer\n");
+    ANAX_TRACE("glSelectBuffer");
     if (__proc_glSelectBuffer == nullptr) {
         __proc_glSelectBuffer = (__pfn_glSelectBuffer)GetProcAddress(EnsureRealOpenGL32(), "glSelectBuffer");
         if (__proc_glSelectBuffer == nullptr) {
@@ -4134,7 +4155,7 @@ typedef void (__stdcall *__pfn_glShadeModel)(GLenum);
 static __pfn_glShadeModel __proc_glShadeModel = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glShadeModel(GLenum mode) {
-    printf("[opengl32_enh_cpp] call glShadeModel\n");
+    ANAX_TRACE("glShadeModel");
     if (__proc_glShadeModel == nullptr) {
         __proc_glShadeModel = (__pfn_glShadeModel)GetProcAddress(EnsureRealOpenGL32(), "glShadeModel");
         if (__proc_glShadeModel == nullptr) {
@@ -4150,7 +4171,7 @@ typedef void (__stdcall *__pfn_glStencilFunc)(GLenum, GLint, GLuint);
 static __pfn_glStencilFunc __proc_glStencilFunc = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glStencilFunc(GLenum func, GLint ref, GLuint mask) {
-    printf("[opengl32_enh_cpp] call glStencilFunc\n");
+    ANAX_TRACE("glStencilFunc");
     if (__proc_glStencilFunc == nullptr) {
         __proc_glStencilFunc = (__pfn_glStencilFunc)GetProcAddress(EnsureRealOpenGL32(), "glStencilFunc");
         if (__proc_glStencilFunc == nullptr) {
@@ -4166,7 +4187,7 @@ typedef void (__stdcall *__pfn_glStencilMask)(GLuint);
 static __pfn_glStencilMask __proc_glStencilMask = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glStencilMask(GLuint mask) {
-    printf("[opengl32_enh_cpp] call glStencilMask\n");
+    ANAX_TRACE("glStencilMask");
     if (__proc_glStencilMask == nullptr) {
         __proc_glStencilMask = (__pfn_glStencilMask)GetProcAddress(EnsureRealOpenGL32(), "glStencilMask");
         if (__proc_glStencilMask == nullptr) {
@@ -4182,7 +4203,7 @@ typedef void (__stdcall *__pfn_glStencilOp)(GLenum, GLenum, GLenum);
 static __pfn_glStencilOp __proc_glStencilOp = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glStencilOp(GLenum fail, GLenum zfail, GLenum zpass) {
-    printf("[opengl32_enh_cpp] call glStencilOp\n");
+    ANAX_TRACE("glStencilOp");
     if (__proc_glStencilOp == nullptr) {
         __proc_glStencilOp = (__pfn_glStencilOp)GetProcAddress(EnsureRealOpenGL32(), "glStencilOp");
         if (__proc_glStencilOp == nullptr) {
@@ -4198,7 +4219,7 @@ typedef void (__stdcall *__pfn_glTexCoord1d)(GLdouble);
 static __pfn_glTexCoord1d __proc_glTexCoord1d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1d(GLdouble s) {
-    printf("[opengl32_enh_cpp] call glTexCoord1d\n");
+    ANAX_TRACE("glTexCoord1d");
     if (__proc_glTexCoord1d == nullptr) {
         __proc_glTexCoord1d = (__pfn_glTexCoord1d)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1d");
         if (__proc_glTexCoord1d == nullptr) {
@@ -4214,7 +4235,7 @@ typedef void (__stdcall *__pfn_glTexCoord1dv)(void*);
 static __pfn_glTexCoord1dv __proc_glTexCoord1dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1dv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord1dv\n");
+    ANAX_TRACE("glTexCoord1dv");
     if (__proc_glTexCoord1dv == nullptr) {
         __proc_glTexCoord1dv = (__pfn_glTexCoord1dv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1dv");
         if (__proc_glTexCoord1dv == nullptr) {
@@ -4230,7 +4251,7 @@ typedef void (__stdcall *__pfn_glTexCoord1f)(GLfloat);
 static __pfn_glTexCoord1f __proc_glTexCoord1f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1f(GLfloat s) {
-    printf("[opengl32_enh_cpp] call glTexCoord1f\n");
+    ANAX_TRACE("glTexCoord1f");
     if (__proc_glTexCoord1f == nullptr) {
         __proc_glTexCoord1f = (__pfn_glTexCoord1f)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1f");
         if (__proc_glTexCoord1f == nullptr) {
@@ -4246,7 +4267,7 @@ typedef void (__stdcall *__pfn_glTexCoord1fv)(void*);
 static __pfn_glTexCoord1fv __proc_glTexCoord1fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1fv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord1fv\n");
+    ANAX_TRACE("glTexCoord1fv");
     if (__proc_glTexCoord1fv == nullptr) {
         __proc_glTexCoord1fv = (__pfn_glTexCoord1fv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1fv");
         if (__proc_glTexCoord1fv == nullptr) {
@@ -4262,7 +4283,7 @@ typedef void (__stdcall *__pfn_glTexCoord1i)(GLint);
 static __pfn_glTexCoord1i __proc_glTexCoord1i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1i(GLint s) {
-    printf("[opengl32_enh_cpp] call glTexCoord1i\n");
+    ANAX_TRACE("glTexCoord1i");
     if (__proc_glTexCoord1i == nullptr) {
         __proc_glTexCoord1i = (__pfn_glTexCoord1i)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1i");
         if (__proc_glTexCoord1i == nullptr) {
@@ -4278,7 +4299,7 @@ typedef void (__stdcall *__pfn_glTexCoord1iv)(void*);
 static __pfn_glTexCoord1iv __proc_glTexCoord1iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1iv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord1iv\n");
+    ANAX_TRACE("glTexCoord1iv");
     if (__proc_glTexCoord1iv == nullptr) {
         __proc_glTexCoord1iv = (__pfn_glTexCoord1iv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1iv");
         if (__proc_glTexCoord1iv == nullptr) {
@@ -4294,7 +4315,7 @@ typedef void (__stdcall *__pfn_glTexCoord1s)(GLshort);
 static __pfn_glTexCoord1s __proc_glTexCoord1s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1s(GLshort s) {
-    printf("[opengl32_enh_cpp] call glTexCoord1s\n");
+    ANAX_TRACE("glTexCoord1s");
     if (__proc_glTexCoord1s == nullptr) {
         __proc_glTexCoord1s = (__pfn_glTexCoord1s)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1s");
         if (__proc_glTexCoord1s == nullptr) {
@@ -4310,7 +4331,7 @@ typedef void (__stdcall *__pfn_glTexCoord1sv)(void*);
 static __pfn_glTexCoord1sv __proc_glTexCoord1sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord1sv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord1sv\n");
+    ANAX_TRACE("glTexCoord1sv");
     if (__proc_glTexCoord1sv == nullptr) {
         __proc_glTexCoord1sv = (__pfn_glTexCoord1sv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord1sv");
         if (__proc_glTexCoord1sv == nullptr) {
@@ -4326,7 +4347,7 @@ typedef void (__stdcall *__pfn_glTexCoord2d)(GLdouble, GLdouble);
 static __pfn_glTexCoord2d __proc_glTexCoord2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2d(GLdouble s, GLdouble t) {
-    printf("[opengl32_enh_cpp] call glTexCoord2d\n");
+    ANAX_TRACE("glTexCoord2d");
     if (__proc_glTexCoord2d == nullptr) {
         __proc_glTexCoord2d = (__pfn_glTexCoord2d)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2d");
         if (__proc_glTexCoord2d == nullptr) {
@@ -4342,7 +4363,7 @@ typedef void (__stdcall *__pfn_glTexCoord2dv)(void*);
 static __pfn_glTexCoord2dv __proc_glTexCoord2dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2dv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord2dv\n");
+    ANAX_TRACE("glTexCoord2dv");
     if (__proc_glTexCoord2dv == nullptr) {
         __proc_glTexCoord2dv = (__pfn_glTexCoord2dv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2dv");
         if (__proc_glTexCoord2dv == nullptr) {
@@ -4358,7 +4379,7 @@ typedef void (__stdcall *__pfn_glTexCoord2f)(GLfloat, GLfloat);
 static __pfn_glTexCoord2f __proc_glTexCoord2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2f(GLfloat s, GLfloat t) {
-    printf("[opengl32_enh_cpp] call glTexCoord2f\n");
+    ANAX_TRACE("glTexCoord2f");
     if (__proc_glTexCoord2f == nullptr) {
         __proc_glTexCoord2f = (__pfn_glTexCoord2f)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2f");
         if (__proc_glTexCoord2f == nullptr) {
@@ -4374,7 +4395,7 @@ typedef void (__stdcall *__pfn_glTexCoord2fv)(void*);
 static __pfn_glTexCoord2fv __proc_glTexCoord2fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2fv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord2fv\n");
+    ANAX_TRACE("glTexCoord2fv");
     if (__proc_glTexCoord2fv == nullptr) {
         __proc_glTexCoord2fv = (__pfn_glTexCoord2fv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2fv");
         if (__proc_glTexCoord2fv == nullptr) {
@@ -4390,7 +4411,7 @@ typedef void (__stdcall *__pfn_glTexCoord2i)(GLint, GLint);
 static __pfn_glTexCoord2i __proc_glTexCoord2i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2i(GLint s, GLint t) {
-    printf("[opengl32_enh_cpp] call glTexCoord2i\n");
+    ANAX_TRACE("glTexCoord2i");
     if (__proc_glTexCoord2i == nullptr) {
         __proc_glTexCoord2i = (__pfn_glTexCoord2i)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2i");
         if (__proc_glTexCoord2i == nullptr) {
@@ -4406,7 +4427,7 @@ typedef void (__stdcall *__pfn_glTexCoord2iv)(void*);
 static __pfn_glTexCoord2iv __proc_glTexCoord2iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2iv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord2iv\n");
+    ANAX_TRACE("glTexCoord2iv");
     if (__proc_glTexCoord2iv == nullptr) {
         __proc_glTexCoord2iv = (__pfn_glTexCoord2iv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2iv");
         if (__proc_glTexCoord2iv == nullptr) {
@@ -4422,7 +4443,7 @@ typedef void (__stdcall *__pfn_glTexCoord2s)(GLshort, GLshort);
 static __pfn_glTexCoord2s __proc_glTexCoord2s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2s(GLshort s, GLshort t) {
-    printf("[opengl32_enh_cpp] call glTexCoord2s\n");
+    ANAX_TRACE("glTexCoord2s");
     if (__proc_glTexCoord2s == nullptr) {
         __proc_glTexCoord2s = (__pfn_glTexCoord2s)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2s");
         if (__proc_glTexCoord2s == nullptr) {
@@ -4438,7 +4459,7 @@ typedef void (__stdcall *__pfn_glTexCoord2sv)(void*);
 static __pfn_glTexCoord2sv __proc_glTexCoord2sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord2sv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord2sv\n");
+    ANAX_TRACE("glTexCoord2sv");
     if (__proc_glTexCoord2sv == nullptr) {
         __proc_glTexCoord2sv = (__pfn_glTexCoord2sv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord2sv");
         if (__proc_glTexCoord2sv == nullptr) {
@@ -4454,7 +4475,7 @@ typedef void (__stdcall *__pfn_glTexCoord3d)(GLdouble, GLdouble, GLdouble);
 static __pfn_glTexCoord3d __proc_glTexCoord3d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3d(GLdouble s, GLdouble t, GLdouble r) {
-    printf("[opengl32_enh_cpp] call glTexCoord3d\n");
+    ANAX_TRACE("glTexCoord3d");
     if (__proc_glTexCoord3d == nullptr) {
         __proc_glTexCoord3d = (__pfn_glTexCoord3d)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3d");
         if (__proc_glTexCoord3d == nullptr) {
@@ -4470,7 +4491,7 @@ typedef void (__stdcall *__pfn_glTexCoord3dv)(void*);
 static __pfn_glTexCoord3dv __proc_glTexCoord3dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3dv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord3dv\n");
+    ANAX_TRACE("glTexCoord3dv");
     if (__proc_glTexCoord3dv == nullptr) {
         __proc_glTexCoord3dv = (__pfn_glTexCoord3dv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3dv");
         if (__proc_glTexCoord3dv == nullptr) {
@@ -4486,7 +4507,7 @@ typedef void (__stdcall *__pfn_glTexCoord3f)(GLfloat, GLfloat, GLfloat);
 static __pfn_glTexCoord3f __proc_glTexCoord3f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3f(GLfloat s, GLfloat t, GLfloat r) {
-    printf("[opengl32_enh_cpp] call glTexCoord3f\n");
+    ANAX_TRACE("glTexCoord3f");
     if (__proc_glTexCoord3f == nullptr) {
         __proc_glTexCoord3f = (__pfn_glTexCoord3f)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3f");
         if (__proc_glTexCoord3f == nullptr) {
@@ -4502,7 +4523,7 @@ typedef void (__stdcall *__pfn_glTexCoord3fv)(void*);
 static __pfn_glTexCoord3fv __proc_glTexCoord3fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3fv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord3fv\n");
+    ANAX_TRACE("glTexCoord3fv");
     if (__proc_glTexCoord3fv == nullptr) {
         __proc_glTexCoord3fv = (__pfn_glTexCoord3fv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3fv");
         if (__proc_glTexCoord3fv == nullptr) {
@@ -4518,7 +4539,7 @@ typedef void (__stdcall *__pfn_glTexCoord3i)(GLint, GLint, GLint);
 static __pfn_glTexCoord3i __proc_glTexCoord3i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3i(GLint s, GLint t, GLint r) {
-    printf("[opengl32_enh_cpp] call glTexCoord3i\n");
+    ANAX_TRACE("glTexCoord3i");
     if (__proc_glTexCoord3i == nullptr) {
         __proc_glTexCoord3i = (__pfn_glTexCoord3i)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3i");
         if (__proc_glTexCoord3i == nullptr) {
@@ -4534,7 +4555,7 @@ typedef void (__stdcall *__pfn_glTexCoord3iv)(void*);
 static __pfn_glTexCoord3iv __proc_glTexCoord3iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3iv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord3iv\n");
+    ANAX_TRACE("glTexCoord3iv");
     if (__proc_glTexCoord3iv == nullptr) {
         __proc_glTexCoord3iv = (__pfn_glTexCoord3iv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3iv");
         if (__proc_glTexCoord3iv == nullptr) {
@@ -4550,7 +4571,7 @@ typedef void (__stdcall *__pfn_glTexCoord3s)(GLshort, GLshort, GLshort);
 static __pfn_glTexCoord3s __proc_glTexCoord3s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3s(GLshort s, GLshort t, GLshort r) {
-    printf("[opengl32_enh_cpp] call glTexCoord3s\n");
+    ANAX_TRACE("glTexCoord3s");
     if (__proc_glTexCoord3s == nullptr) {
         __proc_glTexCoord3s = (__pfn_glTexCoord3s)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3s");
         if (__proc_glTexCoord3s == nullptr) {
@@ -4566,7 +4587,7 @@ typedef void (__stdcall *__pfn_glTexCoord3sv)(void*);
 static __pfn_glTexCoord3sv __proc_glTexCoord3sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord3sv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord3sv\n");
+    ANAX_TRACE("glTexCoord3sv");
     if (__proc_glTexCoord3sv == nullptr) {
         __proc_glTexCoord3sv = (__pfn_glTexCoord3sv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord3sv");
         if (__proc_glTexCoord3sv == nullptr) {
@@ -4582,7 +4603,7 @@ typedef void (__stdcall *__pfn_glTexCoord4d)(GLdouble, GLdouble, GLdouble, GLdou
 static __pfn_glTexCoord4d __proc_glTexCoord4d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4d(GLdouble s, GLdouble t, GLdouble r, GLdouble q) {
-    printf("[opengl32_enh_cpp] call glTexCoord4d\n");
+    ANAX_TRACE("glTexCoord4d");
     if (__proc_glTexCoord4d == nullptr) {
         __proc_glTexCoord4d = (__pfn_glTexCoord4d)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4d");
         if (__proc_glTexCoord4d == nullptr) {
@@ -4598,7 +4619,7 @@ typedef void (__stdcall *__pfn_glTexCoord4dv)(void*);
 static __pfn_glTexCoord4dv __proc_glTexCoord4dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4dv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord4dv\n");
+    ANAX_TRACE("glTexCoord4dv");
     if (__proc_glTexCoord4dv == nullptr) {
         __proc_glTexCoord4dv = (__pfn_glTexCoord4dv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4dv");
         if (__proc_glTexCoord4dv == nullptr) {
@@ -4614,7 +4635,7 @@ typedef void (__stdcall *__pfn_glTexCoord4f)(GLfloat, GLfloat, GLfloat, GLfloat)
 static __pfn_glTexCoord4f __proc_glTexCoord4f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) {
-    printf("[opengl32_enh_cpp] call glTexCoord4f\n");
+    ANAX_TRACE("glTexCoord4f");
     if (__proc_glTexCoord4f == nullptr) {
         __proc_glTexCoord4f = (__pfn_glTexCoord4f)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4f");
         if (__proc_glTexCoord4f == nullptr) {
@@ -4630,7 +4651,7 @@ typedef void (__stdcall *__pfn_glTexCoord4fv)(void*);
 static __pfn_glTexCoord4fv __proc_glTexCoord4fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4fv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord4fv\n");
+    ANAX_TRACE("glTexCoord4fv");
     if (__proc_glTexCoord4fv == nullptr) {
         __proc_glTexCoord4fv = (__pfn_glTexCoord4fv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4fv");
         if (__proc_glTexCoord4fv == nullptr) {
@@ -4646,7 +4667,7 @@ typedef void (__stdcall *__pfn_glTexCoord4i)(GLint, GLint, GLint, GLint);
 static __pfn_glTexCoord4i __proc_glTexCoord4i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4i(GLint s, GLint t, GLint r, GLint q) {
-    printf("[opengl32_enh_cpp] call glTexCoord4i\n");
+    ANAX_TRACE("glTexCoord4i");
     if (__proc_glTexCoord4i == nullptr) {
         __proc_glTexCoord4i = (__pfn_glTexCoord4i)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4i");
         if (__proc_glTexCoord4i == nullptr) {
@@ -4662,7 +4683,7 @@ typedef void (__stdcall *__pfn_glTexCoord4iv)(void*);
 static __pfn_glTexCoord4iv __proc_glTexCoord4iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4iv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord4iv\n");
+    ANAX_TRACE("glTexCoord4iv");
     if (__proc_glTexCoord4iv == nullptr) {
         __proc_glTexCoord4iv = (__pfn_glTexCoord4iv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4iv");
         if (__proc_glTexCoord4iv == nullptr) {
@@ -4678,7 +4699,7 @@ typedef void (__stdcall *__pfn_glTexCoord4s)(GLshort, GLshort, GLshort, GLshort)
 static __pfn_glTexCoord4s __proc_glTexCoord4s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4s(GLshort s, GLshort t, GLshort r, GLshort q) {
-    printf("[opengl32_enh_cpp] call glTexCoord4s\n");
+    ANAX_TRACE("glTexCoord4s");
     if (__proc_glTexCoord4s == nullptr) {
         __proc_glTexCoord4s = (__pfn_glTexCoord4s)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4s");
         if (__proc_glTexCoord4s == nullptr) {
@@ -4694,7 +4715,7 @@ typedef void (__stdcall *__pfn_glTexCoord4sv)(void*);
 static __pfn_glTexCoord4sv __proc_glTexCoord4sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoord4sv(void* v) {
-    printf("[opengl32_enh_cpp] call glTexCoord4sv\n");
+    ANAX_TRACE("glTexCoord4sv");
     if (__proc_glTexCoord4sv == nullptr) {
         __proc_glTexCoord4sv = (__pfn_glTexCoord4sv)GetProcAddress(EnsureRealOpenGL32(), "glTexCoord4sv");
         if (__proc_glTexCoord4sv == nullptr) {
@@ -4710,7 +4731,7 @@ typedef void (__stdcall *__pfn_glTexCoordPointer)(GLint, GLenum, GLsizei, void*)
 static __pfn_glTexCoordPointer __proc_glTexCoordPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexCoordPointer(GLint size, GLenum type, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glTexCoordPointer\n");
+    ANAX_TRACE("glTexCoordPointer");
     if (__proc_glTexCoordPointer == nullptr) {
         __proc_glTexCoordPointer = (__pfn_glTexCoordPointer)GetProcAddress(EnsureRealOpenGL32(), "glTexCoordPointer");
         if (__proc_glTexCoordPointer == nullptr) {
@@ -4726,7 +4747,7 @@ typedef void (__stdcall *__pfn_glTexEnvf)(GLenum, GLenum, GLfloat);
 static __pfn_glTexEnvf __proc_glTexEnvf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexEnvf(GLenum target, GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glTexEnvf\n");
+    ANAX_TRACE("glTexEnvf");
     if (__proc_glTexEnvf == nullptr) {
         __proc_glTexEnvf = (__pfn_glTexEnvf)GetProcAddress(EnsureRealOpenGL32(), "glTexEnvf");
         if (__proc_glTexEnvf == nullptr) {
@@ -4742,7 +4763,7 @@ typedef void (__stdcall *__pfn_glTexEnvfv)(GLenum, GLenum, void*);
 static __pfn_glTexEnvfv __proc_glTexEnvfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexEnvfv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexEnvfv\n");
+    ANAX_TRACE("glTexEnvfv");
     if (__proc_glTexEnvfv == nullptr) {
         __proc_glTexEnvfv = (__pfn_glTexEnvfv)GetProcAddress(EnsureRealOpenGL32(), "glTexEnvfv");
         if (__proc_glTexEnvfv == nullptr) {
@@ -4758,7 +4779,7 @@ typedef void (__stdcall *__pfn_glTexEnvi)(GLenum, GLenum, GLint);
 static __pfn_glTexEnvi __proc_glTexEnvi = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexEnvi(GLenum target, GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glTexEnvi\n");
+    ANAX_TRACE("glTexEnvi");
     if (__proc_glTexEnvi == nullptr) {
         __proc_glTexEnvi = (__pfn_glTexEnvi)GetProcAddress(EnsureRealOpenGL32(), "glTexEnvi");
         if (__proc_glTexEnvi == nullptr) {
@@ -4774,7 +4795,7 @@ typedef void (__stdcall *__pfn_glTexEnviv)(GLenum, GLenum, void*);
 static __pfn_glTexEnviv __proc_glTexEnviv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexEnviv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexEnviv\n");
+    ANAX_TRACE("glTexEnviv");
     if (__proc_glTexEnviv == nullptr) {
         __proc_glTexEnviv = (__pfn_glTexEnviv)GetProcAddress(EnsureRealOpenGL32(), "glTexEnviv");
         if (__proc_glTexEnviv == nullptr) {
@@ -4790,7 +4811,7 @@ typedef void (__stdcall *__pfn_glTexGend)(GLenum, GLenum, GLdouble);
 static __pfn_glTexGend __proc_glTexGend = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGend(GLenum coord, GLenum pname, GLdouble param) {
-    printf("[opengl32_enh_cpp] call glTexGend\n");
+    ANAX_TRACE("glTexGend");
     if (__proc_glTexGend == nullptr) {
         __proc_glTexGend = (__pfn_glTexGend)GetProcAddress(EnsureRealOpenGL32(), "glTexGend");
         if (__proc_glTexGend == nullptr) {
@@ -4806,7 +4827,7 @@ typedef void (__stdcall *__pfn_glTexGendv)(GLenum, GLenum, void*);
 static __pfn_glTexGendv __proc_glTexGendv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGendv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexGendv\n");
+    ANAX_TRACE("glTexGendv");
     if (__proc_glTexGendv == nullptr) {
         __proc_glTexGendv = (__pfn_glTexGendv)GetProcAddress(EnsureRealOpenGL32(), "glTexGendv");
         if (__proc_glTexGendv == nullptr) {
@@ -4822,7 +4843,7 @@ typedef void (__stdcall *__pfn_glTexGenf)(GLenum, GLenum, GLfloat);
 static __pfn_glTexGenf __proc_glTexGenf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGenf(GLenum coord, GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glTexGenf\n");
+    ANAX_TRACE("glTexGenf");
     if (__proc_glTexGenf == nullptr) {
         __proc_glTexGenf = (__pfn_glTexGenf)GetProcAddress(EnsureRealOpenGL32(), "glTexGenf");
         if (__proc_glTexGenf == nullptr) {
@@ -4838,7 +4859,7 @@ typedef void (__stdcall *__pfn_glTexGenfv)(GLenum, GLenum, void*);
 static __pfn_glTexGenfv __proc_glTexGenfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGenfv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexGenfv\n");
+    ANAX_TRACE("glTexGenfv");
     if (__proc_glTexGenfv == nullptr) {
         __proc_glTexGenfv = (__pfn_glTexGenfv)GetProcAddress(EnsureRealOpenGL32(), "glTexGenfv");
         if (__proc_glTexGenfv == nullptr) {
@@ -4854,7 +4875,7 @@ typedef void (__stdcall *__pfn_glTexGeni)(GLenum, GLenum, GLint);
 static __pfn_glTexGeni __proc_glTexGeni = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGeni(GLenum coord, GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glTexGeni\n");
+    ANAX_TRACE("glTexGeni");
     if (__proc_glTexGeni == nullptr) {
         __proc_glTexGeni = (__pfn_glTexGeni)GetProcAddress(EnsureRealOpenGL32(), "glTexGeni");
         if (__proc_glTexGeni == nullptr) {
@@ -4870,7 +4891,7 @@ typedef void (__stdcall *__pfn_glTexGeniv)(GLenum, GLenum, void*);
 static __pfn_glTexGeniv __proc_glTexGeniv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexGeniv(GLenum coord, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexGeniv\n");
+    ANAX_TRACE("glTexGeniv");
     if (__proc_glTexGeniv == nullptr) {
         __proc_glTexGeniv = (__pfn_glTexGeniv)GetProcAddress(EnsureRealOpenGL32(), "glTexGeniv");
         if (__proc_glTexGeniv == nullptr) {
@@ -4886,7 +4907,7 @@ typedef void (__stdcall *__pfn_glTexImage1D)(GLenum, GLint, GLint, GLsizei, GLin
 static __pfn_glTexImage1D __proc_glTexImage1D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexImage1D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLint border, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glTexImage1D\n");
+    ANAX_TRACE("glTexImage1D");
     if (__proc_glTexImage1D == nullptr) {
         __proc_glTexImage1D = (__pfn_glTexImage1D)GetProcAddress(EnsureRealOpenGL32(), "glTexImage1D");
         if (__proc_glTexImage1D == nullptr) {
@@ -4902,7 +4923,7 @@ typedef void (__stdcall *__pfn_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsi
 static __pfn_glTexImage2D __proc_glTexImage2D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glTexImage2D\n");
+    ANAX_TRACE("glTexImage2D");
     if (__proc_glTexImage2D == nullptr) {
         __proc_glTexImage2D = (__pfn_glTexImage2D)GetProcAddress(EnsureRealOpenGL32(), "glTexImage2D");
         if (__proc_glTexImage2D == nullptr) {
@@ -4918,7 +4939,7 @@ typedef void (__stdcall *__pfn_glTexParameterf)(GLenum, GLenum, GLfloat);
 static __pfn_glTexParameterf __proc_glTexParameterf = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
-    printf("[opengl32_enh_cpp] call glTexParameterf\n");
+    ANAX_TRACE("glTexParameterf");
     if (__proc_glTexParameterf == nullptr) {
         __proc_glTexParameterf = (__pfn_glTexParameterf)GetProcAddress(EnsureRealOpenGL32(), "glTexParameterf");
         if (__proc_glTexParameterf == nullptr) {
@@ -4934,7 +4955,7 @@ typedef void (__stdcall *__pfn_glTexParameterfv)(GLenum, GLenum, void*);
 static __pfn_glTexParameterfv __proc_glTexParameterfv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexParameterfv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexParameterfv\n");
+    ANAX_TRACE("glTexParameterfv");
     if (__proc_glTexParameterfv == nullptr) {
         __proc_glTexParameterfv = (__pfn_glTexParameterfv)GetProcAddress(EnsureRealOpenGL32(), "glTexParameterfv");
         if (__proc_glTexParameterfv == nullptr) {
@@ -4950,7 +4971,7 @@ typedef void (__stdcall *__pfn_glTexParameteri)(GLenum, GLenum, GLint);
 static __pfn_glTexParameteri __proc_glTexParameteri = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexParameteri(GLenum target, GLenum pname, GLint param) {
-    printf("[opengl32_enh_cpp] call glTexParameteri\n");
+    ANAX_TRACE("glTexParameteri");
     if (__proc_glTexParameteri == nullptr) {
         __proc_glTexParameteri = (__pfn_glTexParameteri)GetProcAddress(EnsureRealOpenGL32(), "glTexParameteri");
         if (__proc_glTexParameteri == nullptr) {
@@ -4966,7 +4987,7 @@ typedef void (__stdcall *__pfn_glTexParameteriv)(GLenum, GLenum, void*);
 static __pfn_glTexParameteriv __proc_glTexParameteriv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexParameteriv(GLenum target, GLenum pname, void* params) {
-    printf("[opengl32_enh_cpp] call glTexParameteriv\n");
+    ANAX_TRACE("glTexParameteriv");
     if (__proc_glTexParameteriv == nullptr) {
         __proc_glTexParameteriv = (__pfn_glTexParameteriv)GetProcAddress(EnsureRealOpenGL32(), "glTexParameteriv");
         if (__proc_glTexParameteriv == nullptr) {
@@ -4982,7 +5003,7 @@ typedef void (__stdcall *__pfn_glTexSubImage1D)(GLenum, GLint, GLint, GLsizei, G
 static __pfn_glTexSubImage1D __proc_glTexSubImage1D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexSubImage1D(GLenum target, GLint level, GLint xoffset, GLsizei width, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glTexSubImage1D\n");
+    ANAX_TRACE("glTexSubImage1D");
     if (__proc_glTexSubImage1D == nullptr) {
         __proc_glTexSubImage1D = (__pfn_glTexSubImage1D)GetProcAddress(EnsureRealOpenGL32(), "glTexSubImage1D");
         if (__proc_glTexSubImage1D == nullptr) {
@@ -4998,7 +5019,7 @@ typedef void (__stdcall *__pfn_glTexSubImage2D)(GLenum, GLint, GLint, GLint, GLs
 static __pfn_glTexSubImage2D __proc_glTexSubImage2D = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, void* pixels) {
-    printf("[opengl32_enh_cpp] call glTexSubImage2D\n");
+    ANAX_TRACE("glTexSubImage2D");
     if (__proc_glTexSubImage2D == nullptr) {
         __proc_glTexSubImage2D = (__pfn_glTexSubImage2D)GetProcAddress(EnsureRealOpenGL32(), "glTexSubImage2D");
         if (__proc_glTexSubImage2D == nullptr) {
@@ -5014,7 +5035,7 @@ typedef void (__stdcall *__pfn_glTranslated)(GLdouble, GLdouble, GLdouble);
 static __pfn_glTranslated __proc_glTranslated = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTranslated(GLdouble x, GLdouble y, GLdouble z) {
-    printf("[opengl32_enh_cpp] call glTranslated\n");
+    ANAX_TRACE("glTranslated");
     if (__proc_glTranslated == nullptr) {
         __proc_glTranslated = (__pfn_glTranslated)GetProcAddress(EnsureRealOpenGL32(), "glTranslated");
         if (__proc_glTranslated == nullptr) {
@@ -5030,7 +5051,7 @@ typedef void (__stdcall *__pfn_glTranslatef)(GLfloat, GLfloat, GLfloat);
 static __pfn_glTranslatef __proc_glTranslatef = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glTranslatef(GLfloat x, GLfloat y, GLfloat z) {
-    printf("[opengl32_enh_cpp] call glTranslatef\n");
+    ANAX_TRACE("glTranslatef");
     if (__proc_glTranslatef == nullptr) {
         __proc_glTranslatef = (__pfn_glTranslatef)GetProcAddress(EnsureRealOpenGL32(), "glTranslatef");
         if (__proc_glTranslatef == nullptr) {
@@ -5046,7 +5067,7 @@ typedef void (__stdcall *__pfn_glVertex2d)(GLdouble, GLdouble);
 static __pfn_glVertex2d __proc_glVertex2d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2d(GLdouble x, GLdouble y) {
-    printf("[opengl32_enh_cpp] call glVertex2d\n");
+    ANAX_TRACE("glVertex2d");
     if (__proc_glVertex2d == nullptr) {
         __proc_glVertex2d = (__pfn_glVertex2d)GetProcAddress(EnsureRealOpenGL32(), "glVertex2d");
         if (__proc_glVertex2d == nullptr) {
@@ -5062,7 +5083,7 @@ typedef void (__stdcall *__pfn_glVertex2dv)(void*);
 static __pfn_glVertex2dv __proc_glVertex2dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2dv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex2dv\n");
+    ANAX_TRACE("glVertex2dv");
     if (__proc_glVertex2dv == nullptr) {
         __proc_glVertex2dv = (__pfn_glVertex2dv)GetProcAddress(EnsureRealOpenGL32(), "glVertex2dv");
         if (__proc_glVertex2dv == nullptr) {
@@ -5078,7 +5099,7 @@ typedef void (__stdcall *__pfn_glVertex2f)(GLfloat, GLfloat);
 static __pfn_glVertex2f __proc_glVertex2f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2f(GLfloat x, GLfloat y) {
-    printf("[opengl32_enh_cpp] call glVertex2f\n");
+    ANAX_TRACE("glVertex2f");
     if (__proc_glVertex2f == nullptr) {
         __proc_glVertex2f = (__pfn_glVertex2f)GetProcAddress(EnsureRealOpenGL32(), "glVertex2f");
         if (__proc_glVertex2f == nullptr) {
@@ -5094,7 +5115,7 @@ typedef void (__stdcall *__pfn_glVertex2fv)(void*);
 static __pfn_glVertex2fv __proc_glVertex2fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2fv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex2fv\n");
+    ANAX_TRACE("glVertex2fv");
     if (__proc_glVertex2fv == nullptr) {
         __proc_glVertex2fv = (__pfn_glVertex2fv)GetProcAddress(EnsureRealOpenGL32(), "glVertex2fv");
         if (__proc_glVertex2fv == nullptr) {
@@ -5110,7 +5131,7 @@ typedef void (__stdcall *__pfn_glVertex2i)(GLint, GLint);
 static __pfn_glVertex2i __proc_glVertex2i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2i(GLint x, GLint y) {
-    printf("[opengl32_enh_cpp] call glVertex2i\n");
+    ANAX_TRACE("glVertex2i");
     if (__proc_glVertex2i == nullptr) {
         __proc_glVertex2i = (__pfn_glVertex2i)GetProcAddress(EnsureRealOpenGL32(), "glVertex2i");
         if (__proc_glVertex2i == nullptr) {
@@ -5126,7 +5147,7 @@ typedef void (__stdcall *__pfn_glVertex2iv)(void*);
 static __pfn_glVertex2iv __proc_glVertex2iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2iv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex2iv\n");
+    ANAX_TRACE("glVertex2iv");
     if (__proc_glVertex2iv == nullptr) {
         __proc_glVertex2iv = (__pfn_glVertex2iv)GetProcAddress(EnsureRealOpenGL32(), "glVertex2iv");
         if (__proc_glVertex2iv == nullptr) {
@@ -5142,7 +5163,7 @@ typedef void (__stdcall *__pfn_glVertex2s)(GLshort, GLshort);
 static __pfn_glVertex2s __proc_glVertex2s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2s(GLshort x, GLshort y) {
-    printf("[opengl32_enh_cpp] call glVertex2s\n");
+    ANAX_TRACE("glVertex2s");
     if (__proc_glVertex2s == nullptr) {
         __proc_glVertex2s = (__pfn_glVertex2s)GetProcAddress(EnsureRealOpenGL32(), "glVertex2s");
         if (__proc_glVertex2s == nullptr) {
@@ -5158,7 +5179,7 @@ typedef void (__stdcall *__pfn_glVertex2sv)(void*);
 static __pfn_glVertex2sv __proc_glVertex2sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex2sv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex2sv\n");
+    ANAX_TRACE("glVertex2sv");
     if (__proc_glVertex2sv == nullptr) {
         __proc_glVertex2sv = (__pfn_glVertex2sv)GetProcAddress(EnsureRealOpenGL32(), "glVertex2sv");
         if (__proc_glVertex2sv == nullptr) {
@@ -5174,7 +5195,7 @@ typedef void (__stdcall *__pfn_glVertex3d)(GLdouble, GLdouble, GLdouble);
 static __pfn_glVertex3d __proc_glVertex3d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3d(GLdouble x, GLdouble y, GLdouble z) {
-    printf("[opengl32_enh_cpp] call glVertex3d\n");
+    ANAX_TRACE("glVertex3d");
     if (__proc_glVertex3d == nullptr) {
         __proc_glVertex3d = (__pfn_glVertex3d)GetProcAddress(EnsureRealOpenGL32(), "glVertex3d");
         if (__proc_glVertex3d == nullptr) {
@@ -5190,7 +5211,7 @@ typedef void (__stdcall *__pfn_glVertex3dv)(void*);
 static __pfn_glVertex3dv __proc_glVertex3dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3dv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex3dv\n");
+    ANAX_TRACE("glVertex3dv");
     if (__proc_glVertex3dv == nullptr) {
         __proc_glVertex3dv = (__pfn_glVertex3dv)GetProcAddress(EnsureRealOpenGL32(), "glVertex3dv");
         if (__proc_glVertex3dv == nullptr) {
@@ -5206,7 +5227,7 @@ typedef void (__stdcall *__pfn_glVertex3f)(GLfloat, GLfloat, GLfloat);
 static __pfn_glVertex3f __proc_glVertex3f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3f(GLfloat x, GLfloat y, GLfloat z) {
-    printf("[opengl32_enh_cpp] call glVertex3f\n");
+    ANAX_TRACE("glVertex3f");
     if (__proc_glVertex3f == nullptr) {
         __proc_glVertex3f = (__pfn_glVertex3f)GetProcAddress(EnsureRealOpenGL32(), "glVertex3f");
         if (__proc_glVertex3f == nullptr) {
@@ -5222,7 +5243,7 @@ typedef void (__stdcall *__pfn_glVertex3fv)(void*);
 static __pfn_glVertex3fv __proc_glVertex3fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3fv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex3fv\n");
+    ANAX_TRACE("glVertex3fv");
     if (__proc_glVertex3fv == nullptr) {
         __proc_glVertex3fv = (__pfn_glVertex3fv)GetProcAddress(EnsureRealOpenGL32(), "glVertex3fv");
         if (__proc_glVertex3fv == nullptr) {
@@ -5238,7 +5259,7 @@ typedef void (__stdcall *__pfn_glVertex3i)(GLint, GLint, GLint);
 static __pfn_glVertex3i __proc_glVertex3i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3i(GLint x, GLint y, GLint z) {
-    printf("[opengl32_enh_cpp] call glVertex3i\n");
+    ANAX_TRACE("glVertex3i");
     if (__proc_glVertex3i == nullptr) {
         __proc_glVertex3i = (__pfn_glVertex3i)GetProcAddress(EnsureRealOpenGL32(), "glVertex3i");
         if (__proc_glVertex3i == nullptr) {
@@ -5254,7 +5275,7 @@ typedef void (__stdcall *__pfn_glVertex3iv)(void*);
 static __pfn_glVertex3iv __proc_glVertex3iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3iv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex3iv\n");
+    ANAX_TRACE("glVertex3iv");
     if (__proc_glVertex3iv == nullptr) {
         __proc_glVertex3iv = (__pfn_glVertex3iv)GetProcAddress(EnsureRealOpenGL32(), "glVertex3iv");
         if (__proc_glVertex3iv == nullptr) {
@@ -5270,7 +5291,7 @@ typedef void (__stdcall *__pfn_glVertex3s)(GLshort, GLshort, GLshort);
 static __pfn_glVertex3s __proc_glVertex3s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3s(GLshort x, GLshort y, GLshort z) {
-    printf("[opengl32_enh_cpp] call glVertex3s\n");
+    ANAX_TRACE("glVertex3s");
     if (__proc_glVertex3s == nullptr) {
         __proc_glVertex3s = (__pfn_glVertex3s)GetProcAddress(EnsureRealOpenGL32(), "glVertex3s");
         if (__proc_glVertex3s == nullptr) {
@@ -5286,7 +5307,7 @@ typedef void (__stdcall *__pfn_glVertex3sv)(void*);
 static __pfn_glVertex3sv __proc_glVertex3sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex3sv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex3sv\n");
+    ANAX_TRACE("glVertex3sv");
     if (__proc_glVertex3sv == nullptr) {
         __proc_glVertex3sv = (__pfn_glVertex3sv)GetProcAddress(EnsureRealOpenGL32(), "glVertex3sv");
         if (__proc_glVertex3sv == nullptr) {
@@ -5302,7 +5323,7 @@ typedef void (__stdcall *__pfn_glVertex4d)(GLdouble, GLdouble, GLdouble, GLdoubl
 static __pfn_glVertex4d __proc_glVertex4d = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4d(GLdouble x, GLdouble y, GLdouble z, GLdouble w) {
-    printf("[opengl32_enh_cpp] call glVertex4d\n");
+    ANAX_TRACE("glVertex4d");
     if (__proc_glVertex4d == nullptr) {
         __proc_glVertex4d = (__pfn_glVertex4d)GetProcAddress(EnsureRealOpenGL32(), "glVertex4d");
         if (__proc_glVertex4d == nullptr) {
@@ -5318,7 +5339,7 @@ typedef void (__stdcall *__pfn_glVertex4dv)(void*);
 static __pfn_glVertex4dv __proc_glVertex4dv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4dv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex4dv\n");
+    ANAX_TRACE("glVertex4dv");
     if (__proc_glVertex4dv == nullptr) {
         __proc_glVertex4dv = (__pfn_glVertex4dv)GetProcAddress(EnsureRealOpenGL32(), "glVertex4dv");
         if (__proc_glVertex4dv == nullptr) {
@@ -5334,7 +5355,7 @@ typedef void (__stdcall *__pfn_glVertex4f)(GLfloat, GLfloat, GLfloat, GLfloat);
 static __pfn_glVertex4f __proc_glVertex4f = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    printf("[opengl32_enh_cpp] call glVertex4f\n");
+    ANAX_TRACE("glVertex4f");
     if (__proc_glVertex4f == nullptr) {
         __proc_glVertex4f = (__pfn_glVertex4f)GetProcAddress(EnsureRealOpenGL32(), "glVertex4f");
         if (__proc_glVertex4f == nullptr) {
@@ -5350,7 +5371,7 @@ typedef void (__stdcall *__pfn_glVertex4fv)(void*);
 static __pfn_glVertex4fv __proc_glVertex4fv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4fv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex4fv\n");
+    ANAX_TRACE("glVertex4fv");
     if (__proc_glVertex4fv == nullptr) {
         __proc_glVertex4fv = (__pfn_glVertex4fv)GetProcAddress(EnsureRealOpenGL32(), "glVertex4fv");
         if (__proc_glVertex4fv == nullptr) {
@@ -5366,7 +5387,7 @@ typedef void (__stdcall *__pfn_glVertex4i)(GLint, GLint, GLint, GLint);
 static __pfn_glVertex4i __proc_glVertex4i = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4i(GLint x, GLint y, GLint z, GLint w) {
-    printf("[opengl32_enh_cpp] call glVertex4i\n");
+    ANAX_TRACE("glVertex4i");
     if (__proc_glVertex4i == nullptr) {
         __proc_glVertex4i = (__pfn_glVertex4i)GetProcAddress(EnsureRealOpenGL32(), "glVertex4i");
         if (__proc_glVertex4i == nullptr) {
@@ -5382,7 +5403,7 @@ typedef void (__stdcall *__pfn_glVertex4iv)(void*);
 static __pfn_glVertex4iv __proc_glVertex4iv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4iv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex4iv\n");
+    ANAX_TRACE("glVertex4iv");
     if (__proc_glVertex4iv == nullptr) {
         __proc_glVertex4iv = (__pfn_glVertex4iv)GetProcAddress(EnsureRealOpenGL32(), "glVertex4iv");
         if (__proc_glVertex4iv == nullptr) {
@@ -5398,7 +5419,7 @@ typedef void (__stdcall *__pfn_glVertex4s)(GLshort, GLshort, GLshort, GLshort);
 static __pfn_glVertex4s __proc_glVertex4s = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4s(GLshort x, GLshort y, GLshort z, GLshort w) {
-    printf("[opengl32_enh_cpp] call glVertex4s\n");
+    ANAX_TRACE("glVertex4s");
     if (__proc_glVertex4s == nullptr) {
         __proc_glVertex4s = (__pfn_glVertex4s)GetProcAddress(EnsureRealOpenGL32(), "glVertex4s");
         if (__proc_glVertex4s == nullptr) {
@@ -5414,7 +5435,7 @@ typedef void (__stdcall *__pfn_glVertex4sv)(void*);
 static __pfn_glVertex4sv __proc_glVertex4sv = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertex4sv(void* v) {
-    printf("[opengl32_enh_cpp] call glVertex4sv\n");
+    ANAX_TRACE("glVertex4sv");
     if (__proc_glVertex4sv == nullptr) {
         __proc_glVertex4sv = (__pfn_glVertex4sv)GetProcAddress(EnsureRealOpenGL32(), "glVertex4sv");
         if (__proc_glVertex4sv == nullptr) {
@@ -5430,7 +5451,7 @@ typedef void (__stdcall *__pfn_glVertexPointer)(GLint, GLenum, GLsizei, void*);
 static __pfn_glVertexPointer __proc_glVertexPointer = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glVertexPointer(GLint size, GLenum type, GLsizei stride, void* pointer) {
-    printf("[opengl32_enh_cpp] call glVertexPointer\n");
+    ANAX_TRACE("glVertexPointer");
     if (__proc_glVertexPointer == nullptr) {
         __proc_glVertexPointer = (__pfn_glVertexPointer)GetProcAddress(EnsureRealOpenGL32(), "glVertexPointer");
         if (__proc_glVertexPointer == nullptr) {
@@ -5446,7 +5467,7 @@ typedef void (__stdcall *__pfn_glViewport)(GLint, GLint, GLsizei, GLsizei);
 static __pfn_glViewport __proc_glViewport = nullptr;
 
 extern "C" __declspec(dllexport) void __stdcall glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
-    printf("[opengl32_enh_cpp] call glViewport\n");
+    ANAX_TRACE("glViewport");
     if (__proc_glViewport == nullptr) {
         __proc_glViewport = (__pfn_glViewport)GetProcAddress(EnsureRealOpenGL32(), "glViewport");
         if (__proc_glViewport == nullptr) {
@@ -5462,7 +5483,7 @@ typedef BOOL (__stdcall *__pfn_wglCopyContext)(void*, void*, UINT);
 static __pfn_wglCopyContext __proc_wglCopyContext = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglCopyContext(void* p0, void* p1, UINT p2) {
-    printf("[opengl32_enh_cpp] call wglCopyContext\n");
+    ANAX_TRACE("wglCopyContext");
     if (__proc_wglCopyContext == nullptr) {
         __proc_wglCopyContext = (__pfn_wglCopyContext)GetProcAddress(EnsureRealOpenGL32(), "wglCopyContext");
         if (__proc_wglCopyContext == nullptr) {
@@ -5478,7 +5499,7 @@ typedef void* (__stdcall *__pfn_wglCreateContext)(void*);
 static __pfn_wglCreateContext __proc_wglCreateContext = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglCreateContext(void* p0) {
-    printf("[opengl32_enh_cpp] call wglCreateContext\n");
+    ANAX_TRACE("wglCreateContext");
     if (__proc_wglCreateContext == nullptr) {
         __proc_wglCreateContext = (__pfn_wglCreateContext)GetProcAddress(EnsureRealOpenGL32(), "wglCreateContext");
         if (__proc_wglCreateContext == nullptr) {
@@ -5495,7 +5516,7 @@ typedef void* (__stdcall *__pfn_wglCreateLayerContext)(void*, int);
 static __pfn_wglCreateLayerContext __proc_wglCreateLayerContext = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglCreateLayerContext(void* p0, int p1) {
-    printf("[opengl32_enh_cpp] call wglCreateLayerContext\n");
+    ANAX_TRACE("wglCreateLayerContext");
     if (__proc_wglCreateLayerContext == nullptr) {
         __proc_wglCreateLayerContext = (__pfn_wglCreateLayerContext)GetProcAddress(EnsureRealOpenGL32(), "wglCreateLayerContext");
         if (__proc_wglCreateLayerContext == nullptr) {
@@ -5511,7 +5532,7 @@ typedef BOOL (__stdcall *__pfn_wglDeleteContext)(void*);
 static __pfn_wglDeleteContext __proc_wglDeleteContext = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglDeleteContext(void* p0) {
-    printf("[opengl32_enh_cpp] call wglDeleteContext\n");
+    ANAX_TRACE("wglDeleteContext");
     if (__proc_wglDeleteContext == nullptr) {
         __proc_wglDeleteContext = (__pfn_wglDeleteContext)GetProcAddress(EnsureRealOpenGL32(), "wglDeleteContext");
         if (__proc_wglDeleteContext == nullptr) {
@@ -5527,7 +5548,7 @@ typedef void* (__stdcall *__pfn_wglGetCurrentContext)(void);
 static __pfn_wglGetCurrentContext __proc_wglGetCurrentContext = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglGetCurrentContext(void) {
-    printf("[opengl32_enh_cpp] call wglGetCurrentContext\n");
+    ANAX_TRACE("wglGetCurrentContext");
     if (__proc_wglGetCurrentContext == nullptr) {
         __proc_wglGetCurrentContext = (__pfn_wglGetCurrentContext)GetProcAddress(EnsureRealOpenGL32(), "wglGetCurrentContext");
         if (__proc_wglGetCurrentContext == nullptr) {
@@ -5543,7 +5564,7 @@ typedef void* (__stdcall *__pfn_wglGetCurrentDC)(void);
 static __pfn_wglGetCurrentDC __proc_wglGetCurrentDC = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglGetCurrentDC(void) {
-    printf("[opengl32_enh_cpp] call wglGetCurrentDC\n");
+    ANAX_TRACE("wglGetCurrentDC");
     if (__proc_wglGetCurrentDC == nullptr) {
         __proc_wglGetCurrentDC = (__pfn_wglGetCurrentDC)GetProcAddress(EnsureRealOpenGL32(), "wglGetCurrentDC");
         if (__proc_wglGetCurrentDC == nullptr) {
@@ -5559,7 +5580,7 @@ typedef void* (__stdcall *__pfn_wglGetProcAddress)(void*);
 static __pfn_wglGetProcAddress __proc_wglGetProcAddress = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglGetProcAddress(void* p0) {
-    printf("[opengl32_enh_cpp] call wglGetProcAddress\n");
+    ANAX_TRACE("wglGetProcAddress");
     if (__proc_wglGetProcAddress == nullptr) {
         __proc_wglGetProcAddress = (__pfn_wglGetProcAddress)GetProcAddress(EnsureRealOpenGL32(), "wglGetProcAddress");
         if (__proc_wglGetProcAddress == nullptr) {
@@ -5575,7 +5596,7 @@ typedef BOOL (__stdcall *__pfn_wglMakeCurrent)(void*, void*);
 static __pfn_wglMakeCurrent __proc_wglMakeCurrent = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglMakeCurrent(void* p0, void* p1) {
-    printf("[opengl32_enh_cpp] call wglMakeCurrent\n");
+    ANAX_TRACE("wglMakeCurrent");
     if (__proc_wglMakeCurrent == nullptr) {
         __proc_wglMakeCurrent = (__pfn_wglMakeCurrent)GetProcAddress(EnsureRealOpenGL32(), "wglMakeCurrent");
         if (__proc_wglMakeCurrent == nullptr) {
@@ -5591,7 +5612,7 @@ typedef BOOL (__stdcall *__pfn_wglShareLists)(void*, void*);
 static __pfn_wglShareLists __proc_wglShareLists = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglShareLists(void* p0, void* p1) {
-    printf("[opengl32_enh_cpp] call wglShareLists\n");
+    ANAX_TRACE("wglShareLists");
     if (__proc_wglShareLists == nullptr) {
         __proc_wglShareLists = (__pfn_wglShareLists)GetProcAddress(EnsureRealOpenGL32(), "wglShareLists");
         if (__proc_wglShareLists == nullptr) {
@@ -5607,7 +5628,7 @@ typedef BOOL (__stdcall *__pfn_wglUseFontBitmapsA)(void*, DWORD, DWORD, DWORD);
 static __pfn_wglUseFontBitmapsA __proc_wglUseFontBitmapsA = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglUseFontBitmapsA(void* p0, DWORD p1, DWORD p2, DWORD p3) {
-    printf("[opengl32_enh_cpp] call wglUseFontBitmapsA\n");
+    ANAX_TRACE("wglUseFontBitmapsA");
     if (__proc_wglUseFontBitmapsA == nullptr) {
         __proc_wglUseFontBitmapsA = (__pfn_wglUseFontBitmapsA)GetProcAddress(EnsureRealOpenGL32(), "wglUseFontBitmapsA");
         if (__proc_wglUseFontBitmapsA == nullptr) {
@@ -5623,7 +5644,7 @@ typedef BOOL (__stdcall *__pfn_wglUseFontBitmapsW)(void*, DWORD, DWORD, DWORD);
 static __pfn_wglUseFontBitmapsW __proc_wglUseFontBitmapsW = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglUseFontBitmapsW(void* p0, DWORD p1, DWORD p2, DWORD p3) {
-    printf("[opengl32_enh_cpp] call wglUseFontBitmapsW\n");
+    ANAX_TRACE("wglUseFontBitmapsW");
     if (__proc_wglUseFontBitmapsW == nullptr) {
         __proc_wglUseFontBitmapsW = (__pfn_wglUseFontBitmapsW)GetProcAddress(EnsureRealOpenGL32(), "wglUseFontBitmapsW");
         if (__proc_wglUseFontBitmapsW == nullptr) {
@@ -5639,7 +5660,7 @@ typedef BOOL (__stdcall *__pfn_wglUseFontOutlinesA)(void*, DWORD, DWORD, DWORD, 
 static __pfn_wglUseFontOutlinesA __proc_wglUseFontOutlinesA = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglUseFontOutlinesA(void* p0, DWORD p1, DWORD p2, DWORD p3, FLOAT p4, FLOAT p5, int p6, void* p7) {
-    printf("[opengl32_enh_cpp] call wglUseFontOutlinesA\n");
+    ANAX_TRACE("wglUseFontOutlinesA");
     if (__proc_wglUseFontOutlinesA == nullptr) {
         __proc_wglUseFontOutlinesA = (__pfn_wglUseFontOutlinesA)GetProcAddress(EnsureRealOpenGL32(), "wglUseFontOutlinesA");
         if (__proc_wglUseFontOutlinesA == nullptr) {
@@ -5655,7 +5676,7 @@ typedef BOOL (__stdcall *__pfn_wglUseFontOutlinesW)(void*, DWORD, DWORD, DWORD, 
 static __pfn_wglUseFontOutlinesW __proc_wglUseFontOutlinesW = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglUseFontOutlinesW(void* p0, DWORD p1, DWORD p2, DWORD p3, FLOAT p4, FLOAT p5, int p6, void* p7) {
-    printf("[opengl32_enh_cpp] call wglUseFontOutlinesW\n");
+    ANAX_TRACE("wglUseFontOutlinesW");
     if (__proc_wglUseFontOutlinesW == nullptr) {
         __proc_wglUseFontOutlinesW = (__pfn_wglUseFontOutlinesW)GetProcAddress(EnsureRealOpenGL32(), "wglUseFontOutlinesW");
         if (__proc_wglUseFontOutlinesW == nullptr) {
@@ -5671,7 +5692,7 @@ typedef BOOL (__stdcall *__pfn_wglDescribeLayerPlane)(void*, int, int, UINT, voi
 static __pfn_wglDescribeLayerPlane __proc_wglDescribeLayerPlane = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglDescribeLayerPlane(void* p0, int p1, int p2, UINT p3, void* p4) {
-    printf("[opengl32_enh_cpp] call wglDescribeLayerPlane\n");
+    ANAX_TRACE("wglDescribeLayerPlane");
     if (__proc_wglDescribeLayerPlane == nullptr) {
         __proc_wglDescribeLayerPlane = (__pfn_wglDescribeLayerPlane)GetProcAddress(EnsureRealOpenGL32(), "wglDescribeLayerPlane");
         if (__proc_wglDescribeLayerPlane == nullptr) {
@@ -5687,7 +5708,7 @@ typedef int (__stdcall *__pfn_wglSetLayerPaletteEntries)(void*, int, int, int, v
 static __pfn_wglSetLayerPaletteEntries __proc_wglSetLayerPaletteEntries = nullptr;
 
 extern "C" __declspec(dllexport) int __stdcall wglSetLayerPaletteEntries(void* p0, int p1, int p2, int p3, void* p4) {
-    printf("[opengl32_enh_cpp] call wglSetLayerPaletteEntries\n");
+    ANAX_TRACE("wglSetLayerPaletteEntries");
     if (__proc_wglSetLayerPaletteEntries == nullptr) {
         __proc_wglSetLayerPaletteEntries = (__pfn_wglSetLayerPaletteEntries)GetProcAddress(EnsureRealOpenGL32(), "wglSetLayerPaletteEntries");
         if (__proc_wglSetLayerPaletteEntries == nullptr) {
@@ -5703,7 +5724,7 @@ typedef int (__stdcall *__pfn_wglGetLayerPaletteEntries)(void*, int, int, int, v
 static __pfn_wglGetLayerPaletteEntries __proc_wglGetLayerPaletteEntries = nullptr;
 
 extern "C" __declspec(dllexport) int __stdcall wglGetLayerPaletteEntries(void* p0, int p1, int p2, int p3, void* p4) {
-    printf("[opengl32_enh_cpp] call wglGetLayerPaletteEntries\n");
+    ANAX_TRACE("wglGetLayerPaletteEntries");
     if (__proc_wglGetLayerPaletteEntries == nullptr) {
         __proc_wglGetLayerPaletteEntries = (__pfn_wglGetLayerPaletteEntries)GetProcAddress(EnsureRealOpenGL32(), "wglGetLayerPaletteEntries");
         if (__proc_wglGetLayerPaletteEntries == nullptr) {
@@ -5719,7 +5740,7 @@ typedef BOOL (__stdcall *__pfn_wglRealizeLayerPalette)(void*, int, BOOL);
 static __pfn_wglRealizeLayerPalette __proc_wglRealizeLayerPalette = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglRealizeLayerPalette(void* p0, int p1, BOOL p2) {
-    printf("[opengl32_enh_cpp] call wglRealizeLayerPalette\n");
+    ANAX_TRACE("wglRealizeLayerPalette");
     if (__proc_wglRealizeLayerPalette == nullptr) {
         __proc_wglRealizeLayerPalette = (__pfn_wglRealizeLayerPalette)GetProcAddress(EnsureRealOpenGL32(), "wglRealizeLayerPalette");
         if (__proc_wglRealizeLayerPalette == nullptr) {
@@ -5735,7 +5756,7 @@ typedef BOOL (__stdcall *__pfn_wglSwapLayerBuffers)(void*, UINT);
 static __pfn_wglSwapLayerBuffers __proc_wglSwapLayerBuffers = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglSwapLayerBuffers(void* p0, UINT p1) {
-    printf("[opengl32_enh_cpp] call wglSwapLayerBuffers\n");
+    ANAX_TRACE("wglSwapLayerBuffers");
     if (__proc_wglSwapLayerBuffers == nullptr) {
         __proc_wglSwapLayerBuffers = (__pfn_wglSwapLayerBuffers)GetProcAddress(EnsureRealOpenGL32(), "wglSwapLayerBuffers");
         if (__proc_wglSwapLayerBuffers == nullptr) {
@@ -5751,7 +5772,7 @@ typedef DWORD (__stdcall *__pfn_wglSwapMultipleBuffers)(UINT, void*);
 static __pfn_wglSwapMultipleBuffers __proc_wglSwapMultipleBuffers = nullptr;
 
 extern "C" __declspec(dllexport) DWORD __stdcall wglSwapMultipleBuffers(UINT p0, void* p1) {
-    printf("[opengl32_enh_cpp] call wglSwapMultipleBuffers\n");
+    ANAX_TRACE("wglSwapMultipleBuffers");
     if (__proc_wglSwapMultipleBuffers == nullptr) {
         __proc_wglSwapMultipleBuffers = (__pfn_wglSwapMultipleBuffers)GetProcAddress(EnsureRealOpenGL32(), "wglSwapMultipleBuffers");
         if (__proc_wglSwapMultipleBuffers == nullptr) {
@@ -5767,7 +5788,7 @@ typedef int (__stdcall *__pfn_wglChoosePixelFormat)(void*, void*);
 static __pfn_wglChoosePixelFormat __proc_wglChoosePixelFormat = nullptr;
 
 extern "C" __declspec(dllexport) int __stdcall wglChoosePixelFormat(void* p0, void* p1) {
-    printf("[opengl32_enh_cpp] call wglChoosePixelFormat\n");
+    ANAX_TRACE("wglChoosePixelFormat");
     if (__proc_wglChoosePixelFormat == nullptr) {
         __proc_wglChoosePixelFormat = (__pfn_wglChoosePixelFormat)GetProcAddress(EnsureRealOpenGL32(), "wglChoosePixelFormat");
         if (__proc_wglChoosePixelFormat == nullptr) {
@@ -5783,7 +5804,7 @@ typedef int (__stdcall *__pfn_wglDescribePixelFormat)(void*, int, UINT, void*);
 static __pfn_wglDescribePixelFormat __proc_wglDescribePixelFormat = nullptr;
 
 extern "C" __declspec(dllexport) int __stdcall wglDescribePixelFormat(void* p0, int p1, UINT p2, void* p3) {
-    printf("[opengl32_enh_cpp] call wglDescribePixelFormat\n");
+    ANAX_TRACE("wglDescribePixelFormat");
     if (__proc_wglDescribePixelFormat == nullptr) {
         __proc_wglDescribePixelFormat = (__pfn_wglDescribePixelFormat)GetProcAddress(EnsureRealOpenGL32(), "wglDescribePixelFormat");
         if (__proc_wglDescribePixelFormat == nullptr) {
@@ -5799,7 +5820,7 @@ typedef int (__stdcall *__pfn_wglGetPixelFormat)(void*);
 static __pfn_wglGetPixelFormat __proc_wglGetPixelFormat = nullptr;
 
 extern "C" __declspec(dllexport) int __stdcall wglGetPixelFormat(void* p0) {
-    printf("[opengl32_enh_cpp] call wglGetPixelFormat\n");
+    ANAX_TRACE("wglGetPixelFormat");
     if (__proc_wglGetPixelFormat == nullptr) {
         __proc_wglGetPixelFormat = (__pfn_wglGetPixelFormat)GetProcAddress(EnsureRealOpenGL32(), "wglGetPixelFormat");
         if (__proc_wglGetPixelFormat == nullptr) {
@@ -5815,7 +5836,7 @@ typedef BOOL (__stdcall *__pfn_wglSetPixelFormat)(void*, int, void*);
 static __pfn_wglSetPixelFormat __proc_wglSetPixelFormat = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglSetPixelFormat(void* p0, int p1, void* p2) {
-    printf("[opengl32_enh_cpp] call wglSetPixelFormat\n");
+    ANAX_TRACE("wglSetPixelFormat");
     if (__proc_wglSetPixelFormat == nullptr) {
         __proc_wglSetPixelFormat = (__pfn_wglSetPixelFormat)GetProcAddress(EnsureRealOpenGL32(), "wglSetPixelFormat");
         if (__proc_wglSetPixelFormat == nullptr) {
@@ -5831,7 +5852,7 @@ typedef BOOL (__stdcall *__pfn_wglSwapBuffers)(void*);
 static __pfn_wglSwapBuffers __proc_wglSwapBuffers = nullptr;
 
 extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
-    printf("[opengl32_enh_cpp] call wglSwapBuffers\n");
+    ANAX_TRACE("wglSwapBuffers");
     if (__proc_wglSwapBuffers == nullptr) {
         __proc_wglSwapBuffers = (__pfn_wglSwapBuffers)GetProcAddress(EnsureRealOpenGL32(), "wglSwapBuffers");
         if (__proc_wglSwapBuffers == nullptr) {
@@ -5848,7 +5869,7 @@ typedef void* (__stdcall *__pfn_wglGetDefaultProcAddress)(void*);
 static __pfn_wglGetDefaultProcAddress __proc_wglGetDefaultProcAddress = nullptr;
 
 extern "C" __declspec(dllexport) void* __stdcall wglGetDefaultProcAddress(void* p0) {
-    printf("[opengl32_enh_cpp] call wglGetDefaultProcAddress\n");
+    ANAX_TRACE("wglGetDefaultProcAddress");
     if (__proc_wglGetDefaultProcAddress == nullptr) {
         __proc_wglGetDefaultProcAddress = (__pfn_wglGetDefaultProcAddress)GetProcAddress(EnsureRealOpenGL32(), "wglGetDefaultProcAddress");
         if (__proc_wglGetDefaultProcAddress == nullptr) {

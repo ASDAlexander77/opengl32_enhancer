@@ -152,6 +152,27 @@ typedef double GLclampd;
 
 const int MAX_PATH = 260;
 
+// Per-call tracing, OFF by default and deliberately so.
+//
+// Every exported entry point below can announce itself, which is invaluable when working out
+// what a game actually calls - but there are ~370 of them and an id Tech 2-era engine drives
+// immediate mode, so glVertex3f alone runs per vertex per frame. Once debug_log.h started
+// routing stdout to a real file, an unconditional trace wrote ~3.5 MB/s (about 12 GB/hour) and
+// put a formatted file write in the hottest path in the process. It was only ever harmless
+// because the output had nowhere to go.
+//
+// Compile-time rather than a config key: this must cost exactly nothing when off, and a runtime
+// check inside glVertex3f is not nothing. Build with -DANAX_TRACE_CALLS=1 when you need it.
+#ifndef ANAX_TRACE_CALLS
+#define ANAX_TRACE_CALLS 0
+#endif
+
+#if ANAX_TRACE_CALLS
+#define ANAX_TRACE(name) printf("[opengl32_enh_cpp] call " name "\\n")
+#else
+#define ANAX_TRACE(name) ((void)0)
+#endif
+
 extern "C" {
     __declspec(dllimport) void* __stdcall LoadLibraryA(const char* lpLibFileName);
     __declspec(dllimport) void* __stdcall GetProcAddress(void* hModule, const char* lpProcName);
@@ -225,7 +246,7 @@ def emit_cpp(funcs):
         lines.append(f"static {fn_ptr_t} {cache_var} = nullptr;")
         lines.append("")
         lines.append(f'extern "C" __declspec(dllexport) {ret} __stdcall {name}({params_decl}) {{')
-        lines.append(f'    printf("[opengl32_enh_cpp] call {name}\\n");')
+        lines.append(f'    ANAX_TRACE("{name}");')
         lines.append(f"    if ({cache_var} == nullptr) {{")
         lines.append(f'        {cache_var} = ({fn_ptr_t})GetProcAddress(EnsureRealOpenGL32(), "{name}");')
         lines.append(f"        if ({cache_var} == nullptr) {{")
