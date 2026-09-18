@@ -41,11 +41,25 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -LE gpu
 
+      # config_editor.exe ships flat, alongside the DLL, rather than in a tools/ subfolder.
+      # With no argv it opens "opengl32_enhancer.ini" relative to its working directory, which
+      # when double-clicked is its own folder - so sitting next to the DLL in the game's
+      # directory means it edits THE GAME'S ini with no setup, which is the whole workflow the
+      # frame dump feature is built around. From a subfolder it would find no ini at all and
+      # silently come up showing effect=none.
+      #
+      # Note the path shape: unlike the DLL's build/Release/, this target sets its own
+      # RUNTIME_OUTPUT_DIRECTORY (see CMakeLists.txt), and the Visual Studio generator used
+      # here appends the per-config subdirectory to it - hence config_editor_dir/Release/.
+      # Local Ninja builds have no such subdirectory. Copy-Item hard-fails on a missing
+      # source, so if that ever changes this step breaks loudly instead of quietly publishing
+      # an archive with the editor missing.
       - name: Stage archive contents
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path stage -Force | Out-Null
           Copy-Item build/Release/opengl32_enh32.dll stage/opengl32.dll
+          Copy-Item build/config_editor_dir/Release/config_editor.exe stage/config_editor.exe
           Copy-Item opengl32_enhancer.ini stage/opengl32_enhancer.ini
           Copy-Item cyberpunk.cube stage/cyberpunk.cube
 

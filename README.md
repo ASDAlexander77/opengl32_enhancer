@@ -27,10 +27,14 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Choosing an anti-aliasing stage: TAA vs SMAA](#choosing-an-anti-aliasing-stage-taa-vs-smaa)
   - [Choosing a sharpener: sharpen vs FSR vs CAS](#choosing-a-sharpener-sharpen-vs-fsr-vs-cas)
   - [Noise reduction: nr](#noise-reduction-nr)
+  - [Ambient occlusion: ssao](#ambient-occlusion-ssao)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
+  - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
 - [Texture effects](#texture-effects)
 - [Anisotropic filtering](#anisotropic-filtering)
+- [Tuning settings: the config editor](#tuning-settings-the-config-editor)
+  - [Tuning against a real game frame](#tuning-against-a-real-game-frame)
 - [How it works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
 - [Building from source](#building-from-source)
@@ -40,18 +44,24 @@ ENB, built specifically for 32-bit OpenGL titles.
 
 ## Quick start
 
-1. Download `opengl32.dll`, `opengl32_enhancer.ini` and `cyberpunk.cube` from
-   the [latest build artifact](../../actions), or
+1. Download `opengl32.dll`, `opengl32_enhancer.ini`, `cyberpunk.cube` and
+   `config_editor.exe` from the [latest build artifact](../../actions), or
    [build them yourself](#building-from-source).
-2. Copy all three files into the game's folder — the same directory as the
+2. Copy all four files into the game's folder — the same directory as the
    game's `.exe`. **Not** `system32`.
-3. Open `opengl32_enhancer.ini` and edit the `effect=` line to pick the stages
-   you want.
+3. Pick the stages you want: either edit the `effect=` line in
+   `opengl32_enhancer.ini` by hand, or run `config_editor.exe` from that folder
+   and tune it against a live preview (see
+   [the config editor](#tuning-settings-the-config-editor)).
 4. Launch the game normally.
 
 Windows loads the `opengl32.dll` sitting next to the game's executable in
 preference to the system one, so no installer or injector is involved. To
-uninstall, delete the three files.
+uninstall, delete the files.
+
+`config_editor.exe` is a standalone tool, never loaded by the game — it ships
+in the same folder only because that is where the ini it edits lives. Deleting
+it changes nothing about how the DLL behaves.
 
 ## Requirements
 
@@ -60,6 +70,7 @@ uninstall, delete the three files.
 | **OS** | Windows |
 | **Game** | 32-bit, rendering through OpenGL (`opengl32.dll`) |
 | **GPU** | Anything supporting OpenGL 4.3 compute shaders |
+| **Runtime** | The [Visual C++ 2015-2022 redistributable (x86)](https://aka.ms/vs/17/release/vc_redist.x86.exe), which `opengl32.dll` links against. Most systems already have it. `config_editor.exe` links its CRT statically and needs nothing |
 
 Direct3D and Vulkan games are not affected — this proxy only sees OpenGL
 calls. If the GPU or driver cannot provide GL 4.3 compute, the affected stage
@@ -388,6 +399,12 @@ It is a separate application rather than an in-game overlay on purpose. An overl
 subclassing the game's window procedure from inside its process and fighting it for mouse and
 keyboard input — a lot of risk, in someone else's address space, to move a slider. The editor
 owns its own window, message loop and GL context, so none of that applies.
+
+It ships prebuilt in the build artifact and the release archive, next to
+`opengl32.dll` — so if you followed the quick start it is already sitting in the game's
+folder, and running it there edits that game's ini directly, with no arguments and no setup.
+
+To build it from source instead:
 
 ```sh
 cmake --build --preset x86-release --target config_editor

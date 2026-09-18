@@ -275,6 +275,19 @@ target_link_libraries(config_editor opengl32 gdi32 user32 dwmapi imm32)
 # reports through printf - so give it a console back. Without this, every diagnostic from the
 # config parser, the GL loader and the stages themselves would go nowhere.
 set_target_properties(config_editor PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+# Static CRT for this target only (cmake_minimum_required(3.20) puts CMP0091 at NEW, so this
+# property is what selects it - there is no /MD in CMAKE_CXX_FLAGS to fight). Unlike every
+# other target here, this one is shipped to end users as a standalone double-clickable .exe
+# (see .github/workflows/build.yml), where a missing VC++ redistributable is a loader error box
+# before a single line of our code runs - no console message, nothing to go on. Linking the CRT
+# in costs a couple hundred KB and makes the editor self-contained.
+#
+# Safe precisely because it IS standalone: static CRT is a problem when modules pass ownership
+# of CRT resources (allocations, FILE*, errno) across a boundary, and this target is its own
+# process that shares none with anything.
+set_target_properties(config_editor PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
 # Its own output directory, for exactly the reason texture_filter_test has one: two targets
 # copying a same-named opengl32_enhancer.ini into one build directory is an unordered race with
 # the Ninja generator, and post_effects_test already claims that filename in the shared dir.
