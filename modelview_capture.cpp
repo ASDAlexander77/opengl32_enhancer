@@ -93,7 +93,11 @@ void LatchCamera() {
     g_pending = false;
 
     if (!g_loggedFirst) {
-        RedirectStdoutToDebugLog();
+        // No RedirectStdoutToDebugLog() here on purpose. In a game stdout is already pointed at
+        // opengl32_enhancer.log by window_override.cpp's call at wglCreateContext, which must run
+        // before any glFrustum can reach this module - so a redirect here would buy nothing. What
+        // it WOULD do is redirect modelview_capture_test's own output mid-run, hiding a future
+        // failure's diagnostics in a file instead of showing them in ctest --output-on-failure.
         printf("[opengl32_enh_cpp] modelview: captured first camera matrix, camera-relative "
                "stages can now be placed\n");
         g_loggedFirst = true;
