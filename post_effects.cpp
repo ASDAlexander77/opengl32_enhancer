@@ -314,6 +314,45 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
 
 }  // namespace
 
+// Diagnostic for "motion blur is on but I see nothing", which has three quite different causes
+// that look identical on screen: the stage never ran, it ran on a camera that did not move, or it
+// ran correctly and something downstream undid it. One line separates them.
+//
+// The angle between the two cameras' forward vectors is the honest quantity to print. It needs no
+// depth readback (which would stall the pipeline every frame), and rotation dominates the
+// screen-space velocity for everything except geometry very close to the eye. Reads
+// cameraLogInterval rather than adding a knob - the same interval that already validates the
+// camera and world captures, for the same reason.
+//
+// Reading it: a near-zero angle while you are visibly turning means the camera history is wrong,
+// not the blur. A healthy angle with wrote=no means a guard above rejected the frame. A healthy
+// angle with wrote=yes means the blur really is being applied, and anything invisible after that
+// is magnitude or a later stage.
+void LogMotionBlurIfDue(const CameraMatrix& current, const CameraMatrix& previous, bool wrote) {
+    int interval = GetAnaxConfig().cameraLogInterval;
+    if (interval <= 0) {
+        return;
+    }
+    static unsigned int frames = 0;
+    unsigned int thisFrame = frames++;
+    if ((thisFrame % (unsigned int)interval) != 0) {
+        return;
+    }
+
+    // Row 2 of a view matrix is the camera's backward axis in world space (see DecomposeCamera in
+    // modelview_capture.cpp, which negates it to get forward), so the dot product of the two
+    // frames' rows is the cosine of the angle the view turned through.
+    float dot = current.m[2] * previous.m[2] +
+                current.m[6] * previous.m[6] +
+                current.m[10] * previous.m[10];
+    if (dot > 1.0f) { dot = 1.0f; }
+    if (dot < -1.0f) { dot = -1.0f; }
+    float degrees = acosf(dot) * 57.2957795f;
+
+    printf("[opengl32_enh_cpp] motion_blur: frame %u turned %.3f deg since the previous frame, "
+           "wrote=%s\n", thisFrame, degrees, wrote ? "yes" : "no");
+}
+
 // See post_effects.h. Every stage named here passes g_pipeline.depthTex to its Apply*() in the
 // switch below, and every stage that does must be named here.
 bool StageNeedsDepth(EffectKind stage) {
@@ -755,6 +794,7 @@ void ApplySelectedEffect(void* hdc) {
                                                 g_pipeline.captureTex, dstW, dstH, mbProjection,
                                                 reprojection, config.motionBlurStrength,
                                                 config.motionBlurMaxRadius);
+                        LogMotionBlurIfDue(mbCurrent, mbPrevious, wrote);
                     }
                 }
                 break;
