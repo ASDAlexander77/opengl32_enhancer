@@ -289,6 +289,38 @@ int main() {
         AdvanceCameraHistory();
     }
 
+    // --- Case 6: the disarm itself. A frame whose world pass is armed but where the HUD begins
+    // before any camera is set - the engine drew no world geometry that frame - must not let the
+    // HUD's modelview become the camera. Nothing is pending at the glOrtho, so the latch there is
+    // a no-op, and g_armed = false is the only thing standing between the HUD and the capture.
+    {
+        // A normal frame first, so there is a known camera to preserve.
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 7.0f, 8.0f, 9.0f);
+        float knownCamera[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, knownCamera);
+        FinalizeCameraForFrame();
+        AdvanceCameraHistory();
+
+        // Now a frame that arms a world pass and goes straight to the HUD.
+        BeginWorldPass();
+        BeginHudPass();
+        pTranslatef(64.0f, 64.0f, 0.0f);
+        NotifyMatrixEdited();
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, knownCamera)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("expected", knownCamera);
+        }
+        Check(got && MatricesEqual(camera.m, knownCamera),
+              "glOrtho disarms: a HUD pass with no camera pending cannot become the camera");
+
+        AdvanceCameraHistory();
+    }
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);
