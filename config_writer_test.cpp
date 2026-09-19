@@ -197,6 +197,41 @@ int main() {
                strcmp(reloaded.lutPath, original.lutPath) == 0,
                "untouched settings were preserved unchanged") && ok;
 
+    // An UNMANAGED key must survive a save too. ssrWorldUpAxis is deliberately absent from the
+    // writer's managed-key list, for the same reason windowWidth and frameDumpKey are: it is a
+    // per-engine fact rather than something anyone tunes by eye, and the editor could not help
+    // anyway - it has no captured camera, so the control would visibly do nothing there. That
+    // decision is only safe if unmanaged lines really are copied through untouched, and the
+    // preservation check above exercises only keys the writer DOES manage. If this breaks, a
+    // user's world-up axis silently reverts to z the first time they press Save, and reflections
+    // move onto the walls.
+    {
+        std::vector<std::string> lines = ReadLines(kWorkIni);
+        FILE* f = fopen(kWorkIni, "wb");
+        ok = Check(f != nullptr, "reopened the work ini to set a non-default ssrWorldUpAxis") && ok;
+        if (f != nullptr) {
+            for (size_t i = 0; i < lines.size(); ++i) {
+                if (lines[i].rfind("ssrWorldUpAxis=", 0) == 0) {
+                    fputs("ssrWorldUpAxis=y\n", f);
+                } else {
+                    fputs(lines[i].c_str(), f);
+                    fputc('\n', f);
+                }
+            }
+            fclose(f);
+        }
+
+        AnaxConfig beforeSave = ParseConfigFile(kWorkIni);
+        ok = Check(beforeSave.ssrWorldUpAxis == 1, "the work ini now says ssrWorldUpAxis=y") && ok;
+
+        ok = Check(WriteConfigToIni(kWorkIni, beforeSave),
+                   "WriteConfigToIni() reported success on the second save") && ok;
+
+        AnaxConfig afterSave = ParseConfigFile(kWorkIni);
+        ok = Check(afterSave.ssrWorldUpAxis == 1,
+                   "an unmanaged key (ssrWorldUpAxis) survives a save unchanged") && ok;
+    }
+
     remove(kWorkIni);
 
     printf("\n%s\n", ok ? "All checks passed." : "Some checks FAILED.");

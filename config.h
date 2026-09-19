@@ -116,6 +116,13 @@ struct AnaxConfig {
     float ssrThickness = 16.0f;                // Ssr
     float ssrUpThreshold = 0.7f;               // Ssr
 
+    // Which world axis points up in the game, as 0=X, 1=Y, 2=Z, written in the ini as x/y/z.
+    // `ssrUpThreshold` above measures how far a surface points up, and "up" is a fact about the
+    // game's world that a captured view matrix cannot supply - it is an engine convention. Quake
+    // II-family engines (Anachronox included) use +Z, hence the default. Get it wrong and
+    // reflections appear on walls instead of floors. See ssr.h.
+    int ssrWorldUpAxis = 2;                    // Ssr
+
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact
     // passthrough. See gamma.h for why brightness is a gain and not an additive offset.

@@ -21,6 +21,7 @@
 #include <cstdio>
 
 #include "gl_loader.h"
+#include "modelview_capture.h"
 #include "projection_capture.h"
 #include "ssr.h"
 
@@ -46,6 +47,7 @@ const unsigned int GL_COLOR_BUFFER_BIT     = 0x00004000;
 const unsigned int GL_DEPTH_TEST           = 0x0B71;
 const unsigned int GL_PROJECTION           = 0x1701;
 const unsigned int GL_MODELVIEW            = 0x1700;
+const unsigned int GL_MODELVIEW_MATRIX     = 0x0BA6;
 const unsigned int GL_QUADS                = 0x0007;
 
 int g_failures = 0;
@@ -153,6 +155,8 @@ int main() {
     typedef void (__stdcall *PFNGLENDPROC)(void);
     typedef void (__stdcall *PFNGLVERTEX3FPROC)(float, float, float);
     typedef void (__stdcall *PFNGLCOLOR3FPROC)(float, float, float);
+    typedef void (__stdcall *PFNGLROTATEFPROC)(float, float, float, float);
+    typedef void (__stdcall *PFNGLGETFLOATVPROC)(unsigned int, float*);
     auto pGlClearColor = (PFNGLCLEARCOLORPROC)GetProcAddress(realGl, "glClearColor");
     auto pGlClear = (PFNGLCLEARPROC)GetProcAddress(realGl, "glClear");
     auto pGlViewport = (PFNGLVIEWPORTPROC)GetProcAddress(realGl, "glViewport");
@@ -164,6 +168,8 @@ int main() {
     auto pGlEnd = (PFNGLENDPROC)GetProcAddress(realGl, "glEnd");
     auto pGlVertex3f = (PFNGLVERTEX3FPROC)GetProcAddress(realGl, "glVertex3f");
     auto pGlColor3f = (PFNGLCOLOR3FPROC)GetProcAddress(realGl, "glColor3f");
+    auto pGlRotatef = (PFNGLROTATEFPROC)GetProcAddress(realGl, "glRotatef");
+    auto pGlGetFloatv = (PFNGLGETFLOATVPROC)GetProcAddress(realGl, "glGetFloatv");
 
     // These exact numbers go into ProjectionParams below, so the stage unprojects with precisely
     // the projection the scene was drawn under - the same discipline as ssao_test.cpp.
@@ -252,7 +258,7 @@ int main() {
 
     // intensity=0 is an exact no-op.
     {
-        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection,
+        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, nullptr,
                               0.0f, kMaxDistance, kThickness, kUpThreshold);
         Check(wrote && gl.glGetError() == 0, "ApplySsr(intensity=0) runs without a GL error");
         CheckExact(ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY), floorSrc,
@@ -262,7 +268,7 @@ int main() {
     // The real pass: the floor must pick up the bright wall standing on it.
     unsigned char floorLit = 0;
     {
-        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection,
+        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, nullptr,
                               1.0f, kMaxDistance, kThickness, kUpThreshold);
         Check(wrote && gl.glGetError() == 0, "ApplySsr(intensity=1) runs without a GL error");
         floorLit = ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY);
@@ -279,18 +285,95 @@ int main() {
     // exceed - so the same pixel that just brightened must come back exactly as it started. This
     // is what distinguishes "the gate decides what reflects" from "everything reflects".
     {
-        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection,
+        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, nullptr,
                               1.0f, kMaxDistance, kThickness, 1.0f);
         Check(wrote, "ApplySsr(upThreshold=1) runs");
         CheckExact(ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY), floorSrc,
                    "upThreshold=1 gates the floor off entirely");
     }
 
+    // --- The gate reads WORLD up, not view-space up.
+    //
+    // Everything above measures the gate against view-space +Y, which is what this stage used to
+    // do and what ssr.h documented as its worst limitation: pitch the camera and the gate swings
+    // off true, because "up" was up from the camera's point of view rather than up in the world.
+    //
+    // The rendered image is held FIXED here and only the claimed camera changes. That isolates
+    // the one thing this change is about - the gate now consults the camera - without the framing
+    // shifts a re-render would bring. The floor in this image has a view-space normal of (0,1,0),
+    // so: a camera that says world up IS view +Y must reflect it, and a camera pitched 45 degrees
+    // (world up 45 degrees off view +Y, dot = 0.707) must gate it off at upThreshold=0.8.
+    //
+    // Pitch INVARIANCE - the same physical floor staying reflective as the camera tilts - is a
+    // separate claim and needs a second render; it is tested further down.
+    const float kWorldUpThreshold = 0.8f;
+    {
+        // Build both camera matrices with real GL rather than by hand, so the driver is the
+        // oracle for the layout, exactly as modelview_capture_test.cpp does. Safe to run now:
+        // colour and depth were already copied into textures above, so touching the matrix
+        // stack can no longer affect what the stage reads.
+        CameraMatrix levelCamera;
+        CameraMatrix pitchedCamera;
+        pGlMatrixMode(GL_MODELVIEW);
+        pGlLoadIdentity();
+        pGlGetFloatv(GL_MODELVIEW_MATRIX, levelCamera.m);
+        pGlRotatef(45.0f, 1.0f, 0.0f, 0.0f);
+        pGlGetFloatv(GL_MODELVIEW_MATRIX, pitchedCamera.m);
+        pGlLoadIdentity();
+
+        // World up is +Y in THIS scene: the test authors its geometry directly in view space
+        // with a level camera, so world and view axes coincide. A Quake II game's world up is
+        // +Z, which is why the axis is a parameter rather than a constant.
+        float levelUp[3] = {0.0f, 0.0f, 0.0f};
+        float pitchedUp[3] = {0.0f, 0.0f, 0.0f};
+        SsrViewSpaceWorldUp(levelCamera, SsrWorldUpAxis::Y, levelUp);
+        SsrViewSpaceWorldUp(pitchedCamera, SsrWorldUpAxis::Y, pitchedUp);
+        printf("world up in view space: level = %.3f/%.3f/%.3f, pitched = %.3f/%.3f/%.3f\n",
+               levelUp[0], levelUp[1], levelUp[2], pitchedUp[0], pitchedUp[1], pitchedUp[2]);
+        Check(levelUp[1] > 0.999f, "SsrViewSpaceWorldUp: a level camera puts world up along view +Y");
+        Check(pitchedUp[1] > 0.69f && pitchedUp[1] < 0.72f,
+              "SsrViewSpaceWorldUp: a 45-degree pitch tilts world up off view +Y by cos(45)");
+
+        // The axis reaches this function as an int from the config file, and it indexes a
+        // 16-float array - so a value outside 0..2 would read past the end of the matrix. The
+        // parser cannot currently produce one, which is exactly why this is worth pinning: the
+        // function must be safe on its own terms rather than on its caller's good behaviour.
+        float strayUp[3] = {9.0f, 9.0f, 9.0f};
+        SsrViewSpaceWorldUp(levelCamera, (SsrWorldUpAxis)7, strayUp);
+        Check(strayUp[0] == 0.0f && strayUp[1] == 0.0f && strayUp[2] == 1.0f,
+              "SsrViewSpaceWorldUp: an out-of-range axis falls back to Z, reading nothing stray");
+
+        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, levelUp,
+                              1.0f, kMaxDistance, kThickness, kWorldUpThreshold);
+        unsigned char floorLevel = ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY);
+        Check(wrote && floorLevel > floorSrc + 40,
+              "world up along view +Y: the floor still reflects");
+
+        // The decisive one. Same image, same threshold, same everything - only the camera says
+        // the world is tilted relative to the view. With the old view-space gate this call is
+        // indistinguishable from the one above and the floor reflects identically.
+        wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, pitchedUp,
+                         1.0f, kMaxDistance, kThickness, kWorldUpThreshold);
+        Check(wrote, "ApplySsr runs with a pitched camera");
+        CheckExact(ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY), floorSrc,
+                   "a camera pitched 45 degrees gates this floor off: the gate reads the camera");
+
+        // No camera captured at all. The stage must degrade to exactly what it did before this
+        // change - not decline, and not guess - so a game whose view matrix is never captured
+        // keeps the reflections it has today, bit for bit.
+        wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, projection, nullptr,
+                         1.0f, kMaxDistance, kThickness, kWorldUpThreshold);
+        unsigned char floorNoCamera = ReadRed(gl, readFbo, dstTex, kFloorX, kFloorY);
+        Check(wrote, "ApplySsr runs with no camera");
+        CheckExact(floorNoCamera, floorLevel,
+                   "no camera falls back to view-space up, matching the level camera bit-exactly");
+    }
+
     // Without a captured projection raw depth cannot be unprojected at all, so the stage must
     // decline rather than reconstruct nonsense from a guessed near/far.
     {
         ProjectionParams empty;
-        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, empty,
+        bool wrote = ApplySsr(srcTex, dstTex, depthTex, width, height, empty, nullptr,
                               1.0f, kMaxDistance, kThickness, kUpThreshold);
         Check(!wrote, "ApplySsr declines when no projection has been captured");
     }

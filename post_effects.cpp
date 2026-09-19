@@ -41,6 +41,7 @@
 #include "light_shafts.h"
 #include "ssr.h"
 #include "ssao.h"
+#include "modelview_capture.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
 #include "gl_loader.h"
@@ -643,8 +644,21 @@ void ApplySelectedEffect(void* hdc) {
                 // Reconstructs view-space positions and normals from depth, so it needs the
                 // projection for the same reason ssao does.
                 ProjectionParams ssrProjection;
+                // The camera is optional where the projection is not: without a projection raw
+                // depth cannot be unprojected at all, but without a camera the gate simply falls
+                // back to view-space up - the behaviour this stage shipped with. So this is
+                // computed outside the short-circuit and handed over as nullptr when absent.
+                CameraMatrix ssrCamera;
+                float ssrWorldUp[3] = {0.0f, 0.0f, 0.0f};
+                const float* ssrWorldUpPtr = nullptr;
+                if (GetCapturedCamera(ssrCamera)) {
+                    SsrViewSpaceWorldUp(ssrCamera, (SsrWorldUpAxis)config.ssrWorldUpAxis,
+                                        ssrWorldUp);
+                    ssrWorldUpPtr = ssrWorldUp;
+                }
                 wrote = depthCaptured && GetCapturedProjection(ssrProjection) &&
                          ApplySsr(src, dst, g_pipeline.depthTex, dstW, dstH, ssrProjection,
+                                  ssrWorldUpPtr,
                                   config.ssrIntensity, config.ssrMaxDistance,
                                   config.ssrThickness, config.ssrUpThreshold);
                 break;

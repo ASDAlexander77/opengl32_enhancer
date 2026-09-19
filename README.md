@@ -330,6 +330,7 @@ material channel per pixel. A GL 1.1 game supplies nothing of the kind — there
 anywhere in the frame that says "marble" rather than "carpet". So this stage guesses from
 geometry: `ssrUpThreshold` is a minimum upward tilt, and only surfaces above it reflect, on the
 reasoning that floors, water and polished tables are what a player expects a reflection in.
+"Upward" means upward *in the world* — see `ssrWorldUpAxis` below.
 
 | Setting | What it does |
 | --- | --- |
@@ -343,16 +344,25 @@ Three honest limitations, all consequences of that one guess:
 - It is a guess about **orientation standing in for a fact about material**, so it is wrong in
   both directions: carpet reflects as readily as marble, and a mirror hung on a wall does not
   reflect at all.
-- "Up" is measured in **view space**, because a `wglSwapBuffers` proxy never sees the modelview
-  matrix (see `docs/enhancement-opportunities.md`, Tier 2). So it means "up from the camera's
-  point of view", and pitching the camera up or down swings the gate off true. Levelling out
-  restores it.
 - Only what is **already on screen** can be reflected. Geometry behind the camera or off the
   frame edge has no pixels to gather, which is why reflections fade toward the border rather than
   ending abruptly.
 
-Fixing the second one properly needs the modelview capture described in the roadmap; the first
-needs material information the game does not have.
+The first needs material information the game does not have, so it stays.
+
+"Up" used to be a third limitation — it was measured in *view* space, so pitching the camera
+swung the gate off true and levelling out restored it. It is now measured in **world** space,
+using the camera matrix the proxy reconstructs from the game's own matrix calls. That needs one
+thing the camera cannot supply, because it is an engine convention rather than anything a view
+matrix reveals:
+
+| Setting | What it does |
+| --- | --- |
+| `ssrWorldUpAxis` | `x`, `y` or `z` — which world axis points up in your game. `z` (the default) is right for Quake II-engine games including Anachronox; many other engines use `y` |
+
+Get it wrong and the symptom is unmistakable: reflections appear on walls instead of floors. A
+game whose view matrix is never captured at all keeps the old view-space behaviour rather than
+losing its reflections.
 
 ### Local contrast: `localcontrast`
 
