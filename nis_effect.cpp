@@ -299,7 +299,15 @@ const char* kNVScalerShaderSource =
     "        float y = getY(op.xyz);\n"
     "        const float corr = opY - y;\n"
     "        op.x += corr; op.y += corr; op.z += corr;\n"
-    "        imageStore(out_texture, dstCoord, op);\n"
+    // The clamp is this port's, not NIS's. NVIDIA's SDK stores this sum into a UNORM
+    // target, where the write saturates for free; out_texture here is rgba16f, which does
+    // not, so without it the sharpen overshoots the source range on any real detail
+    // (measured: input held inside [0.32,0.95] came back spanning [0.16,1.18]) and every
+    // edge grows a halo. Those halos are not merely clipped on the way to an 8-bit back
+    // buffer - a later stage reads them as signal, and `bloom` at its shipped 0.8
+    // threshold turns each bright one into a glow. See cas.cpp, which clamps for the same
+    // reason, and nis_effect.h on why this stage must sit on LDR input.
+    "        imageStore(out_texture, dstCoord, vec4(clamp(op.xyz, 0.0, 1.0), op.w));\n"
     "    }\n"
     "}\n"
     "layout(local_size_x = NIS_THREAD_GROUP_SIZE) in;\n"
@@ -450,7 +458,9 @@ const char* kNVSharpenShaderSource =
     "        ivec2 dstCoord = ivec2(dstX, dstY);\n"
     "        vec4 op = textureLod(in_texture, coord, 0.0);\n"
     "        op.x += usmY; op.y += usmY; op.z += usmY;\n"
-    "        imageStore(out_texture, dstCoord, op);\n"
+    // Same clamp, same reason as NVScaler's above - this is the identical unsharp mask
+    // with the resample stage removed, so it overshoots identically.
+    "        imageStore(out_texture, dstCoord, vec4(clamp(op.xyz, 0.0, 1.0), op.w));\n"
     "    }\n"
     "}\n"
     "layout(local_size_x = NIS_THREAD_GROUP_SIZE) in;\n"

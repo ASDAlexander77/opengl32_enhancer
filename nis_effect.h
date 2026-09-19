@@ -7,6 +7,20 @@
 // pipeline (see post_effects.cpp): reads srcTexture, writes dstTexture. No capture/blit/
 // state-save of their own - the caller owns the pipeline's shared textures and the app's GL
 // state around the whole chain.
+//
+// Both stages are LDR filters and their output is clamped to [0,1]. That is not a stylistic
+// choice: NIS's sharpen adds its correction straight onto the sampled colour, and NVIDIA's SDK
+// stores the sum into a UNORM target where the write saturates for free. This port's pipeline
+// textures are RGBA16F, which does not saturate, so the clamp is written into the shaders -
+// without it a frame with ordinary fine detail came back with every edge wearing a halo well
+// past white, which the stages listed AFTER this one then read as real signal (`bloom` at its
+// shipped 0.8 threshold turns each one into a glow).
+//
+// The consequence to know: list nvscaler/nvsharpen BEFORE anything that legitimately produces
+// values above 1 - bloom, acestonemap - or that headroom is clipped here. In practice these
+// belong early anyway, next to the other resolution stages. The clamp does not remove the
+// sharpening halo itself, only the part that escapes the displayable range; `sharpness` is the
+// knob for how strong the halo is.
 
 // Runs NVScaler (NIS_SCALER=1: directional edge-adaptive resample + adaptive sharpen),
 // called from post_effects.cpp's ApplySelectedEffect(). srcTexture and dstTexture are both
