@@ -75,13 +75,26 @@ bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int h
 // they differ the game drew an overlay, and those pixels take the current frame untouched so
 // HUD text neither ghosts nor softens.
 //
+// `currentJitterDx`/`currentJitterDy` are THIS frame's jitter in frustum units, from
+// GetTaaJitterApplied(), or zero on an unjittered frame. They are subtracted from the history
+// fetch coordinate. Unprojecting with a jittered frustum and projecting into an unjittered one
+// yields where the scene point was, but history is indexed on the pixel grid, and the point
+// sampled at this pixel sits one jitter away from its centre - so without this the fetch is off
+// by the current offset every frame and a static camera never resolves onto itself. Note this
+// is the CURRENT frame's offset, subtracted here; `previousProjection` separately needs the
+// PREVIOUS frame's offset already removed by the caller. Two different offsets, two different
+// jobs.
+//
 // `shimmerSuppression` is deliberately absent: it exists to approximate, without motion
 // vectors, what reprojection does properly, and it would fight the jitter here. It keeps its
 // full meaning on ApplyTaa()'s fallback path.
 //
 // Shares ApplyTaa()'s single ping-pong history, which is correct - they are two paths through
-// one stage and only one of them can run in any given frame - so switching between the paths
-// does not invalidate history and deliberately does not reset it.
+// one stage, resolving the same image at the same size - so switching between the paths does
+// not invalidate history and deliberately does not reset it. (Both CAN run in one frame: if
+// this one dispatches and then reports a GL error, the caller falls back to ApplyTaa() for that
+// frame. The error path deliberately leaves the ping-pong roles unflipped, so the history the
+// fallback then reads is the same valid one this path started from.)
 //
 // Returns true if dstTexture was written; false if any input was missing or degenerate, if GL
 // 4.3 compute support is unavailable, if this path's shader failed to build, or if the dispatch
@@ -93,4 +106,5 @@ bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
                   const ProjectionParams& currentProjection,
                   const ProjectionParams& previousProjection,
                   const float reprojection[16],
+                  float currentJitterDx, float currentJitterDy,
                   float blend);

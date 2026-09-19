@@ -166,9 +166,10 @@ void BuildRamp(unsigned char* pixels, int width, int height) {
 // Alternating full-contrast columns. The off-screen-history fixture below needs this rather
 // than BuildRamp's gradient: the resolve clips history to one standard deviation of the current
 // frame's 3x3 neighbourhood, and a gradient's neighbourhood is so uniform that the clip alone
-// bounds surviving history to within about one 8-bit level - so on a ramp the fixture cannot
-// tell the range check working from the range check missing. With neighbouring columns 0 and
-// 255 the clip box is wide open and stale history shows up at full strength.
+// holds surviving history to about three 8-bit levels - measured at 3, against that fixture's
+// tolerance of 3, so on a ramp it cannot tell the range check working from the range check
+// missing and passes on the boundary. With neighbouring columns 0 and 255 the clip box is wide
+// open, stale history shows up at full strength (measured 109), and the guard is covered.
 void BuildStripes(unsigned char* pixels, int width, int height) {
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -225,8 +226,10 @@ bool CheckRealHudPixelsAreUntouched(const GlComputeApi& gl, unsigned int readFbo
     // Two calls: the first pulls history toward this fixture's ramp, the second is the one
     // under test. The HUD assertion holds on either call - the HUD early-out is unconditional -
     // but the "something changed" guard below wants history that resembles this content.
-    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, yaw, 0.85f);
-    bool wrote = ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, yaw, 0.85f);
+    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, yaw,
+                 0.0f, 0.0f, 0.85f);
+    bool wrote = ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj,
+                              yaw, 0.0f, 0.0f, 0.85f);
     ok = Check(wrote, "the real path reports that it wrote dst") && ok;
 
     const unsigned char hudOut = ReadR(gl, readFbo, dst, kHudX, kHudY);
@@ -277,7 +280,8 @@ bool CheckRealStationaryCameraIsStable(const GlComputeApi& gl, unsigned int read
     float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 
     for (int call = 0; call < 4; ++call) {
-        ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity, 0.85f);
+        ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity,
+                     0.0f, 0.0f, 0.85f);
     }
 
     bool stable = true;
@@ -311,8 +315,8 @@ bool CheckRealOffscreenHistoryIsRejected(const GlComputeApi& gl, unsigned int re
     unsigned int capture = CreatePipelineTexture(gl, kRealW, kRealH);
     unsigned int depth = CreateDepthTexture(gl, kRealW, kRealH);
 
-    // Seed history with flat mid-grey, then switch src to the ramp. Any history that survives
-    // is therefore visible as a pull toward 128.
+    // Seed history with flat mid-grey, then switch src to the stripes. Any history that
+    // survives is therefore visible as a pull toward 128.
     unsigned char* grey = new unsigned char[(size_t)n * 4];
     for (int i = 0; i < n; ++i) {
         grey[i * 4 + 0] = 128; grey[i * 4 + 1] = 128; grey[i * 4 + 2] = 128; grey[i * 4 + 3] = 255;
@@ -332,13 +336,16 @@ bool CheckRealOffscreenHistoryIsRejected(const GlComputeApi& gl, unsigned int re
     UploadRgba(gl, src, kRealW, kRealH, grey);
     UploadRgba(gl, world, kRealW, kRealH, grey);
     UploadRgba(gl, capture, kRealW, kRealH, grey);
-    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity, 0.85f);
-    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity, 0.85f);
+    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity,
+                 0.0f, 0.0f, 0.85f);
+    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, identity,
+                 0.0f, 0.0f, 0.85f);
 
     UploadRgba(gl, src, kRealW, kRealH, stripes);
     UploadRgba(gl, world, kRealW, kRealH, stripes);
     UploadRgba(gl, capture, kRealW, kRealH, stripes);
-    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, bigYaw, 0.85f);
+    ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, proj, proj, bigYaw,
+                 0.0f, 0.0f, 0.85f);
 
     // Column 0 under a 45-degree yaw reprojects well outside the previous frame.
     const unsigned char out = ReadR(gl, readFbo, dst, 0, 32);
@@ -418,7 +425,8 @@ bool CheckRealJitterAntiAliases(const GlComputeApi& gl, unsigned int readFbo) {
         cur.left = (float)l; cur.right = (float)r;
         cur.bottom = (float)b; cur.top = (float)t;
 
-        ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, cur, base, identity, 0.85f);
+        ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, cur, base, identity,
+                     dx, dy, 0.85f);
     }
 
     // The texel straddling the edge must have converged to something between the two extremes.
@@ -428,6 +436,94 @@ bool CheckRealJitterAntiAliases(const GlComputeApi& gl, unsigned int readFbo) {
                "jittered accumulation resolves the edge texel to an intermediate value") && ok;
 
     delete[] depthPixels; delete[] frame;
+    gl.glDeleteTextures(1, &src); gl.glDeleteTextures(1, &dst);
+    gl.glDeleteTextures(1, &world); gl.glDeleteTextures(1, &capture);
+    gl.glDeleteTextures(1, &depth);
+    return ok;
+}
+
+// A steep gradient - 16 levels per column across the left sixteen columns, flat 255 after.
+// The alignment fixture below needs a much stronger local gradient than BuildRamp's four levels
+// per column: what a mis-aimed history fetch costs is (displacement x gradient), and the
+// variance clip caps the visible part of it at one standard deviation of the 3x3 neighbourhood,
+// which is itself proportional to the gradient. So the gradient is the only lever that widens
+// the gap between "aimed correctly" and "aimed one jitter away".
+void BuildSteepRamp(unsigned char* pixels, int width, int height) {
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            size_t i = ((size_t)y * width + x) * 4;
+            int value = x * 16;
+            if (value > 255) { value = 255; }
+            unsigned char v = (unsigned char)value;
+            pixels[i + 0] = v; pixels[i + 1] = v; pixels[i + 2] = v; pixels[i + 3] = 255;
+        }
+    }
+}
+
+// THE FETCH IS AIMED AT THE PIXEL GRID, NOT AT THE SCENE POINT. A jittered current frustum, an
+// unjittered previous one, an identity reprojection and unchanging content: the camera has not
+// moved, so every pixel must resolve against its OWN history and the frame must not drift at
+// all. This is the one case the other four fixtures cannot see - three of them pass `proj, proj`
+// so there is no jitter to mis-handle, and the anti-aliasing fixture's 20..235 band is orders of
+// magnitude too wide for a quarter-pixel bias.
+//
+// Unprojecting with the jittered frustum and projecting into the unjittered one answers "where
+// was this scene point last frame", which is one jitter away from "where was this pixel last
+// frame". Leave that in and the fetch lands at uv + jx/width every single frame; the history
+// recursion turns a constant sub-pixel offset into a standing displacement of blend/(1-blend)
+// times it, bounded only by the variance clip.
+//
+// A CONSTANT offset is used rather than the Halton cycle on purpose: a cycling offset partly
+// averages out, while a constant one drives the error to a steady value that either is or is
+// not there. kAlignFrames is generous for the same reason the anti-aliasing fixture's count is -
+// history inherited from the fixture before this one decays only 15% per call.
+bool CheckRealJitteredFetchStaysOnTheGrid(const GlComputeApi& gl, unsigned int readFbo) {
+    bool ok = true;
+    const int n = kRealW * kRealH;
+    const int kAlignFrames = 24;
+    const int kProbeX = 8;          // inside the steep stretch, clear of both ends
+    const int kProbeY = 32;
+    const float kConstantJitterPx = 0.375f;   // a value the real Halton sequence does produce
+
+    unsigned int src = CreatePipelineTexture(gl, kRealW, kRealH);
+    unsigned int dst = CreatePipelineTexture(gl, kRealW, kRealH);
+    unsigned int world = CreatePipelineTexture(gl, kRealW, kRealH);
+    unsigned int capture = CreatePipelineTexture(gl, kRealW, kRealH);
+    unsigned int depth = CreateDepthTexture(gl, kRealW, kRealH);
+
+    unsigned char* ramp = new unsigned char[(size_t)n * 4];
+    BuildSteepRamp(ramp, kRealW, kRealH);
+    UploadRgba(gl, src, kRealW, kRealH, ramp);
+    UploadRgba(gl, world, kRealW, kRealH, ramp);
+    UploadRgba(gl, capture, kRealW, kRealH, ramp);   // capture == world: no HUD anywhere
+
+    float* depthPixels = new float[n];
+    FillDepth(depthPixels, n);
+    UploadDepth(gl, depth, kRealW, kRealH, depthPixels);
+
+    const ProjectionParams base = RealProjection();
+    float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+
+    double l = base.left, r = base.right, b = base.bottom, t = base.top;
+    float dx = 0.0f, dy = 0.0f;
+    JitterFrustumBounds(l, r, b, t, kConstantJitterPx, 0.0f, kRealW, kRealH, dx, dy);
+    ProjectionParams jittered = base;
+    jittered.left = (float)l; jittered.right = (float)r;
+    jittered.bottom = (float)b; jittered.top = (float)t;
+
+    for (int call = 0; call < kAlignFrames; ++call) {
+        ApplyTaaReal(src, dst, depth, world, capture, kRealW, kRealH, jittered, base, identity,
+                     dx, dy, 0.85f);
+    }
+
+    const unsigned char out = ReadR(gl, readFbo, dst, kProbeX, kProbeY);
+    const unsigned char expected = ramp[(((size_t)kProbeY * kRealW) + kProbeX) * 4];
+    printf("Static camera under a constant %.3f px jitter: probe=%d, current frame=%d\n",
+           kConstantJitterPx, out, expected);
+    ok = Check(out <= expected + 1 && out + 1 >= expected,
+               "a jittered frustum with a static camera still resolves onto the same pixel") && ok;
+
+    delete[] ramp; delete[] depthPixels;
     gl.glDeleteTextures(1, &src); gl.glDeleteTextures(1, &dst);
     gl.glDeleteTextures(1, &world); gl.glDeleteTextures(1, &capture);
     gl.glDeleteTextures(1, &depth);
@@ -631,6 +727,7 @@ int main() {
     ok = CheckRealStationaryCameraIsStable(gl, readFbo) && ok;
     ok = CheckRealOffscreenHistoryIsRejected(gl, readFbo) && ok;
     ok = CheckRealJitterAntiAliases(gl, readFbo) && ok;
+    ok = CheckRealJitteredFetchStaysOnTheGrid(gl, readFbo) && ok;
 
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);

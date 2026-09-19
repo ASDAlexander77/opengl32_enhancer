@@ -615,8 +615,9 @@ void ApplySelectedEffect(void* hdc) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
                        "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/fog/ssr/motionblur/depthvignette "
-                       "BEFORE bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
+                       "stage is being skipped. List ssao/dof/fog/ssr/motionblur/depthvignette/"
+                       "taa BEFORE bilinear/nvscaler/fsr in effect= instead.\n",
+                       EffectNameFor(stage));
                 warnedDepthAfterUpscale = true;
             }
             continue;
@@ -754,11 +755,21 @@ void ApplySelectedEffect(void* hdc) {
                             taaPrev.top -= prevDy;
                         }
 
+                        // THIS frame's offset, by contrast, stays on taaCur - the depth
+                        // buffer really was rendered with the jittered frustum - and is handed
+                        // over separately so the resolve can take it back off the history fetch
+                        // coordinate. Unprojecting jittered and projecting unjittered finds the
+                        // scene point; history is indexed on the pixel grid, and the two differ
+                        // by exactly this. It is the one legitimate use of GetTaaJitterApplied
+                        // here, as against GetPreviousTaaJitterApplied above.
+                        float curDx = 0.0f, curDy = 0.0f;
+                        GetTaaJitterApplied(curDx, curDy);
+
                         float taaReprojection[16];
                         MotionBlurReprojection(taaCamCur, taaCamPrev, taaReprojection);
                         wrote = ApplyTaaReal(src, dst, g_pipeline.depthTex, taaWorldTex,
                                              g_pipeline.captureTex, dstW, dstH, taaCur, taaPrev,
-                                             taaReprojection, config.taaBlend);
+                                             taaReprojection, curDx, curDy, config.taaBlend);
                         ranReal = wrote;
                     }
                 }

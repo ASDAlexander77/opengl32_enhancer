@@ -138,6 +138,7 @@ const char* kTaaRealShaderSource =
     "    vec4 prevFrustum;\n"      // left, right, bottom, top - UNJITTERED, matches resolved history
     "    vec4 planes;\n"           // curNear, curFar, prevNear, blend
     "    int historyValid;\n"
+    "    vec2 curJitterUv;\n"      // this frame's jitter, in UV, removed from the fetch below
     "    mat4 reprojection;\n"     // previous * inverse(current)
     "};\n"
     "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
@@ -187,7 +188,18 @@ const char* kTaaRealShaderSource =
     "        imageStore(historyImage, coord, src);\n"
     "        return;\n"
     "    }\n"
-    "    vec2 histUv = UvForViewPos(prevFrustum, before, planes.z);\n"
+    // Unprojecting with the JITTERED current frustum and projecting into the UNJITTERED
+    // previous one answers "where was this scene point last frame" - a scene-space motion
+    // vector. But history is indexed on the PIXEL GRID, and the scene point sampled at this
+    // pixel sits curJitterUv away from the pixel centre, so that answer is off by exactly the
+    // current frame's jitter. Taking it back off is what makes a static camera fetch each
+    // pixel's own history: without it the fetch lands at uv + jx/width every frame, and the
+    // recursion D <- blend * (D + j) turns that into a standing sub-pixel displacement - the
+    // permanent wobble taa.h warns about, reached by single-counting the offset rather than
+    // double-counting it. Standard TAA computes its velocity with both ends unjittered and
+    // gets zero for a static camera; this subtraction is the same thing, applied after the
+    // unprojection because the depth being unprojected really was rendered jittered.
+    "    vec2 histUv = UvForViewPos(prevFrustum, before, planes.z) - curJitterUv;\n"
     // Off screen last frame means there is no history for this pixel - not history worth
     // clamping. Sampling anyway would drag an edge texel across the whole border.
     "    if (histUv.x < 0.0 || histUv.x > 1.0 || histUv.y < 0.0 || histUv.y > 1.0) {\n"
@@ -218,16 +230,19 @@ const char* kTaaRealShaderSource =
     "    imageStore(historyImage, coord, out4);\n"
     "}\n";
 
-// std140 layout for TaaRealConfigBlock above: vec4 and mat4 are both 16-byte aligned, so the
-// lone int needs three words of padding before the mat4 or the matrix would land four bytes
-// early.
+// std140 layout for TaaRealConfigBlock above, offsets in bytes: the three vec4s occupy 0..47,
+// the int sits at 48, the vec2 is 8-byte aligned so it starts at 56 (one word of padding), and
+// the mat4 is 16-byte aligned so it starts at 64. The vec2 therefore lands exactly in the hole
+// the int left behind and costs nothing. Get the padding wrong and the matrix starts twelve
+// bytes early, at 52.
 struct TaaRealConfigData {
-    float curFrustum[4];
-    float prevFrustum[4];
-    float planes[4];        // curNear, curFar, prevNear, blend
-    int32_t historyValid;
-    int32_t pad[3];
-    float reprojection[16];
+    float curFrustum[4];    // 0
+    float prevFrustum[4];   // 16
+    float planes[4];        // 32 - curNear, curFar, prevNear, blend
+    int32_t historyValid;   // 48
+    int32_t pad;            // 52
+    float curJitterUv[2];   // 56
+    float reprojection[16]; // 64
 };
 
 struct TaaState {
@@ -434,6 +449,7 @@ bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
                   const ProjectionParams& currentProjection,
                   const ProjectionParams& previousProjection,
                   const float reprojection[16],
+                  float currentJitterDx, float currentJitterDy,
                   float blend) {
     // Same refusals as every other stage here: no inputs invented, no guessing. A caller that
     // gets false must leave dstTexture alone rather than treating it as the new source.
@@ -506,6 +522,12 @@ bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
     configData.planes[2] = previousProjection.zNear;
     configData.planes[3] = blend;
     configData.historyValid = g_state.historyValid ? 1 : 0;
+    // Frustum units into UV: the jittered and unjittered frusta have the same extent (jitter
+    // translates the window, it does not resize it), so either one divides correctly here.
+    configData.curJitterUv[0] =
+        currentJitterDx / (currentProjection.right - currentProjection.left);
+    configData.curJitterUv[1] =
+        currentJitterDy / (currentProjection.top - currentProjection.bottom);
     for (int i = 0; i < 16; ++i) {
         configData.reprojection[i] = reprojection[i];
     }

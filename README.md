@@ -193,6 +193,12 @@ a pixel's history weight the larger its raw frame-to-frame difference is, so a
 cut or a snap-turn converges in about one frame rather than trailing for
 several.
 
+List `taa` **before** `bilinear`/`nvscaler`/`fsr`. Its reprojected path reads
+the game's depth buffer, which only exists at the game's own render resolution,
+so listed after one of those while it is doing a real upscale (windowWidth/
+windowHeight larger than the game's mode) the stage is skipped outright and says
+so in the log — the same rule `ssao`/`ssr`/`motionblur` already follow.
+
 Because history is resampled and re-filtered every frame, `taa` softens the
 image a little. The conventional remedy is a mild sharpener listed **after**
 it — `effect=..., taa, cas, ...`. Note this is the exact opposite of
@@ -541,7 +547,7 @@ ditherStrength=0.7
 simulation:
 
 ```ini
-effect=bilinear, fsr, bloom, acestonemap, lutgrading, vignette, chromaticaberration, taa, dither
+effect=taa, bilinear, fsr, bloom, acestonemap, lutgrading, vignette, chromaticaberration, dither
 scale=1.0
 bloomThreshold=0.8
 bloomIntensity=0.5
