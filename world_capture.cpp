@@ -105,26 +105,30 @@ void LatchWorldFrame() {
     int savedReadFbo = 0;
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
 
-    EnsureTexture(gl, viewport[2], viewport[3]);
-
-    // Drain anything the app left pending before touching the copy's own error. glGetError()
-    // reports the first error since it was last called, with no notion of who caused it: without
-    // this, an error the GAME left pending here is misread as the copy's own failure, and worse,
+    // Drain anything the app left pending before ANY of this module's own GL calls, including
+    // EnsureTexture()'s glTexStorage2D on a resize - not just the copy below. glGetError()
+    // reports the first error since it was last called, with no notion of who caused it: placed
+    // after EnsureTexture(), a storage allocation failure of OUR OWN would itself be drained and
+    // logged as "the app had glGetError() pending", blaming the game for our own fault. Draining
+    // here, before either call, keeps that from happening while still fixing the original
+    // problem: an error the GAME left pending is misread as this module's own failure, and worse,
     // reading it CLEARS the flag - so a Quake II-family engine's own GL_CheckErrors() call after
-    // R_SetGL2D would silently lose an error it would otherwise have reported. Draining it here
-    // and logging once (same pattern as post_effects.cpp's pending-error drain around its own
-    // capture) fixes both: the real result is read afterward, and the game keeps seeing its own
-    // errors. See world_capture.h.
+    // R_SetGL2D would silently lose an error it would otherwise have reported. Logging once (same
+    // pattern as post_effects.cpp's pending-error drain around its own capture) fixes both: the
+    // real result of each of this module's OWN calls is read afterward, and the game keeps seeing
+    // its own errors. See world_capture.h.
     unsigned int pendingErr = gl.glGetError();
     if (pendingErr != GL_NO_ERROR) {
         static bool warnedPending = false;
         if (!warnedPending) {
             printf("[opengl32_enh_cpp] world_capture: the app had glGetError() = 0x%04X pending "
-                   "before this copy; draining it so it is not blamed on the capture\n",
+                   "before this capture; draining it so it is not blamed on us\n",
                    pendingErr);
             warnedPending = true;
         }
     }
+
+    EnsureTexture(gl, viewport[2], viewport[3]);
 
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl.glReadBuffer(GL_BACK);

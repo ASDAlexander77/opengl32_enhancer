@@ -82,8 +82,8 @@ const char* kMotionBlurShaderSource =
     "    if (before.z > -params.x) { imageStore(outputImage, coord, src); return; }\n"
     "    vec2 velocity = (uv - UvForViewPos(before, params.x)) * params.z;\n"
     "    float len = length(velocity);\n"
-    // A cost saving, not a correctness guarantee: a still camera or strength=0 - the common case
-    // across a static scene - makes velocity IEEE-754-exact zero, which sends every one of the 7
+    // A cost saving, not a correctness guarantee: a still camera - the common case across a
+    // static scene - makes velocity IEEE-754-exact zero, which sends every one of the 7
     // taps below to the same texel as this pixel's own centre regardless of whether this early-out
     // runs, so deleting it changes no output pixel. The same holds for any len just under 1e-6,
     // not only exactly zero: 1e-6 in uv space is roughly 1e-4 px at this file's 128px test width

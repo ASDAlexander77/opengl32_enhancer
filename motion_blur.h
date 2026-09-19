@@ -34,7 +34,9 @@ void MotionBlurReprojection(const CameraMatrix& current, const CameraMatrix& pre
 // possible at all. reprojection is MotionBlurReprojection()'s 16 floats.
 //
 // strength is GetAnaxConfig().motionBlurStrength, 0..1: a multiplier on the measured
-// screen-space velocity. 0 reproduces the input bit-exact. maxRadius is
+// screen-space velocity. 0 declines outright and returns false without writing dstTexture at
+// all - see the return contract below, not "reproduces the input bit-exact": there is no input
+// reproduced into dst for a caller to read. maxRadius is
 // GetAnaxConfig().motionBlurMaxRadius, a fraction of the screen: the longest smear allowed.
 // That clamp is not a tuning nicety - on a scene cut or teleport the inter-frame camera delta
 // is enormous and would smear the whole screen, and the clamp bounds that without needing cut
