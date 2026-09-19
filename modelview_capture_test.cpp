@@ -411,6 +411,34 @@ int main() {
         Check(got && Vec3NearlyEqual(pose.position, 128.0f, -64.0f, 48.0f, 1e-2f),
               "DecomposeCamera: recovers the eye position from a real R_SetupGL matrix");
 
+        // The eye check above pins only the translation half, and the identity check pins nothing
+        // a transposed basis would fail - the identity matrix is symmetric. So cross-check the
+        // basis against the captured matrix itself, on an asymmetric camera: transforming a world
+        // point BY the matrix must agree with projecting that point onto the decomposed axes. A
+        // row/column transposition, or a sign error in `forward`, breaks this and nothing else in
+        // the suite would notice.
+        if (got) {
+            const float px = 200.0f, py = 50.0f, pz = 10.0f;
+            const float* m = camera.m;
+            const float viaMatrixX = m[0] * px + m[4] * py + m[8]  * pz + m[12];
+            const float viaMatrixY = m[1] * px + m[5] * py + m[9]  * pz + m[13];
+            const float viaMatrixZ = m[2] * px + m[6] * py + m[10] * pz + m[14];
+
+            const float dx = px - pose.position[0];
+            const float dy = py - pose.position[1];
+            const float dz = pz - pose.position[2];
+            const float viaPoseX =   pose.right[0]   * dx + pose.right[1]   * dy + pose.right[2]   * dz;
+            const float viaPoseY =   pose.up[0]      * dx + pose.up[1]      * dy + pose.up[2]      * dz;
+            const float viaPoseZ = -(pose.forward[0] * dx + pose.forward[1] * dy + pose.forward[2] * dz);
+
+            printf("  world point via matrix = %.3f/%.3f/%.3f, via pose = %.3f/%.3f/%.3f\n",
+                   viaMatrixX, viaMatrixY, viaMatrixZ, viaPoseX, viaPoseY, viaPoseZ);
+            Check(NearlyEqual(viaMatrixX, viaPoseX, 5e-2f) &&
+                  NearlyEqual(viaMatrixY, viaPoseY, 5e-2f) &&
+                  NearlyEqual(viaMatrixZ, viaPoseZ, 5e-2f),
+                  "DecomposeCamera: the recovered basis agrees with the matrix on an asymmetric camera");
+        }
+
         AdvanceCameraHistory();
     }
 
