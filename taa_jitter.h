@@ -9,8 +9,8 @@
 // recording-only by design and says so. Jitter cannot be: without it TAA has nothing to
 // resolve, and it can only be applied at the moment the game establishes its projection.
 //
-// The maths below is pure and lives here so it can be checked without a GL context; the
-// per-frame state and the arming rule are in taa_jitter.cpp.
+// The maths below is pure so it can be checked without a GL context, and this module is also
+// where the per-frame offset and the rule that gates it belong.
 
 // The offset for a frame, in PIXELS, within +/-0.5 of the pixel centre. Halton(2,3) with a
 // period of 8: low-discrepancy, so eight consecutive frames cover the pixel far more evenly
