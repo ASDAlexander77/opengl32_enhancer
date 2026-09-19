@@ -37,6 +37,10 @@ const char* const kManagedKeys[] = {
     "shaftsDensity",
     "shaftsDecay",
     "shaftsThreshold",
+    "ssrIntensity",
+    "ssrMaxDistance",
+    "ssrThickness",
+    "ssrUpThreshold",
     "gamma",
     "brightness",
     "depthVignetteIntensity",
@@ -108,6 +112,10 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "shaftsDensity") == 0)               { out = FormatFloat(config.shaftsDensity); return true; }
     if (strcmp(key, "shaftsDecay") == 0)                 { out = FormatFloat(config.shaftsDecay); return true; }
     if (strcmp(key, "shaftsThreshold") == 0)             { out = FormatFloat(config.shaftsThreshold); return true; }
+    if (strcmp(key, "ssrIntensity") == 0)                { out = FormatFloat(config.ssrIntensity); return true; }
+    if (strcmp(key, "ssrMaxDistance") == 0)              { out = FormatFloat(config.ssrMaxDistance); return true; }
+    if (strcmp(key, "ssrThickness") == 0)                { out = FormatFloat(config.ssrThickness); return true; }
+    if (strcmp(key, "ssrUpThreshold") == 0)              { out = FormatFloat(config.ssrUpThreshold); return true; }
     if (strcmp(key, "gamma") == 0)                       { out = FormatFloat(config.gamma); return true; }
     if (strcmp(key, "brightness") == 0)                  { out = FormatFloat(config.brightness); return true; }
     if (strcmp(key, "depthVignetteIntensity") == 0)      { out = FormatFloat(config.depthVignetteIntensity); return true; }

@@ -39,6 +39,7 @@
 #include "dof.h"
 #include "fog.h"
 #include "light_shafts.h"
+#include "ssr.h"
 #include "ssao.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
@@ -638,6 +639,16 @@ void ApplySelectedEffect(void* hdc) {
                                           config.shaftsDensity, config.shaftsDecay,
                                           config.shaftsThreshold);
                 break;
+            case EffectKind::Ssr: {
+                // Reconstructs view-space positions and normals from depth, so it needs the
+                // projection for the same reason ssao does.
+                ProjectionParams ssrProjection;
+                wrote = depthCaptured && GetCapturedProjection(ssrProjection) &&
+                         ApplySsr(src, dst, g_pipeline.depthTex, dstW, dstH, ssrProjection,
+                                  config.ssrIntensity, config.ssrMaxDistance,
+                                  config.ssrThickness, config.ssrUpThreshold);
+                break;
+            }
             case EffectKind::Fog: {
                 // World-unit distances, so it needs the projection for the same reason dof does.
                 ProjectionParams fogProjection;

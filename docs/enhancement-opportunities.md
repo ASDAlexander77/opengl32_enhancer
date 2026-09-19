@@ -45,16 +45,27 @@ attachment the pipeline blits for it).
   centroid of the frame, so a large pale surface can drag the rays off the actual
   lamp (raise `shaftsThreshold`), and a light that is off-screen cannot be found
   at all. Notably this stage needs neither depth nor a projection.
-- **SSR (screen-space reflections).** Depth, colour, and normals reconstructed
-  from depth — `ssao.cpp` already does that reconstruction. The largest visible
-  change of the four, and the hardest to make look *right*: a GL 1.1 game
-  supplies no roughness or material signal, so nothing tells the shader what
-  should reflect. Needs a heuristic gate (near-horizontal surfaces, say), which
-  is a design risk rather than just shader work. Left until last for that
-  reason.
+- ~~**SSR (screen-space reflections).**~~ **Done** — `ssr.h`, shipped
+  2026-09-19. The heuristic gate this entry predicted would be needed is
+  `ssrUpThreshold`: only surfaces whose view-space normal points far enough
+  upward reflect. The design risk was real and did not go away, it was only
+  bounded and written down. It is a guess about *orientation* standing in for a
+  fact about *material*, so it is wrong in both directions — carpet reflects as
+  readily as marble, and a wall mirror does not reflect at all. Worse, "up" is
+  measured in view space, because the modelview matrix is exactly what this
+  proxy cannot see, so pitching the camera swings the gate off true. That makes
+  SSR the first shipped stage whose quality is directly capped by the missing
+  Tier 2 capture rather than merely inconvenienced by it.
 
-Risk: low. Cost: one stage each, same shape as the existing ones — both
-completed stages took one new `.cpp`/`.h`/`_test.cpp` plus registration in
+  Worth recording how the test was framed, since "the floor got brighter" would
+  have passed with the gate ignored entirely: `ssr_test.cpp` changes *nothing
+  but* `upThreshold` between two calls and requires the same floor pixel to go
+  from reflecting to bit-exact.
+
+**Tier 1 is now complete.** All four stages ship.
+
+Risk: low. Cost: one stage each, same shape as the existing ones — each
+completed stage took one new `.cpp`/`.h`/`_test.cpp` plus registration in
 `config.h`, `config.cpp`, `config_writer.cpp`, `post_effects.cpp`,
 `config_editor.cpp`, `CMakeLists.txt`, the `.ini` and the README. Note
 `config_writer.cpp`: it keeps an explicit key allow-list, and forgetting it
@@ -177,6 +188,8 @@ thing checked whenever "the resolution setting isn't working".
 2. **Modelview capture** (Tier 2) — unlocks the most, changes nothing on its own.
 3. **Pixel-format spike** (Tier 3) — cheap, and answers a question that gates a
    whole tier either way.
-4. Tier 1 stages as appetite allows; they are independent of everything above.
+4. ~~Tier 1 stages as appetite allows.~~ Done — all four shipped. Note that the
+   last of them (`ssr`) ended up *blocked in quality* on the Tier 2 capture,
+   which strengthens the case for item 2 rather than weakening it.
 
 Tier 5 only after Tier 2 lands.

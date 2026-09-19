@@ -55,7 +55,7 @@ const EffectKind kAllStages[] = {
     EffectKind::Bloom, EffectKind::AcesToneMap, EffectKind::LutGrading,
     EffectKind::Vignette, EffectKind::DepthVignette, EffectKind::ChromaticAberration,
     EffectKind::Taa, EffectKind::Smaa, EffectKind::Cas, EffectKind::Sharpen,
-    EffectKind::Dof, EffectKind::Fog, EffectKind::LightShafts,
+    EffectKind::Dof, EffectKind::Fog, EffectKind::LightShafts, EffectKind::Ssr,
     EffectKind::Gamma, EffectKind::Dither, EffectKind::Invert,
 };
 const int kAllStageCount = (int)(sizeof(kAllStages) / sizeof(kAllStages[0]));
@@ -179,6 +179,14 @@ void DrawParameters(AnaxConfig& config) {
         ImGui::SliderFloat("shaftsThreshold", &config.shaftsThreshold, 0.0f, 1.0f);
         ImGui::TextDisabled("lightshafts finds the light in the frame itself. Raise the");
         ImGui::TextDisabled("threshold if a bright wall is pulling the rays off the lamp.");
+        ImGui::Separator();
+        ImGui::SliderFloat("ssrIntensity", &config.ssrIntensity, 0.0f, 1.0f);
+        ImGui::SliderFloat("ssrMaxDistance", &config.ssrMaxDistance, 1.0f, 4096.0f);
+        ImGui::SliderFloat("ssrThickness", &config.ssrThickness, 0.1f, 256.0f);
+        ImGui::SliderFloat("ssrUpThreshold", &config.ssrUpThreshold, 0.0f, 1.0f);
+        ImGui::TextDisabled("ssr distances are in WORLD UNITS. ssrUpThreshold decides WHAT");
+        ImGui::TextDisabled("reflects: a GL 1.1 game has no material channel, so only");
+        ImGui::TextDisabled("upward-facing surfaces do. 1 gates everything off.");
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);

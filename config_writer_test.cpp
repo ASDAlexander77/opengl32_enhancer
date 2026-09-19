@@ -117,6 +117,9 @@ int main() {
     config.fogColorG = 0.33f;
     config.shaftsIntensity = 0.27f;
     config.shaftsDecay = 0.88f;
+    config.ssrIntensity = 0.31f;
+    config.ssrMaxDistance = 640.0f;
+    config.ssrUpThreshold = 0.55f;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -167,6 +170,12 @@ int main() {
                "float value round-tripped (shaftsIntensity)") && ok;
     ok = Check(reloaded.shaftsDecay > 0.87f && reloaded.shaftsDecay < 0.89f,
                "float value round-tripped (shaftsDecay)") && ok;
+    ok = Check(reloaded.ssrIntensity > 0.30f && reloaded.ssrIntensity < 0.32f,
+               "float value round-tripped (ssrIntensity)") && ok;
+    ok = Check(reloaded.ssrMaxDistance > 639.9f && reloaded.ssrMaxDistance < 640.1f,
+               "float value round-tripped (ssrMaxDistance)") && ok;
+    ok = Check(reloaded.ssrUpThreshold > 0.54f && reloaded.ssrUpThreshold < 0.56f,
+               "float value round-tripped (ssrUpThreshold)") && ok;
     ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
                "float value round-tripped (gamma)") && ok;
     ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,

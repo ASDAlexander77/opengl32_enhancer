@@ -31,6 +31,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Depth of field: dof](#depth-of-field-dof)
   - [Distance fog: fog](#distance-fog-fog)
   - [Light shafts: lightshafts](#light-shafts-lightshafts)
+  - [Screen-space reflections: ssr](#screen-space-reflections-ssr)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
@@ -105,6 +106,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `dof` | Depth of field — blurs whatever is not at the focus distance |
 | `fog` | Per-pixel distance fog — fades distance toward a colour |
 | `lightshafts` | Volumetric god rays radiating from the brightest thing in frame |
+| `ssr` | Screen-space reflections in upward-facing surfaces |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
@@ -311,6 +313,46 @@ Raise it until only genuine highlights qualify.
 The honest limitation: when the light is off-screen there is nothing in the frame to find, which
 is exactly when a real engine would still draw shafts. That is inherent to detecting from the
 image rather than being told by the renderer, and no threshold fixes it.
+
+### Screen-space reflections: `ssr`
+
+Upward-facing surfaces pick up a mirrored image of whatever is already on screen above them:
+floors catch the room, water catches the sky.
+
+The trace itself is the easy part, and reuses `ssao`'s reconstruction exactly — raw depth
+unprojects to a view-space position, neighbouring positions give a normal, the view vector
+reflects about it, and the ray is marched 32 steps. Each step is projected back to a screen
+coordinate; when the ray passes *behind* what the depth buffer says is there, it has hit, and
+that pixel is the reflection.
+
+The hard part is knowing **what should reflect at all**. A real engine reads a roughness or
+material channel per pixel. A GL 1.1 game supplies nothing of the kind — there is no signal
+anywhere in the frame that says "marble" rather than "carpet". So this stage guesses from
+geometry: `ssrUpThreshold` is a minimum upward tilt, and only surfaces above it reflect, on the
+reasoning that floors, water and polished tables are what a player expects a reflection in.
+
+| Setting | What it does |
+| --- | --- |
+| `ssrIntensity` | `0`..`1`, how strongly a reflection is blended over the surface. `0` is an exact no-op and is the default |
+| `ssrMaxDistance` | World units, how far a ray may travel. The step count is fixed, so raising this lengthens each step: more reach, less precision |
+| `ssrThickness` | World units, how far behind a surface a ray may be and still count as hitting it. Too small is patchy, too large latches onto the background |
+| `ssrUpThreshold` | `0`..`1`, the minimum upward tilt for a surface to reflect. `0` is everything facing up at all, `1` turns the stage off without unlisting it |
+
+Three honest limitations, all consequences of that one guess:
+
+- It is a guess about **orientation standing in for a fact about material**, so it is wrong in
+  both directions: carpet reflects as readily as marble, and a mirror hung on a wall does not
+  reflect at all.
+- "Up" is measured in **view space**, because a `wglSwapBuffers` proxy never sees the modelview
+  matrix (see `docs/enhancement-opportunities.md`, Tier 2). So it means "up from the camera's
+  point of view", and pitching the camera up or down swings the gate off true. Levelling out
+  restores it.
+- Only what is **already on screen** can be reflected. Geometry behind the camera or off the
+  frame edge has no pixels to gather, which is why reflections fade toward the border rather than
+  ending abruptly.
+
+Fixing the second one properly needs the modelview capture described in the roadmap; the first
+needs material information the game does not have.
 
 ### Local contrast: `localcontrast`
 

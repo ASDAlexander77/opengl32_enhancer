@@ -30,6 +30,7 @@ enum class EffectKind {
     Dof,
     Fog,
     LightShafts,
+    Ssr,
     Gamma,
 };
 
@@ -102,6 +103,18 @@ struct AnaxConfig {
     float shaftsDensity = 0.6f;                // LightShafts
     float shaftsDecay = 0.96f;                 // LightShafts
     float shaftsThreshold = 0.75f;             // LightShafts
+
+    // Ssr. ssrMaxDistance and ssrThickness are in the GAME'S OWN WORLD UNITS, like ssaoRadius
+    // and dof's distances. ssrUpThreshold is the heuristic that stands in for the material
+    // information a GL 1.1 game never supplies: nothing in the frame says "this is polished
+    // marble and that is carpet", so instead only surfaces facing far enough UP reflect at all.
+    // See ssr.h for what that costs. ssrIntensity defaults to 0 for the same reason fog's does -
+    // reflections are a strong stylistic change, so listing the stage must alter nothing until
+    // it is asked to.
+    float ssrIntensity = 0.0f;                 // Ssr, 0 = exact no-op
+    float ssrMaxDistance = 512.0f;             // Ssr
+    float ssrThickness = 16.0f;                // Ssr
+    float ssrUpThreshold = 0.7f;               // Ssr
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact

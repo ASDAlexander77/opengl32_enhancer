@@ -120,6 +120,7 @@ const StageName kStageNames[] = {
     {EffectKind::Dof,                 "dof"},
     {EffectKind::Fog,                 "fog"},
     {EffectKind::LightShafts,         "lightshafts"},
+    {EffectKind::Ssr,                 "ssr"},
     {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
@@ -493,6 +494,16 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.shaftsDecay = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsDecay, "shaftsDecay");
         } else if (strcmp(key, "shaftsThreshold") == 0) {
             config.shaftsThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.shaftsThreshold, "shaftsThreshold");
+        } else if (strcmp(key, "ssrIntensity") == 0) {
+            config.ssrIntensity = ParseClampedFloat(value, 0.0f, 1.0f, config.ssrIntensity, "ssrIntensity");
+        } else if (strcmp(key, "ssrMaxDistance") == 0) {
+            // World units, like dofFocusDistance - see config.h. A ray longer than the map is
+            // just wasted marching, so the ceiling matches the other world-unit distances.
+            config.ssrMaxDistance = ParseClampedFloat(value, 1.0f, 16384.0f, config.ssrMaxDistance, "ssrMaxDistance");
+        } else if (strcmp(key, "ssrThickness") == 0) {
+            config.ssrThickness = ParseClampedFloat(value, 0.1f, 4096.0f, config.ssrThickness, "ssrThickness");
+        } else if (strcmp(key, "ssrUpThreshold") == 0) {
+            config.ssrUpThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.ssrUpThreshold, "ssrUpThreshold");
         } else if (strcmp(key, "ssaoRadius") == 0) {
             // World units, so the upper bound is deliberately far above the 0..1 most values
             // here use - see config.h. 512 is well past useful for a Quake II-scale map and
@@ -550,6 +561,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "dofFocusDistance=%.3f, dofFocusRange=%.3f, dofBlurStrength=%.3f, "
            "fogStart=%.3f, fogEnd=%.3f, fogIntensity=%.3f, fogColor=%.2f/%.2f/%.2f, "
            "shaftsIntensity=%.3f, shaftsDensity=%.3f, shaftsDecay=%.3f, shaftsThreshold=%.3f, "
+           "ssrIntensity=%.3f, ssrMaxDistance=%.3f, ssrThickness=%.3f, ssrUpThreshold=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', "
@@ -568,6 +580,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.fogStart, config.fogEnd, config.fogIntensity,
            config.fogColorR, config.fogColorG, config.fogColorB,
            config.shaftsIntensity, config.shaftsDensity, config.shaftsDecay, config.shaftsThreshold,
+           config.ssrIntensity, config.ssrMaxDistance, config.ssrThickness, config.ssrUpThreshold,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath,
