@@ -187,6 +187,19 @@ void DrawParameters(AnaxConfig& config) {
         ImGui::TextDisabled("ssr distances are in WORLD UNITS. ssrUpThreshold decides WHAT");
         ImGui::TextDisabled("reflects: a GL 1.1 game has no material channel, so only");
         ImGui::TextDisabled("upward-facing surfaces do. 1 gates everything off.");
+        // ssrWorldUpAxis has no control here on purpose (see config_writer_test.cpp's
+        // unmanaged-key test): it is a per-engine fact, not something tuned by eye, and this
+        // editor could not help anyway - it has no captured camera, so the control would
+        // visibly do nothing.
+        //
+        // motionBlurStrength/motionBlurMaxRadius are absent for the identical reason, one level
+        // further up the call chain: editor_scene.cpp calls CaptureProjectionFrustum()
+        // DIRECTLY rather than through the wrapper's glFrustum hook, so this editor never calls
+        // NotifyWorldProjection()/NotifyWorldPassBegan() and therefore has no captured camera
+        // and no world-only frame (see world_capture.h). GetCapturedCamera(), GetPreviousCamera()
+        // and GetWorldOnlyFrame() all return false here, which makes motionblur provably no-op
+        // in this editor - unlike ssrWorldUpAxis, though, these two ARE managed by the writer
+        // (see config_writer.cpp), since a user editing them by hand must not lose them on save.
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);

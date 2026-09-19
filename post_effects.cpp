@@ -41,6 +41,8 @@
 #include "light_shafts.h"
 #include "ssr.h"
 #include "ssao.h"
+#include "motion_blur.h"
+#include "world_capture.h"
 #include "modelview_capture.h"
 #include "projection_capture.h"
 #include "frame_dump.h"
@@ -116,6 +118,15 @@ struct PipelineTextures {
     int depthWidth = 0;
     int depthHeight = 0;
 
+    // The pristine back-buffer capture, kept only when a stage that needs the UNMODIFIED frame
+    // is listed. By the time such a stage runs, the ping-pong buffers have been through ssao
+    // and whatever else precedes it, so the frame as the game drew it has to be held
+    // separately. Same native-resolution reasoning as depthTex. See motion_blur.h on what it
+    // is compared against.
+    unsigned int captureTex = 0;
+    int captureWidth = 0;
+    int captureHeight = 0;
+
     // A second ping-pong pair, sized at the game's own native render resolution, that only
     // exists while that native resolution is smaller than the real window (see
     // ApplySelectedEffect()): the initial capture and any stage listed before the upscaler run
@@ -162,7 +173,7 @@ unsigned int CreateDepthTexture(const GlComputeApi& gl, int width, int height) {
 // itself renders, which is what turns an upscale-capable stage into a REAL upscale rather than
 // the same-size preview `scale` alone gives (see ApplySelectedEffect()'s header comment).
 void EnsurePipelineTextures(const GlComputeApi& gl, int nativeWidth, int nativeHeight,
-                             int dstWidth, int dstHeight, bool needDepth) {
+                             int dstWidth, int dstHeight, bool needDepth, bool needCapture) {
     // A context change invalidates every cached texture/FBO. Drop the handles rather than
     // deleting them (the owning context freed them already, and glDelete* now would hit
     // unrelated objects in the current context); everything below then recreates them.
@@ -224,6 +235,20 @@ void EnsurePipelineTextures(const GlComputeApi& gl, int nativeWidth, int nativeH
         gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_pipeline.depthTex, 0);
         g_pipeline.depthWidth = nativeWidth;
         g_pipeline.depthHeight = nativeHeight;
+    }
+
+    // Same native-resolution, allocate-only-when-needed treatment as depthTex above, but a
+    // plain RGBA16F color texture (via CreatePipelineTexture, matching world_capture.cpp's
+    // format exactly) rather than a depth attachment - see captureTex's comment on
+    // PipelineTextures.
+    if (needCapture && (g_pipeline.captureTex == 0 || g_pipeline.captureWidth != nativeWidth ||
+                         g_pipeline.captureHeight != nativeHeight)) {
+        if (g_pipeline.captureTex != 0) {
+            gl.glDeleteTextures(1, &g_pipeline.captureTex);
+        }
+        g_pipeline.captureTex = CreatePipelineTexture(gl, nativeWidth, nativeHeight);
+        g_pipeline.captureWidth = nativeWidth;
+        g_pipeline.captureHeight = nativeHeight;
     }
 }
 
@@ -298,6 +323,7 @@ bool StageNeedsDepth(EffectKind stage) {
         case EffectKind::Dof:
         case EffectKind::Fog:
         case EffectKind::Ssr:
+        case EffectKind::MotionBlur:
             return true;
         default:
             return false;
@@ -444,7 +470,8 @@ void ApplySelectedEffect(void* hdc) {
             break;
         }
     }
-    EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth);
+    bool needCapture = HasEffectStage(config, EffectKind::MotionBlur);
+    EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth, needCapture);
 
     auto restoreState = [&]() {
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
@@ -471,6 +498,11 @@ void ApplySelectedEffect(void* hdc) {
     gl.glReadBuffer(GL_BACK);
     gl.glBindTexture(GL_TEXTURE_2D, pair[0]);
     gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
+
+    if (needCapture && g_pipeline.captureTex != 0) {
+        gl.glBindTexture(GL_TEXTURE_2D, g_pipeline.captureTex);
+        gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
+    }
 
     unsigned int captureErr = gl.glGetError();
     if (captureErr != GL_NO_ERROR) {
@@ -678,6 +710,30 @@ void ApplySelectedEffect(void* hdc) {
                                   ssrWorldUpPtr,
                                   config.ssrIntensity, config.ssrMaxDistance,
                                   config.ssrThickness, config.ssrUpThreshold);
+                break;
+            }
+            case EffectKind::MotionBlur: {
+                // Needs four things the frame may not have: depth, a projection, both cameras,
+                // and a world-only capture. Any one missing no-ops the stage rather than
+                // guessing - see motion_blur.h.
+                ProjectionParams mbProjection;
+                CameraMatrix mbCurrent;
+                CameraMatrix mbPrevious;
+                unsigned int worldTex = 0;
+                int worldW = 0, worldH = 0;
+                if (depthCaptured && GetCapturedProjection(mbProjection) &&
+                    GetCapturedCamera(mbCurrent) && GetPreviousCamera(mbPrevious) &&
+                    GetWorldOnlyFrame(worldTex, worldW, worldH) &&
+                    worldW == dstW && worldH == dstH &&
+                    g_pipeline.captureTex != 0 &&
+                    g_pipeline.captureWidth == dstW && g_pipeline.captureHeight == dstH) {
+                    float reprojection[16];
+                    MotionBlurReprojection(mbCurrent, mbPrevious, reprojection);
+                    wrote = ApplyMotionBlur(src, dst, g_pipeline.depthTex, worldTex,
+                                            g_pipeline.captureTex, dstW, dstH, mbProjection,
+                                            reprojection, config.motionBlurStrength,
+                                            config.motionBlurMaxRadius);
+                }
                 break;
             }
             case EffectKind::Fog: {

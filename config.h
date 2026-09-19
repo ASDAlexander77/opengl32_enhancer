@@ -31,6 +31,7 @@ enum class EffectKind {
     Fog,
     LightShafts,
     Ssr,
+    MotionBlur,
     Gamma,
 };
 
@@ -122,6 +123,13 @@ struct AnaxConfig {
     // II-family engines (Anachronox included) use +Z, hence the default. Get it wrong and
     // reflections appear on walls instead of floors. See ssr.h.
     int ssrWorldUpAxis = 2;                    // Ssr
+
+    // MotionBlur. motionBlurMaxRadius is a fraction of the screen, not a world unit: it is the
+    // longest smear allowed, and it exists because a scene cut or a teleport produces an
+    // enormous inter-frame camera delta that would otherwise smear the whole frame. Clamping
+    // is cheaper and more predictable than trying to detect a cut. See motion_blur.h.
+    float motionBlurStrength = 0.5f;           // MotionBlur, 0 = exact no-op
+    float motionBlurMaxRadius = 0.05f;         // MotionBlur
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1
     // darkens them) and `brightness` a linear gain applied BEFORE it. Both default to an exact

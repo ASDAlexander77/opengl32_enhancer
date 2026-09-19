@@ -41,6 +41,8 @@ const char* const kManagedKeys[] = {
     "ssrMaxDistance",
     "ssrThickness",
     "ssrUpThreshold",
+    "motionBlurStrength",
+    "motionBlurMaxRadius",
     "gamma",
     "brightness",
     "depthVignetteIntensity",
@@ -116,6 +118,8 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "ssrMaxDistance") == 0)              { out = FormatFloat(config.ssrMaxDistance); return true; }
     if (strcmp(key, "ssrThickness") == 0)                { out = FormatFloat(config.ssrThickness); return true; }
     if (strcmp(key, "ssrUpThreshold") == 0)              { out = FormatFloat(config.ssrUpThreshold); return true; }
+    if (strcmp(key, "motionBlurStrength") == 0)          { out = FormatFloat(config.motionBlurStrength); return true; }
+    if (strcmp(key, "motionBlurMaxRadius") == 0)         { out = FormatFloat(config.motionBlurMaxRadius); return true; }
     if (strcmp(key, "gamma") == 0)                       { out = FormatFloat(config.gamma); return true; }
     if (strcmp(key, "brightness") == 0)                  { out = FormatFloat(config.brightness); return true; }
     if (strcmp(key, "depthVignetteIntensity") == 0)      { out = FormatFloat(config.depthVignetteIntensity); return true; }

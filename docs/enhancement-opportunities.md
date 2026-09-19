@@ -82,10 +82,28 @@ means the editor silently drops the new settings on save.
 **Done** — `modelview_capture.h`, shipped 2026-09-19. Design:
 `docs/superpowers/specs/2026-09-19-modelview-capture-design.md`.
 
-The capture is recording-only and nothing consumes it yet: SSR still measures
-its `up` gate in view space, TAA still uses its raw-difference heuristic. Those
-rewires are the next increment, deliberately separated so a capture bug shows
-up as a wrong number in a log rather than as a stage regression.
+The capture is recording-only. That "nothing consumes it yet" is now stale
+twice over: SSR's `up` gate was rewired onto it (see Tier 1 above, the
+`ssrWorldUpAxis` work), and camera motion blur (`motionblur`, shipped
+2026-09-19) is the second consumer — it reprojects each pixel between this
+frame's and the previous frame's captured camera. TAA still uses its raw
+frame-to-frame difference heuristic rather than the capture; that rewire
+remains open.
+
+Motion blur needed one more capture beyond the camera: `world_capture.h`,
+which latches a copy of the frame from before the HUD is drawn (at the first
+`glOrtho` of the frame, the same discrimination `projection_capture.h` and
+`modelview_capture.h` already make) so HUD/dialogue pixels can be excluded
+from the blur rather than smeared into the world behind them. That latch
+timing is the same kind of heuristic as the modelview capture's "when," and it
+carries the same caveat: confirmed by unit test and by reading the generated
+wrapper, **not yet confirmed in a running game**. Unlike the modelview
+capture's Anachronox validation recorded below, nobody has yet set
+`cameraLogInterval` and `effect=motionblur`, walked around, and looked at
+whether the HUD stays sharp while the world smears. Doing that is what would
+turn this from "unit-tested" into "confirmed," the same way the modelview
+capture went from a design assumption to the four corroborating log
+observations below.
 
 The predicted hazard was real and is handled rather than dodged. `glFrustum`
 arms a world pass and `glOrtho` disarms it — the same discrimination
@@ -209,9 +227,10 @@ thing checked whenever "the resolution setting isn't working".
 
 1. **Auto mipmap generation** (Tier 4) — smallest change, immediate benefit,
    and it completes a feature that already exists.
-2. ~~**Modelview capture** (Tier 2).~~ Done — see above. The consumers it
-   unlocks (SSR's world-space `up`, real TAA, motion blur, temporally
-   accumulated SSAO) are now each a separate, smaller piece of work.
+2. ~~**Modelview capture** (Tier 2).~~ Done — see above. Two of the consumers
+   it unlocks now ship (SSR's world-space `up`, camera `motionblur`); real
+   TAA and temporally accumulated SSAO remain separate, smaller pieces of
+   work.
 3. **Pixel-format spike** (Tier 3) — cheap, and answers a question that gates a
    whole tier either way.
 4. ~~Tier 1 stages as appetite allows.~~ Done — all four shipped. Note that the
