@@ -82,6 +82,12 @@ const char* kMotionBlurShaderSource =
     "    if (before.z > -params.x) { imageStore(outputImage, coord, src); return; }\n"
     "    vec2 velocity = (uv - UvForViewPos(before, params.x)) * params.z;\n"
     "    float len = length(velocity);\n"
+    // A cost saving, not a correctness guarantee: a still camera or strength=0 - the common case
+    // across a static scene - makes velocity IEEE-754-exact zero, which sends every one of the 7
+    // taps below to the same texel as this pixel's own centre regardless of whether this early-out
+    // runs. Deleting it changes no output pixel, so it is deliberately uncovered by a test - the
+    // bit-exactness a static scene needs is already guaranteed by the HUD and behind-near-plane
+    // early-outs above, which the tests do cover. Don't go looking for a test that kills this line.
     "    if (len < 1e-6) { imageStore(outputImage, coord, src); return; }\n"
     "    if (len > params.w) { velocity *= params.w / len; }\n"
     "    vec3 sum = src.rgb;\n"
