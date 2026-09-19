@@ -644,6 +644,14 @@ directly. Set `gl_driver` to the proxy, or leave it at its default of
 not expose the compute-shader support the effects need. This is expected on
 very old hardware, and on software renderers.
 
+**Depth-based stages (`ssao`, `dof`, `fog`, `ssr`) look wrong in one particular
+game.** These need to know where the camera is, which this proxy works out by
+watching the game's matrix calls — a heuristic about how the engine draws, not
+something it is told. Set `cameraLogInterval=60` in the ini, play for a few
+seconds, and read `opengl32_enhancer.log`: the logged position should slide as
+you walk and hold still as you turn. If it jumps around while you stand still,
+the capture is picking up something that is not the camera.
+
 ## Building from source
 
 Windows and MSVC only, targeting x86 (32-bit) — `wglSwapBuffers` interception

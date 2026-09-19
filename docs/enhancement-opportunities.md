@@ -71,33 +71,33 @@ completed stage took one new `.cpp`/`.h`/`_test.cpp` plus registration in
 `config_writer.cpp`: it keeps an explicit key allow-list, and forgetting it
 means the editor silently drops the new settings on save.
 
-## Tier 2 — capture the modelview matrix (recommended first)
+## Tier 2 — capture the modelview matrix
 
-`taa.h` states the limitation directly: *"this proxy has no access to the app's
-per-object motion vectors, unlike a real engine's TAA"*. That one missing input
-is what caps several shipped stages at once — the neighbourhood-clamp and
-raw-difference heuristics in `taa.cpp` exist entirely to work around it.
+**Done** — `modelview_capture.h`, shipped 2026-09-19. Design:
+`docs/superpowers/specs/2026-09-19-modelview-capture-design.md`.
 
-`glFrustum` is already recorded. Recording `glLoadMatrixf`, `glMultMatrixf`,
-`glLoadIdentity`, `glRotatef`, `glTranslatef` and `glScalef` as well would let
-the proxy reconstruct the **camera** matrix each frame, and camera motion
-vectors follow by reprojection. That unlocks:
+The capture is recording-only and nothing consumes it yet: SSR still measures
+its `up` gate in view space, TAA still uses its raw-difference heuristic. Those
+rewires are the next increment, deliberately separated so a capture bug shows
+up as a wrong number in a log rather than as a stage regression.
 
-- real TAA instead of TAA-lite
-- motion blur, currently impossible
-- temporally accumulated (much quieter) SSAO
-- the groundwork for frame generation
+The predicted hazard was real and is handled rather than dodged. `glFrustum`
+arms a world pass and `glOrtho` disarms it — the same discrimination
+`projection_capture.h` already made — and a second axis was needed on top:
+modelview edits count only at push/pop depth 0, because a Quake II frame
+overwrites the modelview once per entity. The matrix is read back from the
+driver with `glGetFloatv` rather than recomputed, so the captured value cannot
+drift from what the game's GL holds; the whole module decides *when*, never
+*what*.
 
-Why this one first: it is additive and recording-only, exactly like
-`projection_capture.cpp`, so it cannot change what the game renders; and it
-improves stages that already ship rather than adding new surface area.
-
-Known hazard: the same one `projection_capture.h` documents for `glFrustum` —
-id Tech 2-era engines draw the HUD last under an orthographic projection, so
-"the most recent matrix at swap time" is the HUD's, not the world's. The
-heuristic that solved it there (record at the point the engine establishes the
-3D view, ignore the 2D pass) will need an equivalent here, and it is the part
-most likely to be engine-specific.
+What remains a guess is the "when". It is validated against Quake II's
+`R_SetupGL` and against a real GL driver in `modelview_capture_test.cpp`, but
+**not yet against Anachronox** — `cameraLogInterval` exists so that check can
+be made, and it has not been made. An engine that builds its view matrix
+without `glFrustum`, or edits the modelview at depth 0 before its camera
+sequence, would defeat the heuristic. `GetCapturedCamera()` returns false in
+the first case rather than guessing; the second fails silently, and is the
+reason `cameraLogInterval` exists.
 
 ## Tier 3 — pixel format (blocked on a spike)
 
@@ -185,7 +185,9 @@ thing checked whenever "the resolution setting isn't working".
 
 1. **Auto mipmap generation** (Tier 4) — smallest change, immediate benefit,
    and it completes a feature that already exists.
-2. **Modelview capture** (Tier 2) — unlocks the most, changes nothing on its own.
+2. ~~**Modelview capture** (Tier 2).~~ Done — see above. The consumers it
+   unlocks (SSR's world-space `up`, real TAA, motion blur, temporally
+   accumulated SSAO) are now each a separate, smaller piece of work.
 3. **Pixel-format spike** (Tier 3) — cheap, and answers a question that gates a
    whole tier either way.
 4. ~~Tier 1 stages as appetite allows.~~ Done — all four shipped. Note that the

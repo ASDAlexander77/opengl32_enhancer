@@ -523,6 +523,9 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.frameDumpKey = ParseClampedInt(value, 0, 0xFE, config.frameDumpKey, "frameDumpKey", 0);
         } else if (strcmp(key, "frameDumpPath") == 0) {
             CopyStringValue(config.frameDumpPath, sizeof(config.frameDumpPath), value, "frameDumpPath");
+        } else if (strcmp(key, "cameraLogInterval") == 0) {
+            config.cameraLogInterval = ParseClampedInt(value, 0, 100000, config.cameraLogInterval,
+                                                       "cameraLogInterval");
         } else if (strcmp(key, "fxIndicator") == 0) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
         } else if (strcmp(key, "anisotropy") == 0) {
@@ -564,7 +567,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "ssrIntensity=%.3f, ssrMaxDistance=%.3f, ssrThickness=%.3f, ssrUpThreshold=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
-           "frameDumpKey=0x%02X, frameDumpPath='%s', "
+           "frameDumpKey=0x%02X, frameDumpPath='%s', cameraLogInterval=%d, "
            "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
@@ -583,7 +586,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.ssrIntensity, config.ssrMaxDistance, config.ssrThickness, config.ssrUpThreshold,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
-           config.frameDumpKey, config.frameDumpPath,
+           config.frameDumpKey, config.frameDumpPath, config.cameraLogInterval,
            config.fxIndicator ? "true" : "false", config.anisotropy,
            EffectNameFor(config.textureEffect));
     return config;

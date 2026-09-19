@@ -130,6 +130,13 @@ struct AnaxConfig {
     int frameDumpKey = 0x7B;                   // VK_F12
     char frameDumpPath[256] = "opengl32_enhancer_frame.dump";
 
+    // Prints the camera position and orientation that modelview_capture.h reconstructs to the
+    // debug log every N frames. 0 (default) is off. This exists because the capture's heuristic
+    // can only be CONFIRMED inside a real game - the unit tests show it behaves as designed,
+    // not that the engine does what the design assumes. Independent of the effect= pipeline,
+    // and of the capture itself, which always runs and costs one glGetFloatv per frame.
+    int cameraLogInterval = 0;
+
     // Forces trilinear + anisotropic filtering on the game's own mipmapped world/model
     // textures - see texture_filter.h. 0 (default) leaves every glTexParameter call the game
     // makes completely untouched; 1..16 is the anisotropy level to request (capped at runtime

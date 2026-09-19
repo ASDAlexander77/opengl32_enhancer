@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <cstdio>
 
+#include "config.h"
+#include "debug_log.h"
 #include "modelview_capture.h"
 
 namespace {
@@ -61,6 +63,7 @@ bool g_loggedFirst = false;
 // GL's initial matrix mode is GL_MODELVIEW, so that is the honest starting value.
 unsigned int g_matrixMode = kGlModelview;
 int g_modelviewDepth = 0;
+unsigned int g_frameCounter = 0;
 
 // Reads the driver's modelview matrix, if one is pending and none has been taken this frame.
 // Idempotent within a frame, which is what lets all three latch points call it unconditionally.
@@ -90,10 +93,35 @@ void LatchCamera() {
     g_pending = false;
 
     if (!g_loggedFirst) {
+        RedirectStdoutToDebugLog();
         printf("[opengl32_enh_cpp] modelview: captured first camera matrix, camera-relative "
                "stages can now be placed\n");
         g_loggedFirst = true;
     }
+}
+
+// The in-game half of this module's verification: the unit tests show the state machine behaves
+// as designed, but only a real game can show the design matched the engine. Walk a straight
+// line with this on and the logged position must track; turn on the spot and the basis must
+// swing while the position holds.
+void LogCameraIfDue() {
+    const int interval = GetAnaxConfig().cameraLogInterval;
+    if (interval <= 0 || !g_hasCurrent) {
+        return;
+    }
+    if (g_frameCounter % (unsigned int)interval != 0) {
+        return;
+    }
+    RedirectStdoutToDebugLog();
+
+    CameraPose pose;
+    DecomposeCamera(g_current, pose);
+    printf("[opengl32_enh_cpp] modelview: frame %u camera at %.1f/%.1f/%.1f, "
+           "forward %.3f/%.3f/%.3f, up %.3f/%.3f/%.3f\n",
+           g_frameCounter,
+           pose.position[0], pose.position[1], pose.position[2],
+           pose.forward[0], pose.forward[1], pose.forward[2],
+           pose.up[0], pose.up[1], pose.up[2]);
 }
 
 }  // namespace
@@ -147,6 +175,9 @@ void FinalizeCameraForFrame() {
 }
 
 void AdvanceCameraHistory() {
+    LogCameraIfDue();
+    ++g_frameCounter;
+
     if (g_latched) {
         g_previous = g_current;
         g_hasPrevious = true;
