@@ -417,6 +417,73 @@ bool CheckGpuMotionBlur() {
                    "toward the HUD's zero") && ok;
     }
 
+    // ApplyMotionBlur's return-value contract - "returns true ONLY if it actually wrote
+    // dstTexture" - had zero coverage above: every call so far discards the bool. Task 4 is
+    // about to swap its ping-pong buffer on that return value, so a stage that declines (a guard
+    // clause fires) but still reports true - or the reverse - would show garbage on screen. Each
+    // false case pre-fills dst with a sentinel color unrelated to anything else in this test and
+    // reads it back, so "dst was left untouched" is proven rather than assumed from the bool
+    // alone.
+    {
+        const unsigned char kSentinel[4] = {17, 201, 88, 233};
+        static unsigned char sentinelPixels[kWidth * kHeight * 4];
+        for (int i = 0; i < kWidth * kHeight; ++i) {
+            sentinelPixels[i * 4 + 0] = kSentinel[0];
+            sentinelPixels[i * 4 + 1] = kSentinel[1];
+            sentinelPixels[i * 4 + 2] = kSentinel[2];
+            sentinelPixels[i * 4 + 3] = kSentinel[3];
+        }
+
+        CameraMatrix current;
+        float identityReprojection[16];
+        MotionBlurReprojection(current, current, identityReprojection);
+
+        auto isSentinel = [&](const unsigned char px[4]) {
+            return px[0] == kSentinel[0] && px[1] == kSentinel[1] &&
+                   px[2] == kSentinel[2] && px[3] == kSentinel[3];
+        };
+
+        // depthTexture == 0.
+        {
+            UploadRgba(gl, dst, W, H, sentinelPixels);
+            bool wrote = ApplyMotionBlur(src, dst, 0, world, capture, W, H, projection,
+                                          identityReprojection, 0.5f, 0.05f);
+            unsigned char px[4]; ReadPixel(dst, 64, 64, px);
+            ok = Check(!wrote, "depthTexture == 0 returns false") && ok;
+            ok = Check(isSentinel(px), "depthTexture == 0 leaves dst untouched") && ok;
+        }
+
+        // width <= 0.
+        {
+            UploadRgba(gl, dst, W, H, sentinelPixels);
+            bool wrote = ApplyMotionBlur(src, dst, depth, world, capture, 0, H, projection,
+                                          identityReprojection, 0.5f, 0.05f);
+            unsigned char px[4]; ReadPixel(dst, 64, 64, px);
+            ok = Check(!wrote, "width <= 0 returns false") && ok;
+            ok = Check(isSentinel(px), "width <= 0 leaves dst untouched") && ok;
+        }
+
+        // Invalid projection (zNear <= 0).
+        {
+            UploadRgba(gl, dst, W, H, sentinelPixels);
+            ProjectionParams badProjection = projection;
+            badProjection.zNear = 0.0f;
+            bool wrote = ApplyMotionBlur(src, dst, depth, world, capture, W, H, badProjection,
+                                          identityReprojection, 0.5f, 0.05f);
+            unsigned char px[4]; ReadPixel(dst, 64, 64, px);
+            ok = Check(!wrote, "an invalid projection (zNear <= 0) returns false") && ok;
+            ok = Check(isSentinel(px), "an invalid projection leaves dst untouched") && ok;
+        }
+
+        // A normal, fully-valid call returns true.
+        {
+            UploadRgba(gl, dst, W, H, sentinelPixels);
+            bool wrote = ApplyMotionBlur(src, dst, depth, world, capture, W, H, projection,
+                                          identityReprojection, 0.5f, 0.05f);
+            ok = Check(wrote, "a normal, fully-valid call returns true") && ok;
+        }
+    }
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);

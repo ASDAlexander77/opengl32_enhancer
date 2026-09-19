@@ -59,7 +59,7 @@ const char* kMotionBlurShaderSource =
     "}\n"
     // Where the finished frame differs from the pre-HUD frame, the game drew an overlay. The
     // threshold sits just clear of 8-bit quantisation (1/255), which makes this "did the game
-    // draw here" rather than a tolerance to tune - see world_capture.h.
+    // draw here" rather than a tolerance to tune.
     "bool IsHud(ivec2 c) {\n"
     "    vec3 finished = texelFetch(captureTex, c, 0).rgb;\n"
     "    vec3 world = texelFetch(worldTex, c, 0).rgb;\n"
@@ -85,9 +85,14 @@ const char* kMotionBlurShaderSource =
     // A cost saving, not a correctness guarantee: a still camera or strength=0 - the common case
     // across a static scene - makes velocity IEEE-754-exact zero, which sends every one of the 7
     // taps below to the same texel as this pixel's own centre regardless of whether this early-out
-    // runs. Deleting it changes no output pixel, so it is deliberately uncovered by a test - the
-    // bit-exactness a static scene needs is already guaranteed by the HUD and behind-near-plane
-    // early-outs above, which the tests do cover. Don't go looking for a test that kills this line.
+    // runs, so deleting it changes no output pixel. The same holds for any len just under 1e-6,
+    // not only exactly zero: 1e-6 in uv space is roughly 1e-4 px at this file's 128px test width
+    // and roughly 2e-3 px even at 1920 wide - far too small to move a tap off the centre texel
+    // starting from coord+0.5. That bit-exactness is for an ORDINARY static-scene world pixel:
+    // not HUD, and in front of the previous near plane, so neither early-out above this one fires
+    // - the tap collapse this comment describes is what actually delivers it, and it IS covered,
+    // by motion_blur_test.cpp's "a stationary camera leaves the pixel bit-exact" case. Don't go
+    // looking for a test that kills this line instead; there isn't one to find.
     "    if (len < 1e-6) { imageStore(outputImage, coord, src); return; }\n"
     "    if (len > params.w) { velocity *= params.w / len; }\n"
     "    vec3 sum = src.rgb;\n"
