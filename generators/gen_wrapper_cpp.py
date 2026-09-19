@@ -181,6 +181,18 @@ extern "C" {
 }
 """
 
+# Every fixed-function call that modifies the current matrix. modelview_capture.h is told that
+# one happened, never what it was - it reads the driver's resulting matrix rather than replaying
+# the algebra. See its header comment.
+MATRIX_EDIT_FUNCS = {
+    "glLoadIdentity",
+    "glLoadMatrixf", "glLoadMatrixd",
+    "glMultMatrixf", "glMultMatrixd",
+    "glRotatef", "glRotated",
+    "glTranslatef", "glTranslated",
+    "glScalef", "glScaled",
+}
+
 def emit_cpp(funcs):
     lines = []
     lines.append("// AUTO-GENERATED opengl32 interception/passthrough wrapper - C++ x86 proof of concept.")
@@ -200,6 +212,7 @@ def emit_cpp(funcs):
     lines.append('#include "texture_effect.h"')
     lines.append('#include "texture_filter.h"')
     lines.append('#include "projection_capture.h"')
+    lines.append('#include "modelview_capture.h"')
     lines.append('#include "window_override.h"')
     lines.append("")
     lines.append(TYPEDEFS)
@@ -256,7 +269,12 @@ def emit_cpp(funcs):
         lines.append("        }")
         lines.append("    }")
         if name == "wglSwapBuffers":
+            # See modelview_capture.h: last chance to latch this frame's camera, before any
+            # stage could read it, and the history rotation afterwards so a stage reading
+            # during the chain sees a stable current/previous pair.
+            lines.append("    FinalizeCameraForFrame();")
             lines.append(f"    ApplySelectedEffect({params_call});")
+            lines.append("    AdvanceCameraHistory();")
         if name == "wglCreateContext":
             # See window_override.h: resizes the game's window to config.h's
             # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
@@ -269,6 +287,21 @@ def emit_cpp(funcs):
             # normal passthrough below rather than calling cache_var itself, since the game's
             # own glFrustum call must still happen exactly as it asked for it.
             lines.append(f"    CaptureProjectionFrustum({params_call});")
+            # See modelview_capture.h: the same call also marks the start of a world pass, which
+            # is what tells the camera capture that the modelview it is about to see is the
+            # camera's and not the HUD's.
+            lines.append("    NotifyWorldProjection();")
+        if name == "glOrtho":
+            # The other half of that discrimination - the 2D/HUD pass begins here.
+            lines.append("    NotifyTwoDProjection();")
+        if name == "glMatrixMode":
+            lines.append(f"    NotifyMatrixMode({params_call});")
+        if name == "glPushMatrix":
+            lines.append("    NotifyMatrixPush();")
+        if name == "glPopMatrix":
+            lines.append("    NotifyMatrixPop();")
+        if name in MATRIX_EDIT_FUNCS:
+            lines.append("    NotifyMatrixEdited();")
         if name == "glTexImage2D":
             # See texture_effect.h: decides whether to run this upload through the configured
             # texture effect and calls cache_var itself (with either the original pixels or

@@ -609,6 +609,11 @@ nothing depth-based can be tuned against it.
 4. `glTexImage2D` is intercepted separately for the optional
    [texture effects](#texture-effects), and `glTexParameteri`/`glTexParameterf`
    for [anisotropic filtering](#anisotropic-filtering).
+5. The matrix calls — `glFrustum`, `glOrtho`, `glMatrixMode`,
+   `glPushMatrix`/`glPopMatrix` and the calls that modify the current matrix —
+   are watched without being changed, to work out where the camera is and which
+   way it points. Depth-based stages need that to relate a pixel to a point in
+   the world. Nothing uses it yet; it is groundwork.
 
 Exports are emitted under their true undecorated names through a `.def` file,
 since `__declspec(dllexport)` alone would apply `__stdcall`'s `@N` decoration
