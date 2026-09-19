@@ -289,6 +289,21 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
 
 }  // namespace
 
+// See post_effects.h. Every stage named here passes g_pipeline.depthTex to its Apply*() in the
+// switch below, and every stage that does must be named here.
+bool StageNeedsDepth(EffectKind stage) {
+    switch (stage) {
+        case EffectKind::DepthVignette:
+        case EffectKind::Ssao:
+        case EffectKind::Dof:
+        case EffectKind::Fog:
+        case EffectKind::Ssr:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -422,10 +437,13 @@ void ApplySelectedEffect(void* hdc) {
     int savedUniformBuffer = 0;
     gl.glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &savedUniformBuffer);
 
-    bool needDepth = HasEffectStage(config, EffectKind::DepthVignette) ||
-                      HasEffectStage(config, EffectKind::Ssao) ||
-                      HasEffectStage(config, EffectKind::Dof) ||
-                      HasEffectStage(config, EffectKind::Fog);
+    bool needDepth = false;
+    for (int i = 0; i < config.stageCount; ++i) {
+        if (StageNeedsDepth(config.stages[i])) {
+            needDepth = true;
+            break;
+        }
+    }
     EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth);
 
     auto restoreState = [&]() {
@@ -515,13 +533,12 @@ void ApplySelectedEffect(void* hdc) {
         // resolution there is no depth data left to sample, so a depth-consuming stage listed
         // after the upscaler can only no-op. Logged once so a misordered effect= list is
         // diagnosable instead of silently doing nothing.
-        bool isDepthStage = (stage == EffectKind::DepthVignette || stage == EffectKind::Ssao ||
-                             stage == EffectKind::Dof || stage == EffectKind::Fog);
+        bool isDepthStage = StageNeedsDepth(stage);
         if (isDepthStage && !atNativeRes) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
                        "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/fog/depthvignette BEFORE "
+                       "stage is being skipped. List ssao/dof/fog/ssr/depthvignette BEFORE "
                        "bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
                 warnedDepthAfterUpscale = true;
             }

@@ -124,6 +124,51 @@ bool Check(bool condition, const char* what) {
 
 }  // namespace
 
+// Pins the set of stages that read the game's depth buffer - see StageNeedsDepth() in
+// post_effects.h. This is a table, not an integration run, and it is worth being exact about
+// what that buys: it proves the predicate names every stage that passes g_pipeline.depthTex to
+// its Apply*() in ApplySelectedEffect()'s switch, which is the half that went wrong. It does
+// NOT prove the switch only passes depth to stages named here - nothing automated can, and
+// that direction stays a reading of the code.
+//
+// The failure it exists to catch has no symptom to look for. A depth stage missing from the
+// predicate does not error, does not log and does not change the frame: with `effect=ssr`
+// alone the depth texture is never allocated, so the stage no-ops, and the only thing the
+// player sees is reflections that are absent for no stated reason. `ssr` itself was missing
+// here, and went unnoticed precisely because a plausible effect= list pairs it with `ssao`,
+// which requests the depth that `ssr` then quietly relies on.
+//
+// Needs no GL context, so it runs before main() builds one and is unaffected by the
+// no-compute-support bail-out further down.
+bool CheckDepthStageSet() {
+    struct Expectation { EffectKind stage; bool needsDepth; const char* name; };
+    const Expectation kExpected[] = {
+        {EffectKind::DepthVignette,       true,  "depthvignette"},
+        {EffectKind::Ssao,                true,  "ssao"},
+        {EffectKind::Dof,                 true,  "dof"},
+        {EffectKind::Fog,                 true,  "fog"},
+        {EffectKind::Ssr,                 true,  "ssr"},
+        // A sample of stages that read colour only. If one of these ever starts reporting true
+        // the pipeline pays for a depth blit every frame that does not need one.
+        {EffectKind::Bloom,               false, "bloom"},
+        {EffectKind::Gamma,               false, "gamma"},
+        {EffectKind::Taa,                 false, "taa"},
+        {EffectKind::LightShafts,         false, "lightshafts"},
+        {EffectKind::NVScaler,            false, "nvscaler"},
+        {EffectKind::None,                false, "none"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        bool actual = StageNeedsDepth(kExpected[i].stage);
+        char what[160];
+        snprintf(what, sizeof(what), "StageNeedsDepth(%s) == %s",
+                 kExpected[i].name, kExpected[i].needsDepth ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].needsDepth, what) && allMatched;
+    }
+    return allMatched;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -199,7 +244,7 @@ int main() {
     PFNGLCLEARPROC pGlClear = (PFNGLCLEARPROC)GetProcAddress(glModule, "glClear");
     pGlViewport(0, 0, width, height);
 
-    bool ok = true;
+    bool ok = CheckDepthStageSet();
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
