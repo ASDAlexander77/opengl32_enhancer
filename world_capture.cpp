@@ -60,6 +60,18 @@ void LatchWorldFrame() {
         return;
     }
 
+    // Everything below this point costs a handful of glGetIntegerv calls, a full-resolution
+    // glCopyTexSubImage2D of the back buffer with 8-bit->16F conversion, a glGetError() (a
+    // driver sync point) and a permanently-allocated full-res RGBA16F texture - all of it wasted
+    // if motionblur (the only consumer, see motion_blur.h) isn't even listed. GetAnaxConfig()
+    // parses the ini once and caches the result for the process lifetime (see config.h), so this
+    // gate is a cached struct read plus a short loop over at most a couple of dozen stages - not
+    // a per-frame re-parse, and not something that tracks an ini edit made while the DLL is
+    // already loaded.
+    if (!HasEffectStage(GetAnaxConfig(), EffectKind::MotionBlur)) {
+        return;
+    }
+
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         // Unlike the camera capture, this exists solely to feed a compute stage. If compute is
@@ -94,6 +106,25 @@ void LatchWorldFrame() {
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
 
     EnsureTexture(gl, viewport[2], viewport[3]);
+
+    // Drain anything the app left pending before touching the copy's own error. glGetError()
+    // reports the first error since it was last called, with no notion of who caused it: without
+    // this, an error the GAME left pending here is misread as the copy's own failure, and worse,
+    // reading it CLEARS the flag - so a Quake II-family engine's own GL_CheckErrors() call after
+    // R_SetGL2D would silently lose an error it would otherwise have reported. Draining it here
+    // and logging once (same pattern as post_effects.cpp's pending-error drain around its own
+    // capture) fixes both: the real result is read afterward, and the game keeps seeing its own
+    // errors. See world_capture.h.
+    unsigned int pendingErr = gl.glGetError();
+    if (pendingErr != GL_NO_ERROR) {
+        static bool warnedPending = false;
+        if (!warnedPending) {
+            printf("[opengl32_enh_cpp] world_capture: the app had glGetError() = 0x%04X pending "
+                   "before this copy; draining it so it is not blamed on the capture\n",
+                   pendingErr);
+            warnedPending = true;
+        }
+    }
 
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl.glReadBuffer(GL_BACK);
@@ -151,7 +182,7 @@ void InvalidateWorldFrame() {
 }
 
 bool GetWorldOnlyFrame(unsigned int& texture, int& width, int& height) {
-    if (!g_latched || g_texture == 0) {
+    if (!g_latched || g_texture == 0 || g_generation != GetGlContextGeneration()) {
         return false;
     }
     texture = g_texture;

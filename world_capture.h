@@ -15,6 +15,17 @@
 // framebuffer binding around its one copy. See texture_effect.cpp, which does the same at
 // glTexImage2D.
 //
+// Everything here is gated on motionblur (the only consumer) actually being listed in the
+// config - see LatchWorldFrame() in the .cpp. A stock ini, or effect=none, never reaches the
+// GL calls below at all.
+//
+// glGetError() around the copy DRAINS whatever the game left pending first, rather than just
+// reading it: reading clears the flag, so blindly checking it after the copy would both
+// misattribute a pre-existing error to this capture AND make the game's own error-checking
+// (e.g. a Quake II-family GL_CheckErrors() call) silently lose an error it would otherwise have
+// reported. Drain-then-check keeps this capture's own diagnosis honest without taking anything
+// away from the game.
+//
 // Where it breaks, and how it degrades:
 //   - 3D drawn AFTER the first glOrtho (a rendered portrait inside a dialogue box, an inset
 //     viewport) is absent from the capture, so those pixels differ from the finished frame and
@@ -40,4 +51,11 @@ void InvalidateWorldFrame();
 //
 // `width`/`height` are the viewport at latch time. A consumer whose own dimensions differ must
 // decline rather than sample a mismatched texture.
+//
+// Also checks the GL context generation, not just LatchWorldFrame()'s writer-side check: if the
+// game destroys its context and creates a new one between this frame's first glOrtho and its
+// wglSwapBuffers, g_latched would otherwise still read true and hand back a texture name that
+// belonged to the dead context. New contexts hand out low texture names, so that name could
+// plausibly alias one of the pipeline's own new textures rather than fail visibly - the reader
+// has to refuse independently of the writer to catch that window.
 bool GetWorldOnlyFrame(unsigned int& texture, int& width, int& height);

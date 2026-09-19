@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <cstdio>
 
+#include "config.h"
 #include "gl_loader.h"
 #include "world_capture.h"
 
@@ -106,6 +107,17 @@ int main() {
 
     bool ok = true;
 
+    // LatchWorldFrame() now gates on motionblur actually being listed (see world_capture.h/.cpp)
+    // - a config with no stages at all, like GetMutableAnaxConfig()'s default, would make every
+    // case below fail before it ever reached the GL calls it means to exercise. Rather than
+    // shipping an ini fixture just for this test, GetMutableAnaxConfig() exists precisely for a
+    // non-DLL caller like this one to set the config directly (see its comment in config.h) - so
+    // set it here, once, before any case runs. Restored to "no motionblur" for the dedicated gate
+    // case near the end, then put back so nothing after it is affected.
+    AnaxConfig& config = GetMutableAnaxConfig();
+    config.stages[0] = EffectKind::MotionBlur;
+    config.stageCount = 1;
+
     // --- Case 1: nothing captured before any call. MUST RUN FIRST: the module keeps
     // process-global state and exports no test-only reset, so this is the only point at which
     // "not captured yet" can be observed.
@@ -175,6 +187,25 @@ int main() {
         ok = Check(px[0] > 200 && px[1] < 60,
                    "a second glOrtho in the same frame does not re-latch") && ok;
         InvalidateWorldFrame();
+    }
+
+    // --- Case 6: with motionblur NOT in the stage list, LatchWorldFrame() returns before
+    // touching GL at all, so no world frame ever latches even with the exact same glFrustum/
+    // glOrtho sequence that latched one in Case 2. This is CRITICAL 1's gate - see
+    // world_capture.h/.cpp.
+    {
+        config.stageCount = 0;
+        NotifyWorldPassBegan();
+        NotifyTwoDPassBegan();
+        unsigned int tex = 0; int w = 0, h = 0;
+        ok = Check(!GetWorldOnlyFrame(tex, w, h),
+                   "no motionblur stage listed means no world frame latches") && ok;
+        InvalidateWorldFrame();
+
+        // Restored so nothing after this point (there is nothing today, but a later case added
+        // here should not have to rediscover this) runs against a config with no stages.
+        config.stages[0] = EffectKind::MotionBlur;
+        config.stageCount = 1;
     }
 
     wglMakeCurrent(nullptr, nullptr);

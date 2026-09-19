@@ -343,19 +343,39 @@ bool CheckGpuMotionBlur() {
                    "rotating ONLY the previous camera changes the same pixel") && ok;
     }
 
-    // strength 0 is an exact no-op even with the camera moving.
+    // strength 0 is now a guard clause (see motion_blur.h/.cpp): the stage declines outright
+    // rather than running a dispatch that merely happens to be bit-exact, saving a full compute
+    // dispatch every frame for a user who has the stage listed but turned all the way down. So
+    // this no longer reads dst back and compares it to src - with the guard in place dst is
+    // never written at all, and a version that dropped the guard but still produced a bit-exact
+    // result would pass a "dst == src" check right along with a version that has the guard,
+    // which is exactly the gap a mutation check needs closed. Pre-fill dst with a sentinel
+    // (same technique as the return-value-contract cases below) so "dst was left untouched" is
+    // proven, not assumed from the bool alone.
     {
+        const unsigned char kSentinel[4] = {17, 201, 88, 233};
+        static unsigned char sentinelPixels[kWidth * kHeight * 4];
+        for (int i = 0; i < kWidth * kHeight; ++i) {
+            sentinelPixels[i * 4 + 0] = kSentinel[0];
+            sentinelPixels[i * 4 + 1] = kSentinel[1];
+            sentinelPixels[i * 4 + 2] = kSentinel[2];
+            sentinelPixels[i * 4 + 3] = kSentinel[3];
+        }
+        UploadRgba(gl, dst, W, H, sentinelPixels);
+
         CameraMatrix current;
         CameraMatrix moved;
         moved.m[0] = 0.995f;  moved.m[1] = 0.0998f;
         moved.m[4] = -0.0998f; moved.m[5] = 0.995f;
         float rotated[16];
         MotionBlurReprojection(current, moved, rotated);
-        ApplyMotionBlur(src, dst, depth, world, capture, W, H, projection, rotated, 0.0f, 0.05f);
+        bool wrote = ApplyMotionBlur(src, dst, depth, world, capture, W, H, projection, rotated,
+                                      0.0f, 0.05f);
         unsigned char px[4]; ReadPixel(dst, 64, 64, px);
-        unsigned char srcPx[4]; ReadPixel(src, 64, 64, srcPx);
-        ok = Check(px[0] == srcPx[0] && px[1] == srcPx[1] && px[2] == srcPx[2],
-                   "strength 0 reproduces the input bit-exact") && ok;
+        ok = Check(!wrote, "strength 0 returns false") && ok;
+        ok = Check(px[0] == kSentinel[0] && px[1] == kSentinel[1] && px[2] == kSentinel[2] &&
+                   px[3] == kSentinel[3],
+                   "strength 0 leaves dst untouched") && ok;
     }
 
     // A pixel inside the HUD rectangle is bit-exact even with the camera moving hard.
@@ -415,6 +435,36 @@ bool CheckGpuMotionBlur() {
         ok = Check(adjPx[1] > 90,
                    "a world pixel adjacent to the HUD does not have its green channel pulled "
                    "toward the HUD's zero") && ok;
+    }
+
+    // The one shader branch nothing above exercises: "if (before.z > -params.x) { ... return; }"
+    // in kMotionBlurShaderSource, which fires when the current frame's depth-derived position
+    // reprojects to somewhere behind the PREVIOUS frame's near plane - a previous camera that
+    // has since translated far enough forward that it has passed the point entirely. Deleting
+    // the guard would feed UvForViewPos() a positive before.z, dividing by a near-zero-or-flipped
+    // "dist" and producing a velocity nothing like a real reprojection - so this proves the guard
+    // actually fires and writes src through untouched, rather than merely trusting the shader
+    // comment's claim about when it does.
+    {
+        // current is identity: the pixel's own view-space position is here.z == -eyeDist, about
+        // -100 (see depthPixels above). previous.m[14] = 150 puts the reprojection's translation
+        // component at +150 (current is identity, so reprojection == previous exactly), so
+        // before.z = here.z + 150 == +50 - comfortably past the near plane (zNear = 1.0, guard
+        // is before.z > -1.0) in the WRONG direction: the point is now behind the camera that
+        // is supposed to be looking at it, exactly what "camera moved past this point" means.
+        CameraMatrix current;
+        CameraMatrix previous;
+        previous.m[14] = 150.0f;
+        float behindNear[16];
+        MotionBlurReprojection(current, previous, behindNear);
+
+        const int kBx = 64, kBy = 64;   // not in the HUD rectangle
+        ApplyMotionBlur(src, dst, depth, world, capture, W, H, projection, behindNear, 0.5f, 0.05f);
+        unsigned char px[4]; ReadPixel(dst, kBx, kBy, px);
+        unsigned char srcPx[4]; ReadPixel(src, kBx, kBy, srcPx);
+        ok = Check(px[0] == srcPx[0] && px[1] == srcPx[1] && px[2] == srcPx[2],
+                   "a pixel reprojecting behind the previous near plane is returned bit-exact") &&
+             ok;
     }
 
     // ApplyMotionBlur's return-value contract - "returns true ONLY if it actually wrote

@@ -386,7 +386,7 @@ than guessing.
 
 | Setting | What it does |
 | --- | --- |
-| `motionBlurStrength` | `0`..`1`, a multiplier on the measured screen-space velocity. `0` is an exact no-op and is the default |
+| `motionBlurStrength` | `0`..`1`, a multiplier on the measured screen-space velocity. `0` is an exact no-op. **Default is `0.5`**, unlike every other intensity setting on this page - `motionblur` isn't in the shipped `effect=` line, so listing it at all is already the opt-in; once listed, it should visibly do something rather than need a second value changed too |
 | `motionBlurMaxRadius` | `0`..`0.5`, a **fraction of the screen** (not a world unit like `ssaoRadius`) — the longest smear allowed. A scene cut or a teleport produces an enormous inter-frame camera delta that would otherwise smear the whole screen; this bounds that without needing cut detection |
 
 Put `motionblur` **early** in the chain, before `bilinear`/`nvscaler`/`fsr`, for the same reason as

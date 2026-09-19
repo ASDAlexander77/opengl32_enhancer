@@ -233,6 +233,17 @@ bool ApplyMotionBlur(unsigned int srcTexture, unsigned int dstTexture,
         return false;
     }
 
+    // A guard clause, not merely a beneficial side effect of the shader's own math: strength=0
+    // makes every tap collapse onto the source pixel and the dispatch happens to come out
+    // bit-exact, but running it anyway still costs a full compute dispatch every frame for a
+    // user who has the stage listed but turned all the way down. Refusing here instead makes
+    // motion_blur.h's contract, the design doc's "no-op conditions: all return false", and this
+    // code agree - see motion_blur_test.cpp's "strength 0" case, which now checks the return
+    // value and that dst is untouched rather than reading a dst this no longer writes.
+    if (strength <= 0.0f) {
+        return false;
+    }
+
     // Without a captured frustum raw depth cannot be turned into view-space positions - see
     // projection_capture.h. Refusing here rather than guessing near/far keeps a wrong-looking
     // blur from being mistaken for a tuning problem.

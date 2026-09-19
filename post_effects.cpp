@@ -570,8 +570,8 @@ void ApplySelectedEffect(void* hdc) {
             if (!warnedDepthAfterUpscale) {
                 printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
                        "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/fog/ssr/depthvignette BEFORE "
-                       "bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
+                       "stage is being skipped. List ssao/dof/fog/ssr/motionblur/depthvignette "
+                       "BEFORE bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
                 warnedDepthAfterUpscale = true;
             }
             continue;
@@ -721,18 +721,41 @@ void ApplySelectedEffect(void* hdc) {
                 CameraMatrix mbPrevious;
                 unsigned int worldTex = 0;
                 int worldW = 0, worldH = 0;
-                if (depthCaptured && GetCapturedProjection(mbProjection) &&
-                    GetCapturedCamera(mbCurrent) && GetPreviousCamera(mbPrevious) &&
-                    GetWorldOnlyFrame(worldTex, worldW, worldH) &&
-                    worldW == dstW && worldH == dstH &&
-                    g_pipeline.captureTex != 0 &&
-                    g_pipeline.captureWidth == dstW && g_pipeline.captureHeight == dstH) {
-                    float reprojection[16];
-                    MotionBlurReprojection(mbCurrent, mbPrevious, reprojection);
-                    wrote = ApplyMotionBlur(src, dst, g_pipeline.depthTex, worldTex,
-                                            g_pipeline.captureTex, dstW, dstH, mbProjection,
-                                            reprojection, config.motionBlurStrength,
-                                            config.motionBlurMaxRadius);
+                bool mbHaveInputs = depthCaptured && GetCapturedProjection(mbProjection) &&
+                                    GetCapturedCamera(mbCurrent) && GetPreviousCamera(mbPrevious) &&
+                                    GetWorldOnlyFrame(worldTex, worldW, worldH) &&
+                                    g_pipeline.captureTex != 0;
+                if (mbHaveInputs) {
+                    // Split out from mbHaveInputs above so a size mismatch - the viewport
+                    // changing between this frame's first glOrtho (when world_capture.cpp
+                    // latched worldTex) and this later point in the same frame - is
+                    // diagnosable rather than silently sitting in the same guard as four
+                    // legitimately-transient "not available yet" conditions. Same
+                    // warn-once-with-the-actual-numbers pattern as warnedDepthAfterUpscale
+                    // above; behaviour is unchanged either way - no blur this frame.
+                    bool mbDimsMatch = worldW == dstW && worldH == dstH &&
+                                       g_pipeline.captureWidth == dstW &&
+                                       g_pipeline.captureHeight == dstH;
+                    if (!mbDimsMatch) {
+                        static bool warnedMotionBlurDimMismatch = false;
+                        if (!warnedMotionBlurDimMismatch) {
+                            printf("[opengl32_enh_cpp] post_effects: motionblur's captured "
+                                   "inputs don't match this frame's size (world %dx%d, capture "
+                                   "%dx%d, need %dx%d) - the viewport likely changed between "
+                                   "this frame's first glOrtho and now. Stage skipped until the "
+                                   "sizes agree again.\n",
+                                   worldW, worldH, g_pipeline.captureWidth,
+                                   g_pipeline.captureHeight, dstW, dstH);
+                            warnedMotionBlurDimMismatch = true;
+                        }
+                    } else {
+                        float reprojection[16];
+                        MotionBlurReprojection(mbCurrent, mbPrevious, reprojection);
+                        wrote = ApplyMotionBlur(src, dst, g_pipeline.depthTex, worldTex,
+                                                g_pipeline.captureTex, dstW, dstH, mbProjection,
+                                                reprojection, config.motionBlurStrength,
+                                                config.motionBlurMaxRadius);
+                    }
                 }
                 break;
             }

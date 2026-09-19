@@ -44,7 +44,9 @@ void MotionBlurReprojection(const CameraMatrix& current, const CameraMatrix& pre
 // term vanishes and only rotation survives, which is how sky should behave.
 //
 // Returns true if dstTexture was actually written; returns false if GL 4.3 compute support is
-// unavailable, shader init failed, or no depth/projection was supplied.
+// unavailable, shader init failed, no depth/projection was supplied, worldTexture == 0,
+// captureTexture == 0, width <= 0 or height <= 0, or strength <= 0 (0 is now a guard clause, not
+// a dispatch that merely happens to be bit-exact - see the .cpp).
 bool ApplyMotionBlur(unsigned int srcTexture, unsigned int dstTexture,
                      unsigned int depthTexture, unsigned int worldTexture,
                      unsigned int captureTexture,

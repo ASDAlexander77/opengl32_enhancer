@@ -128,6 +128,14 @@ struct AnaxConfig {
     // longest smear allowed, and it exists because a scene cut or a teleport produces an
     // enormous inter-frame camera delta that would otherwise smear the whole frame. Clamping
     // is cheaper and more predictable than trying to detect a cut. See motion_blur.h.
+    //
+    // motionBlurStrength is the first intensity setting on this page to default to something
+    // other than 0/1 (an exact no-op). Every other stylistic stage (fog/shafts/ssr) defaults to
+    // an inert 0 because listing the stage is not itself the opt-in - it costs a dispatch even
+    // at 0. motionblur is different: it is not in the shipped `effect=` line at all, so adding
+    // it to your own `effect=` list already IS the opt-in, and a non-zero default means it does
+    // something visible the moment it's added instead of requiring a second value to be found
+    // and changed too.
     float motionBlurStrength = 0.5f;           // MotionBlur, 0 = exact no-op
     float motionBlurMaxRadius = 0.05f;         // MotionBlur
 
