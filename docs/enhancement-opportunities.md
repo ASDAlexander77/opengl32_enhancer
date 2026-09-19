@@ -51,11 +51,17 @@ attachment the pipeline blits for it).
   upward reflect. The design risk was real and did not go away, it was only
   bounded and written down. It is a guess about *orientation* standing in for a
   fact about *material*, so it is wrong in both directions — carpet reflects as
-  readily as marble, and a wall mirror does not reflect at all. Worse, "up" is
-  measured in view space, because the modelview matrix is exactly what this
-  proxy cannot see, so pitching the camera swings the gate off true. That makes
-  SSR the first shipped stage whose quality is directly capped by the missing
-  Tier 2 capture rather than merely inconvenienced by it.
+  readily as marble, and a wall mirror does not reflect at all. That half needs
+  material information the game does not have, and still stands.
+
+  The other half — "up" measured in view space, so pitching the camera swung the
+  gate off true — was fixed on 2026-09-19, once Tier 2 landed. SSR was the first
+  shipped stage capped by the missing capture and the first consumer of it; the
+  gate now measures against world up. What the capture could *not* supply is
+  which world axis is up, because that is an engine convention rather than
+  anything a view matrix reveals, so it became `ssrWorldUpAxis` (default `z`,
+  right for Quake II-family engines). A game whose view matrix is never captured
+  falls back to the old view-space behaviour rather than losing reflections.
 
   Worth recording how the test was framed, since "the floor got brighter" would
   have passed with the gate ignored entirely: `ssr_test.cpp` changes *nothing

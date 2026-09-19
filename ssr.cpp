@@ -41,6 +41,7 @@ const char* kSsrShaderSource =
     "    vec4 frustum;\n"   // left, right, bottom, top
     "    vec4 params;\n"    // zNear, zFar, maxDistance, thickness
     "    vec4 params2;\n"   // intensity, upThreshold, unused, unused
+    "    vec4 upVector;\n"  // xyz = world up in view space, w = 1 when a camera was captured
     "};\n"
     "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
     "    float ndc = rawDepth * 2.0 - 1.0;\n"
@@ -114,7 +115,15 @@ const char* kSsrShaderSource =
     // made of, so orientation stands in for material: only surfaces facing up reflect. The
     // comparison is <= rather than < so that upThreshold=1 gates off even a perfectly flat
     // floor, which is what makes 1 usable as "disable without unlisting the stage".
-    "    if (N.y <= upThreshold) {\n"
+    //
+    // "Up" is the world's up, carried in as upVector.xyz - so pitching the camera no longer
+    // swings the gate off true, which was this stage's worst limitation before the modelview
+    // capture existed (see ssr.h). The fallback when no camera has been captured is the literal
+    // N.y this line used to read, not dot(N, vec3(0,1,0)): the two are mathematically equal but
+    // only the literal is guaranteed bit-identical to the old output under a compiler free to
+    // reassociate, and ssr_test.cpp asserts exactly that equality.
+    "    float facing = (upVector.w > 0.5) ? dot(N, upVector.xyz) : N.y;\n"
+    "    if (facing <= upThreshold) {\n"
     "        imageStore(outputImage, outCoord, color);\n"
     "        return;\n"
     "    }\n"
@@ -170,6 +179,7 @@ struct SsrConfigData {
     float frustum[4];
     float params[4];
     float params2[4];
+    float upVector[4];
 };
 
 struct PipelineState {
@@ -230,9 +240,29 @@ void EnsureUbo(const GlComputeApi& gl) {
 
 }  // namespace
 
+void SsrViewSpaceWorldUp(const CameraMatrix& camera, SsrWorldUpAxis axis, float outUp[3]) {
+    // The view matrix is [R | t] with R the world->view rotation, stored column-major, so
+    // element (row, col) is m[col * 4 + row]. Rotating the world's up axis into view space is
+    // R * axis, and since the axis is a unit basis vector that is just R's COLUMN for that axis -
+    // three contiguous floats, no arithmetic. (Contrast DecomposeCamera in modelview_capture.cpp,
+    // which reads R's ROWS to get the camera's own axes in world space.)
+    // The axis originates in the ini as a plain int and indexes a 16-float array here, so an
+    // out-of-range value would read past the matrix. config.cpp only ever writes 0/1/2, but a
+    // function that indexes memory should not depend on its caller for that.
+    int column = (int)axis;
+    if (column < 0 || column > 2) {
+        column = 2;
+    }
+    outUp[0] = camera.m[column * 4 + 0];
+    outUp[1] = camera.m[column * 4 + 1];
+    outUp[2] = camera.m[column * 4 + 2];
+}
+
 bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
               int width, int height, const ProjectionParams& projection,
+              const float* viewSpaceWorldUp,
               float intensity, float maxDistance, float thickness, float upThreshold) {
+
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -298,6 +328,13 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     configData.params[3] = thickness;
     configData.params2[0] = intensity;
     configData.params2[1] = upThreshold;
+    if (viewSpaceWorldUp != nullptr) {
+        configData.upVector[0] = viewSpaceWorldUp[0];
+        configData.upVector[1] = viewSpaceWorldUp[1];
+        configData.upVector[2] = viewSpaceWorldUp[2];
+        configData.upVector[3] = 1.0f;
+    }
+    // Left at the zero-initialised {0,0,0,0} otherwise, so w = 0 selects the view-space fallback.
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(SsrConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);

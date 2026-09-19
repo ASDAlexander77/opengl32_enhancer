@@ -410,6 +410,31 @@ int main() {
         Check(config.nrPasses == 1, "unparseable nrPasses falls back to default 1");
     }
 
+    // ssrWorldUpAxis names which world axis points up in the game, which the ssr gate needs and
+    // no capture can derive - see ssr.h. Stored as 0/1/2 for X/Y/Z. The default is Z because
+    // that is what Quake II-family engines use, and they are what this proxy targets; an
+    // unrecognised value must keep that default rather than silently picking an axis, since the
+    // wrong axis puts reflections on walls instead of floors.
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.ssrWorldUpAxis == 2, "missing file falls back to default ssrWorldUpAxis=z");
+    }
+    {
+        WriteFixture("config_test_ssr_up_x.ini", "ssrWorldUpAxis=x\n");
+        AnaxConfig config = ParseConfigFile("config_test_ssr_up_x.ini");
+        Check(config.ssrWorldUpAxis == 0, "ssrWorldUpAxis=x parses to 0");
+    }
+    {
+        WriteFixture("config_test_ssr_up_y.ini", "ssrWorldUpAxis=Y\n");
+        AnaxConfig config = ParseConfigFile("config_test_ssr_up_y.ini");
+        Check(config.ssrWorldUpAxis == 1, "ssrWorldUpAxis=Y parses case-insensitively to 1");
+    }
+    {
+        WriteFixture("config_test_ssr_up_bad.ini", "ssrWorldUpAxis=w\n");
+        AnaxConfig config = ParseConfigFile("config_test_ssr_up_bad.ini");
+        Check(config.ssrWorldUpAxis == 2, "an unrecognised ssrWorldUpAxis keeps the default z");
+    }
+
     // textureEffect accepts none/sharpen/invert, defaults to none, rejects anything else, and
     // still honors the legacy textureSharpen=1/0 spelling.
     {

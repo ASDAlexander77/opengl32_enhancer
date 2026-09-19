@@ -504,6 +504,20 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.ssrThickness = ParseClampedFloat(value, 0.1f, 4096.0f, config.ssrThickness, "ssrThickness");
         } else if (strcmp(key, "ssrUpThreshold") == 0) {
             config.ssrUpThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.ssrUpThreshold, "ssrUpThreshold");
+        } else if (strcmp(key, "ssrWorldUpAxis") == 0) {
+            // Deliberately not ParseClampedInt: clamping "w" to a valid axis would silently pick
+            // one, and the wrong axis is not a subtle degradation - it puts reflections on walls
+            // instead of floors. An unrecognised name keeps the default and says so.
+            if (EqualsIgnoreCase(value, "x")) {
+                config.ssrWorldUpAxis = 0;
+            } else if (EqualsIgnoreCase(value, "y")) {
+                config.ssrWorldUpAxis = 1;
+            } else if (EqualsIgnoreCase(value, "z")) {
+                config.ssrWorldUpAxis = 2;
+            } else {
+                printf("[opengl32_enh_cpp] config: 'ssrWorldUpAxis' value '%s' is not one of "
+                       "x/y/z, keeping default\n", value);
+            }
         } else if (strcmp(key, "ssaoRadius") == 0) {
             // World units, so the upper bound is deliberately far above the 0..1 most values
             // here use - see config.h. 512 is well past useful for a Quake II-scale map and
@@ -565,6 +579,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "fogStart=%.3f, fogEnd=%.3f, fogIntensity=%.3f, fogColor=%.2f/%.2f/%.2f, "
            "shaftsIntensity=%.3f, shaftsDensity=%.3f, shaftsDecay=%.3f, shaftsThreshold=%.3f, "
            "ssrIntensity=%.3f, ssrMaxDistance=%.3f, ssrThickness=%.3f, ssrUpThreshold=%.3f, "
+           "ssrWorldUpAxis=%c, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', cameraLogInterval=%d, "
@@ -584,6 +599,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.fogColorR, config.fogColorG, config.fogColorB,
            config.shaftsIntensity, config.shaftsDensity, config.shaftsDecay, config.shaftsThreshold,
            config.ssrIntensity, config.ssrMaxDistance, config.ssrThickness, config.ssrUpThreshold,
+           "xyz"[config.ssrWorldUpAxis],
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath, config.cameraLogInterval,
