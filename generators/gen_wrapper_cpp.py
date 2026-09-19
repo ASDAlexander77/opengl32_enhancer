@@ -214,6 +214,7 @@ def emit_cpp(funcs):
     lines.append('#include "projection_capture.h"')
     lines.append('#include "modelview_capture.h"')
     lines.append('#include "world_capture.h"')
+    lines.append('#include "taa_jitter.h"')
     lines.append('#include "window_override.h"')
     lines.append("")
     lines.append(TYPEDEFS)
@@ -276,6 +277,12 @@ def emit_cpp(funcs):
             lines.append("    FinalizeCameraForFrame();")
             lines.append(f"    ApplySelectedEffect({params_call});")
             lines.append("    AdvanceCameraHistory();")
+            # See projection_capture.h and taa_jitter.h: the projection and jitter histories
+            # rotate on the same tick as the camera's, and for the same reason - a stage reads
+            # all three as one set describing one frame, so they must agree about which frame
+            # that is.
+            lines.append("    AdvanceProjectionHistory();")
+            lines.append("    AdvanceTaaJitter();")
             # See world_capture.h: invalidated AFTER the effect chain runs, since the chain is
             # the consumer of this frame's world-only capture - invalidating on entry would
             # destroy it before anything could read it.
@@ -287,10 +294,20 @@ def emit_cpp(funcs):
             # the context creation itself depends on either way.
             lines.append(f"    ApplyWindowSizeOverride({params_call});")
         if name == "glFrustum":
-            # See projection_capture.h: records the world projection so depth-consuming stages
-            # can unproject raw depth. Recording only - this deliberately falls through to the
-            # normal passthrough below rather than calling cache_var itself, since the game's
-            # own glFrustum call must still happen exactly as it asked for it.
+            # See taa_jitter.h: shifts left/right/bottom/top by this frame's sub-pixel jitter
+            # offset (if armed - a no-op otherwise) before anything else sees them, so the
+            # capture below and the forwarded call at the end of this function - which passes
+            # these same four variables, now jittered - both work from the value GL is actually
+            # given.
+            params_first4 = ", ".join(pname for pname, _ in args[:4])
+            lines.append(f"    ApplyTaaJitterToFrustumFromCurrentViewport({params_first4});")
+            # See projection_capture.h: records the frustum GL is actually given - which is not
+            # always what the game itself asked for, since the jitter call above may have shifted
+            # it - because that is the matrix the depth buffer for this frame is rendered with, so
+            # every depth-consuming stage unprojects correctly against it with no need to know
+            # jitter happened at all. This deliberately falls through to the normal passthrough
+            # below rather than calling cache_var itself, since the (possibly jittered) call must
+            # still reach the real driver.
             lines.append(f"    CaptureProjectionFrustum({params_call});")
             # See modelview_capture.h: the same call also marks the start of a world pass, which
             # is what tells the camera capture that the modelview it is about to see is the

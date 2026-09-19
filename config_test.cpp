@@ -68,6 +68,7 @@ int main() {
         Check(config.lutStrength == 1.0f, "missing file falls back to default lutStrength");
         Check(config.sharpness == 0.5f, "missing file falls back to default sharpness");
         Check(config.taaBlend == 0.5f, "missing file falls back to default taaBlend");
+        Check(config.taaJitter, "missing file falls back to default taaJitter (true)");
         Check(config.vignetteIntensity == 0.3f, "missing file falls back to default vignetteIntensity");
         Check(config.vignetteRadius == 0.7f, "missing file falls back to default vignetteRadius");
         Check(config.chromaticAberrationStrength == 0.3f, "missing file falls back to default chromaticAberrationStrength");
@@ -348,6 +349,14 @@ int main() {
         WriteFixture("config_test_fsr_clamp.ini", "fsrFilmGrain=5.0\n");
         AnaxConfig config = ParseConfigFile("config_test_fsr_clamp.ini");
         Check(config.fsrFilmGrain == 1.0f, "out-of-range fsrFilmGrain (5.0) clamps to max 1.0");
+    }
+
+    // taaJitter is a plain bool like fsrDenoise/fxIndicator - parses 0/1 (and true/false), no
+    // clamping involved.
+    {
+        WriteFixture("config_test_taa_jitter.ini", "taaJitter=0\n");
+        AnaxConfig config = ParseConfigFile("config_test_taa_jitter.ini");
+        Check(!config.taaJitter, "taaJitter=0 parses as false");
     }
 
     // motionBlurStrength's range is 0..4, not the 0..1 every other intensity uses, and the

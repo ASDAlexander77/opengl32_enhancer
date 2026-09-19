@@ -59,6 +59,7 @@ struct AnaxConfig {
     float vignetteRadius = 0.7f;               // Vignette
     float chromaticAberrationStrength = 0.3f;  // ChromaticAberration
     float taaBlend = 0.5f;                     // Taa
+    bool taaJitter = true;                     // Taa
     float ditherStrength = 1.0f;               // Dither
     bool fsrDenoise = false;                   // Fsr
     float fsrFilmGrain = 0.0f;                 // Fsr
@@ -202,6 +203,27 @@ struct AnaxConfig {
 // it enabled", not "when does it run" - post_effects.cpp walks config.stages directly for
 // the latter.
 bool HasEffectStage(const AnaxConfig& config, EffectKind stage);
+
+// Which stages need the pre-HUD world-only colour capture (see world_capture.h). Latching it
+// costs a full-resolution copy and a persistent texture every frame, so it is gated on a stage
+// that actually consumes it being in the chain.
+//
+// This lives here rather than beside StageNeedsDepth in post_effects.h because it has TWO
+// consumers in two different translation units - post_effects.cpp's own texture allocation and
+// world_capture.cpp's latch gate - so it belongs in the vocabulary both already share (config.h),
+// not in a header that would force one of them to depend on the other. StageNeedsDepth stays in
+// post_effects.h because it has exactly one consumer, post_effects.cpp itself. The asymmetry is
+// deliberate, not an oversight: previously the same question was answered by two hand-written
+// copies of `HasEffectStage(config, MotionBlur)`, one in post_effects.cpp and one in
+// world_capture.cpp, and adding a second consumer to only one of them would have silently
+// starved the other.
+bool StageNeedsWorldCapture(EffectKind stage);
+
+// Does any stage in this config's chain need the world capture? The two callers - the
+// pipeline's texture allocation and world_capture.cpp's own latch gate - must agree exactly, or
+// one allocates a texture the other never fills, or worse, the latch runs for a chain that has
+// no consumer and every user pays a full-resolution copy per frame for nothing.
+bool AnyStageNeedsWorldCapture(const AnaxConfig& config);
 
 // The canonical config-file name for a stage ("acestonemap", "bloom", ...), suitable for
 // writing back into an `effect=` line. Returns "none" for EffectKind::None.

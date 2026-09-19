@@ -27,6 +27,7 @@
 #include "vignette.h"
 #include "chromatic_aberration.h"
 #include "taa.h"
+#include "taa_jitter.h"
 #include "dither.h"
 #include "gamma.h"
 #include "smaa.h"
@@ -353,8 +354,12 @@ void LogMotionBlurIfDue(const CameraMatrix& current, const CameraMatrix& previou
            "wrote=%s\n", thisFrame, degrees, wrote ? "yes" : "no");
 }
 
-// See post_effects.h. Every stage named here passes g_pipeline.depthTex to its Apply*() in the
-// switch below, and every stage that does must be named here.
+// See post_effects.h. Every stage that passes g_pipeline.depthTex to its Apply*() in the switch
+// below must be named here. `taa` is named because its real path, ApplyTaaReal(), takes
+// g_pipeline.depthTex and unprojects it - it is a depth consumer like any other here. (Its
+// TAA-lite fallback, ApplyTaa(), does not read depth; that is what
+// StageIsSkippedWhenDepthUnavailable() below is for, and it is a question about what to do when
+// depth is missing, not about whether the stage ever wants it.)
 bool StageNeedsDepth(EffectKind stage) {
     switch (stage) {
         case EffectKind::DepthVignette:
@@ -363,10 +368,26 @@ bool StageNeedsDepth(EffectKind stage) {
         case EffectKind::Fog:
         case EffectKind::Ssr:
         case EffectKind::MotionBlur:
+        case EffectKind::Taa:
             return true;
         default:
             return false;
     }
+}
+
+// See post_effects.h. Only asked about stages StageNeedsDepth() already returned true for, and
+// only once the pipeline has moved past a real upscale, where the game's depth buffer no longer
+// exists at the current resolution.
+//
+// `taa` is the one false, and deliberately not a general exemption: it is the only depth stage
+// with a second, depth-free implementation to fall back to (ApplyTaa's motion-vector-free
+// TAA-lite - see taa.h, which exposes both paths). Skipping it would silently delete a stage
+// that used to work: `taa` after `bilinear`/`nvscaler`/`fsr` was the shipped effect= layout
+// before the real path existed, and every such config would lose its anti-aliasing entirely for
+// one log line. Every other depth stage here has nothing to run without depth, so skipping it
+// and saying so is the whole of what can be done.
+bool StageIsSkippedWhenDepthUnavailable(EffectKind stage) {
+    return StageNeedsDepth(stage) && stage != EffectKind::Taa;
 }
 
 void ApplySelectedEffect(void* hdc) {
@@ -509,7 +530,7 @@ void ApplySelectedEffect(void* hdc) {
             break;
         }
     }
-    bool needCapture = HasEffectStage(config, EffectKind::MotionBlur);
+    bool needCapture = AnyStageNeedsWorldCapture(config);
     EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth, needCapture);
 
     auto restoreState = [&]() {
@@ -604,16 +625,40 @@ void ApplySelectedEffect(void* hdc) {
         // resolution there is no depth data left to sample, so a depth-consuming stage listed
         // after the upscaler can only no-op. Logged once so a misordered effect= list is
         // diagnosable instead of silently doing nothing.
+        //
+        // `taa` is the one depth stage that is NOT dropped here, because it is the one with a
+        // depth-free fallback to run instead - see StageIsSkippedWhenDepthUnavailable() above
+        // for why that is not a general exemption. It falls through with taaRealPathAvailable
+        // false, which is what its case below tests to decline the real path: running that
+        // path here would hand it a native-resolution depth buffer against a window-resolution
+        // frame. The fallback still runs, so NotifyTaaRealPathRan(false) is still reached and
+        // the jitter still disarms.
         bool isDepthStage = StageNeedsDepth(stage);
+        bool taaRealPathAvailable = true;
         if (isDepthStage && !atNativeRes) {
-            if (!warnedDepthAfterUpscale) {
-                printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
-                       "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/fog/ssr/motionblur/depthvignette "
-                       "BEFORE bilinear/nvscaler/fsr in effect= instead.\n", EffectNameFor(stage));
-                warnedDepthAfterUpscale = true;
+            if (StageIsSkippedWhenDepthUnavailable(stage)) {
+                if (!warnedDepthAfterUpscale) {
+                    printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale "
+                           "stage - the game's depth buffer only exists at its native "
+                           "resolution, so this stage is being skipped. List ssao/dof/fog/ssr/"
+                           "motionblur/depthvignette BEFORE bilinear/nvscaler/fsr in effect= "
+                           "instead.\n", EffectNameFor(stage));
+                    warnedDepthAfterUpscale = true;
+                }
+                continue;
             }
-            continue;
+
+            taaRealPathAvailable = false;
+            static bool warnedTaaAfterUpscale = false;
+            if (!warnedTaaAfterUpscale) {
+                printf("[opengl32_enh_cpp] post_effects: 'taa' is listed after an upscale stage "
+                       "- the game's depth buffer only exists at its native resolution, so the "
+                       "reprojected path is unavailable at this position and the "
+                       "motion-vector-free fallback runs instead (sub-pixel jitter stays off, "
+                       "since nothing is resolving it). List 'taa' BEFORE bilinear/nvscaler/fsr "
+                       "in effect= to get the real one.\n");
+                warnedTaaAfterUpscale = true;
+            }
         }
 
         bool isUpscaleStage = (stage == EffectKind::Bilinear || stage == EffectKind::NVScaler ||
@@ -695,9 +740,90 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::ChromaticAberration:
                 wrote = ApplyChromaticAberration(src, dst, dstW, dstH, config.chromaticAberrationStrength);
                 break;
-            case EffectKind::Taa:
-                wrote = ApplyTaa(src, dst, dstW, dstH, config.taaBlend, config.shimmerSuppression);
+            case EffectKind::Taa: {
+                // The real path needs depth, both projections, both cameras and the pre-HUD
+                // capture. Any one missing falls back to ApplyTaa's motion-vector-free path
+                // rather than guessing - and the report back to taa_jitter.h is what arms or
+                // disarms the NEXT frame's jitter, so it must happen on BOTH paths, every
+                // frame this stage runs. Jitter that nothing resolves is pure added shimmer.
+                ProjectionParams taaCur;
+                ProjectionParams taaPrev;
+                CameraMatrix taaCamCur;
+                CameraMatrix taaCamPrev;
+                unsigned int taaWorldTex = 0;
+                int taaWorldW = 0, taaWorldH = 0;
+                // taaRealPathAvailable is false only when this stage was listed after a real
+                // upscale: g_pipeline.depthTex is then the game's native-resolution depth and
+                // dstW/dstH are the window's, so the real path must decline rather than be fed
+                // mismatched inputs. The gate above has already logged it once.
+                bool taaHaveInputs = taaRealPathAvailable &&
+                                     depthCaptured && GetCapturedProjection(taaCur) &&
+                                     GetPreviousProjection(taaPrev) &&
+                                     GetCapturedCamera(taaCamCur) &&
+                                     GetPreviousCamera(taaCamPrev) &&
+                                     GetWorldOnlyFrame(taaWorldTex, taaWorldW, taaWorldH) &&
+                                     g_pipeline.captureTex != 0;
+
+                bool ranReal = false;
+                if (taaHaveInputs) {
+                    // Split out from taaHaveInputs for the same reason motionblur's is below:
+                    // a size mismatch is a diagnosable event, not one of several legitimately
+                    // transient "not available yet" conditions. Behaviour is the same either
+                    // way - the fallback path runs this frame.
+                    bool taaDimsMatch = taaWorldW == dstW && taaWorldH == dstH &&
+                                        g_pipeline.captureWidth == dstW &&
+                                        g_pipeline.captureHeight == dstH;
+                    if (!taaDimsMatch) {
+                        static bool warnedTaaDimMismatch = false;
+                        if (!warnedTaaDimMismatch) {
+                            printf("[opengl32_enh_cpp] post_effects: taa's captured inputs "
+                                   "don't match this frame's size (world %dx%d, capture %dx%d, "
+                                   "need %dx%d) - the viewport likely changed between this "
+                                   "frame's first glOrtho and now. The motion-vector-free "
+                                   "fallback runs until the sizes agree again.\n",
+                                   taaWorldW, taaWorldH, g_pipeline.captureWidth,
+                                   g_pipeline.captureHeight, dstW, dstH);
+                            warnedTaaDimMismatch = true;
+                        }
+                    } else {
+                        // The previous frustum as CAPTURED is the jittered one. History holds
+                        // the previous frame's resolved output, which is defined at pixel
+                        // centres, so the projection into it must be unjittered - subtract
+                        // exactly the offset that was applied to THAT frame, not this one.
+                        float prevDx = 0.0f, prevDy = 0.0f;
+                        if (GetPreviousTaaJitterApplied(prevDx, prevDy)) {
+                            taaPrev.left -= prevDx;
+                            taaPrev.right -= prevDx;
+                            taaPrev.bottom -= prevDy;
+                            taaPrev.top -= prevDy;
+                        }
+
+                        // THIS frame's offset, by contrast, stays on taaCur - the depth
+                        // buffer really was rendered with the jittered frustum - and is handed
+                        // over separately so the resolve can take it back off the history fetch
+                        // coordinate. Unprojecting jittered and projecting unjittered finds the
+                        // scene point; history is indexed on the pixel grid, and the two differ
+                        // by exactly this. It is the one legitimate use of GetTaaJitterApplied
+                        // here, as against GetPreviousTaaJitterApplied above.
+                        float curDx = 0.0f, curDy = 0.0f;
+                        GetTaaJitterApplied(curDx, curDy);
+
+                        float taaReprojection[16];
+                        MotionBlurReprojection(taaCamCur, taaCamPrev, taaReprojection);
+                        wrote = ApplyTaaReal(src, dst, g_pipeline.depthTex, taaWorldTex,
+                                             g_pipeline.captureTex, dstW, dstH, taaCur, taaPrev,
+                                             taaReprojection, curDx, curDy, config.taaBlend);
+                        ranReal = wrote;
+                    }
+                }
+
+                if (!ranReal) {
+                    wrote = ApplyTaa(src, dst, dstW, dstH, config.taaBlend,
+                                     config.shimmerSuppression);
+                }
+                NotifyTaaRealPathRan(ranReal);
                 break;
+            }
             case EffectKind::Dither:
                 wrote = ApplyDither(src, dst, dstW, dstH, config.ditherStrength);
                 break;

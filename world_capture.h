@@ -15,9 +15,11 @@
 // framebuffer binding around its one copy. See texture_effect.cpp, which does the same at
 // glTexImage2D.
 //
-// Everything here is gated on motionblur (the only consumer) actually being listed in the
-// config - see LatchWorldFrame() in the .cpp. A stock ini, or effect=none, never reaches the
-// GL calls below at all.
+// Everything here is gated on a consumer actually being listed in the config - `motionblur` or
+// `taa`, whose reprojected path masks HUD pixels out of the resolve the same way; see
+// StageNeedsWorldCapture in config.h, and LatchWorldFrame() in the .cpp. A stock ini, or
+// effect=none, never reaches the GL calls below at all. The two share the one capture, so
+// listing both costs no more than either alone.
 //
 // glGetError() around the copy DRAINS whatever the game left pending first, rather than just
 // reading it: reading clears the flag, so blindly checking it after the copy would both

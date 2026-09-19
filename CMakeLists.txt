@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -87,6 +87,17 @@ add_custom_command(TARGET config_writer_test POST_BUILD
 # child lands in the log file beside the module - see debug_log_test.cpp.
 add_executable(debug_log_test debug_log_test.cpp debug_log.cpp)
 target_link_libraries(debug_log_test user32)
+
+# Pure CPU: the Halton sequence, the frustum-shift arithmetic, and the per-frame arming rule
+# from taa_jitter.h, with no GL context - see taa_jitter_test.cpp. gl_loader.cpp is linked in
+# only because taa_jitter.cpp's ApplyTaaJitterToFrustumFromCurrentViewport references
+# GetGlComputeApi(); with no context current, GetGlComputeApi() resolves to loaded=false and
+# that function's guard keeps it from ever touching GL - see taa_jitter.h.
+add_executable(taa_jitter_test taa_jitter_test.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
+
+# Pure CPU: projection_capture.h records only what the glFrustum wrapper hands it and never
+# touches the driver - see projection_capture_test.cpp.
+add_executable(projection_capture_test projection_capture_test.cpp projection_capture.cpp)
 
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
@@ -139,8 +150,11 @@ target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and calls ApplyTaa() four times in a
 # row, checking the ping-pong history buffer and neighborhood clamp reproduce a static
-# scene's color with no drift and no GL error - see taa_test.cpp.
-add_executable(taa_test taa_test.cpp taa.cpp gl_loader.cpp)
+# scene's color with no drift and no GL error. Then exercises ApplyTaaReal() - the reprojected,
+# HUD-masked, variance-clipped path - which is why taa_jitter.cpp (and the config/debug_log it
+# pulls in) is linked here: the anti-aliasing fixture drives the same jitter the game gets.
+# See taa_test.cpp.
+add_executable(taa_test taa_test.cpp taa.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
 target_link_libraries(taa_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, writes an identity .cube LUT fixture,
@@ -312,7 +326,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp debug_log.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
-    chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
+    chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
     local_contrast.cpp fx_indicator.cpp window_override.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
@@ -339,7 +353,7 @@ add_executable(config_editor WIN32
     config_editor.cpp editor_scene.cpp config_writer.cpp debug_log.cpp
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp
@@ -407,7 +421,9 @@ foreach(test_target
     config_writer_test
     window_override_test
     depth_view_test
-    debug_log_test)
+    debug_log_test
+    taa_jitter_test
+    projection_capture_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()
