@@ -17,6 +17,7 @@
 #include "projection_capture.h"
 #include "modelview_capture.h"
 #include "world_capture.h"
+#include "taa_jitter.h"
 #include "window_override.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
@@ -1653,6 +1654,7 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
             printf("[opengl32_enh_cpp]   glFrustum: resolved OK\n");
         }
     }
+    ApplyTaaJitterToFrustumFromCurrentViewport(left, right, bottom, top);
     CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
     NotifyWorldProjection();
     NotifyWorldPassBegan();
@@ -5884,6 +5886,8 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     FinalizeCameraForFrame();
     ApplySelectedEffect(p0);
     AdvanceCameraHistory();
+    AdvanceProjectionHistory();
+    AdvanceTaaJitter();
     InvalidateWorldFrame();
     return __proc_wglSwapBuffers(p0);
 }
