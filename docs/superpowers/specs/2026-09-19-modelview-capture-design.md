@@ -175,7 +175,8 @@ void FinalizeCameraForFrame();               // wglSwapBuffers, before the effec
 void AdvanceCameraHistory();                 // wglSwapBuffers, after the effect chain
 
 bool GetCapturedCamera(CameraMatrix& out);   // false until the first latch
-bool GetPreviousCamera(CameraMatrix& out);   // false until the second
+bool GetPreviousCamera(CameraMatrix& out);   // false until the first frame completes; then
+                                              // true with `previous == current` until the next
 void DecomposeCamera(const CameraMatrix& in, CameraPose& out);
 ```
 

@@ -15,6 +15,7 @@
 #include "texture_effect.h"
 #include "texture_filter.h"
 #include "projection_capture.h"
+#include "modelview_capture.h"
 #include "window_override.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
@@ -1652,6 +1653,7 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
         }
     }
     CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
+    NotifyWorldProjection();
     __proc_glFrustum(left, right, bottom, top, zNear, zFar);
 }
 
@@ -2628,6 +2630,7 @@ extern "C" __declspec(dllexport) void __stdcall glLoadIdentity(void) {
             printf("[opengl32_enh_cpp]   glLoadIdentity: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glLoadIdentity();
 }
 
@@ -2644,6 +2647,7 @@ extern "C" __declspec(dllexport) void __stdcall glLoadMatrixd(void* m) {
             printf("[opengl32_enh_cpp]   glLoadMatrixd: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glLoadMatrixd(m);
 }
 
@@ -2660,6 +2664,7 @@ extern "C" __declspec(dllexport) void __stdcall glLoadMatrixf(void* m) {
             printf("[opengl32_enh_cpp]   glLoadMatrixf: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glLoadMatrixf(m);
 }
 
@@ -2900,6 +2905,7 @@ extern "C" __declspec(dllexport) void __stdcall glMatrixMode(GLenum mode) {
             printf("[opengl32_enh_cpp]   glMatrixMode: resolved OK\n");
         }
     }
+    NotifyMatrixMode(mode);
     __proc_glMatrixMode(mode);
 }
 
@@ -2916,6 +2922,7 @@ extern "C" __declspec(dllexport) void __stdcall glMultMatrixd(void* m) {
             printf("[opengl32_enh_cpp]   glMultMatrixd: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glMultMatrixd(m);
 }
 
@@ -2932,6 +2939,7 @@ extern "C" __declspec(dllexport) void __stdcall glMultMatrixf(void* m) {
             printf("[opengl32_enh_cpp]   glMultMatrixf: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glMultMatrixf(m);
 }
 
@@ -3140,6 +3148,7 @@ extern "C" __declspec(dllexport) void __stdcall glOrtho(GLdouble left, GLdouble 
             printf("[opengl32_enh_cpp]   glOrtho: resolved OK\n");
         }
     }
+    NotifyTwoDProjection();
     __proc_glOrtho(left, right, bottom, top, zNear, zFar);
 }
 
@@ -3396,6 +3405,7 @@ extern "C" __declspec(dllexport) void __stdcall glPopMatrix(void) {
             printf("[opengl32_enh_cpp]   glPopMatrix: resolved OK\n");
         }
     }
+    NotifyMatrixPop();
     __proc_glPopMatrix();
 }
 
@@ -3476,6 +3486,7 @@ extern "C" __declspec(dllexport) void __stdcall glPushMatrix(void) {
             printf("[opengl32_enh_cpp]   glPushMatrix: resolved OK\n");
         }
     }
+    NotifyMatrixPush();
     __proc_glPushMatrix();
 }
 
@@ -4068,6 +4079,7 @@ extern "C" __declspec(dllexport) void __stdcall glRotated(GLdouble angle, GLdoub
             printf("[opengl32_enh_cpp]   glRotated: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glRotated(angle, x, y, z);
 }
 
@@ -4084,6 +4096,7 @@ extern "C" __declspec(dllexport) void __stdcall glRotatef(GLfloat angle, GLfloat
             printf("[opengl32_enh_cpp]   glRotatef: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glRotatef(angle, x, y, z);
 }
 
@@ -4100,6 +4113,7 @@ extern "C" __declspec(dllexport) void __stdcall glScaled(GLdouble x, GLdouble y,
             printf("[opengl32_enh_cpp]   glScaled: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glScaled(x, y, z);
 }
 
@@ -4116,6 +4130,7 @@ extern "C" __declspec(dllexport) void __stdcall glScalef(GLfloat x, GLfloat y, G
             printf("[opengl32_enh_cpp]   glScalef: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glScalef(x, y, z);
 }
 
@@ -5044,6 +5059,7 @@ extern "C" __declspec(dllexport) void __stdcall glTranslated(GLdouble x, GLdoubl
             printf("[opengl32_enh_cpp]   glTranslated: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glTranslated(x, y, z);
 }
 
@@ -5060,6 +5076,7 @@ extern "C" __declspec(dllexport) void __stdcall glTranslatef(GLfloat x, GLfloat 
             printf("[opengl32_enh_cpp]   glTranslatef: resolved OK\n");
         }
     }
+    NotifyMatrixEdited();
     __proc_glTranslatef(x, y, z);
 }
 
@@ -5861,7 +5878,9 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
             printf("[opengl32_enh_cpp]   wglSwapBuffers: resolved OK\n");
         }
     }
+    FinalizeCameraForFrame();
     ApplySelectedEffect(p0);
+    AdvanceCameraHistory();
     return __proc_wglSwapBuffers(p0);
 }
 

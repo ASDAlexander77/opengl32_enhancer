@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -210,6 +210,15 @@ target_link_libraries(light_shafts_test opengl32 gdi32 user32)
 # - see ssr_test.cpp.
 add_executable(ssr_test ssr_test.cpp ssr.cpp gl_loader.cpp projection_capture.cpp)
 target_link_libraries(ssr_test opengl32 gdi32 user32)
+
+# Creates a real GL context, drives the matrix-call sequence a Quake II-family engine makes
+# (world pass, entity push/pop, HUD ortho pass) alongside modelview_capture.h's hooks, and
+# checks the captured camera against the driver's own GL_MODELVIEW_MATRIX - see
+# modelview_capture_test.cpp. Links config.cpp and debug_log.cpp because the optional
+# cameraLogInterval diagnostic reads the config, the same way window_override_test does.
+add_executable(modelview_capture_test modelview_capture_test.cpp modelview_capture.cpp
+    config.cpp debug_log.cpp)
+target_link_libraries(modelview_capture_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a 3D scene under a real glFrustum projection (a wall with a
 # box in front of it), and checks ApplySsao()'s two-pass GPU pipeline reproduces the input exactly
@@ -409,6 +418,7 @@ foreach(test_target
     fog_test
     light_shafts_test
     ssr_test
+    modelview_capture_test
     chromatic_aberration_test
     smaa_test
     nr_test

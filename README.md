@@ -609,6 +609,11 @@ nothing depth-based can be tuned against it.
 4. `glTexImage2D` is intercepted separately for the optional
    [texture effects](#texture-effects), and `glTexParameteri`/`glTexParameterf`
    for [anisotropic filtering](#anisotropic-filtering).
+5. The matrix calls — `glFrustum`, `glOrtho`, `glMatrixMode`,
+   `glPushMatrix`/`glPopMatrix` and the calls that modify the current matrix —
+   are watched without being changed, to work out where the camera is and which
+   way it points. Depth-based stages need that to relate a pixel to a point in
+   the world. Nothing uses it yet; it is groundwork.
 
 Exports are emitted under their true undecorated names through a `.def` file,
 since `__declspec(dllexport)` alone would apply `__stdcall`'s `@N` decoration
@@ -638,6 +643,14 @@ directly. Set `gl_driver` to the proxy, or leave it at its default of
 **Effects are disabled with a message about GL 4.3.** The GPU or driver does
 not expose the compute-shader support the effects need. This is expected on
 very old hardware, and on software renderers.
+
+**Checking the camera capture.** This proxy works out where the camera is by
+watching the game's matrix calls — a heuristic about how the engine draws, not
+something the game tells it. No effect uses this yet; it is groundwork. To check
+it works in your game, set `cameraLogInterval=60` in the ini, play for a few
+seconds, and read `opengl32_enhancer.log`: the logged position should slide as
+you walk and hold still as you turn. If it jumps around while you stand still,
+the capture is picking up something that is not the camera.
 
 ## Building from source
 
