@@ -76,7 +76,16 @@ dy = jy * (t - b) / H        b += dy;  t += dy
 
 Shifting both edges leaves `r-l` unchanged and moves `r+l` by `2*dx`, so `x_ndc' = x_ndc - 2*dx/(r-l) = x_ndc - 2*jx/W`, i.e. the rendered image translates by exactly **`-jx` pixels** horizontally and `-jy` vertically. That is the convention; a test pins it, and if the implementation lands on the opposite sign the *formula* is corrected, not the test.
 
-Everything downstream consumes **matrices, not offsets**, and is self-consistent by construction: the resolve unprojects with the jittered frustum that produced the depth, and projects into history with the unjittered previous frustum. The single exception is reconstructing that unjittered previous frustum, which subtracts the previous frame's recorded `(dx, dy)`. So a jitter sign error can only originate in one function and one subtraction.
+The resolve unprojects with the jittered frustum that produced the depth, and projects into history with the unjittered previous frustum. Two corrections then have to be applied on top, and **an earlier draft of this spec claimed they were unnecessary — that claim was wrong and cost a Critical review finding**, so it is spelled out here:
+
+- Reconstructing the unjittered previous frustum subtracts the **previous** frame's recorded `(dx, dy)`.
+- The **current** frame's jitter must be subtracted from the resulting history UV.
+
+The second is the one the earlier draft missed, on the reasoning that consuming matrices rather than offsets made the composition self-consistent. It does not. Unprojecting with the jittered current frustum and projecting with the unjittered previous one produces a **scene-space motion vector** — where this scene point was last frame — but history is indexed on the **pixel grid**. The two differ by exactly the current jitter: measured on the built shader at `l=-1, r=1, W=1600, jx=0.375`, the history UV landed 0.375 px from the pixel being resolved.
+
+Left uncorrected it is not a rounding detail. The Halton `jx` cycle has mean `-0.0547`, so under the history recursion `D <- blend*(D + j)` the image settles at a systematic displacement of about `-0.36` px with a period-8 oscillation — the "permanent wobble" this section warns about, produced by single-counting the offset rather than double-counting it. It also blunts the feature itself, since fetching history at the current sample's position re-averages the same scene point instead of accumulating new sub-pixel samples.
+
+Standard TAA computes velocity with **both** ends unjittered, so a static camera yields exactly zero. With both corrections applied, a jitter sign error can still only originate in `JitterFrustumBounds` and these two subtractions.
 
 `W` and `H` come from `glGetIntegerv(GL_VIEWPORT)` at `glFrustum` time. Quake II's `R_SetupGL` sets the viewport before the frustum, and `post_effects.cpp` (around line 415) already reads it the same way. One call per frame — the precedent `modelview_capture.h` set with its single `glGetFloatv`.
 
@@ -112,7 +121,7 @@ Real path, per pixel:
 1. **HUD test first.** `any(abs(capture(p) - world(p)) > 1/128)`, the predicate `motion_blur.cpp` already uses. A HUD pixel takes the current frame verbatim and seeds history — no reprojection, no clip. Subtitles neither ghost nor soften.
 2. **Unproject** this pixel's depth with the **jittered** current frustum.
 3. **Reproject** by `V_prev * V_cur^-1`, from `MotionBlurReprojection()`, reused unchanged.
-4. **Project** with the **unjittered** previous frustum to get the history UV.
+4. **Project** with the **unjittered** previous frustum, then **subtract the current frame's jitter** in UV units to get the history UV. Both subtractions are required — see "The jitter formula, and the one place a sign can be wrong" above for why omitting the second displaces the whole image by about a third of a pixel. A static camera must yield a history UV exactly equal to the pixel's own UV; that is the property to test.
 5. **Reject** if that UV is outside `[0,1]`: the pixel was off screen last frame, so there is no history. Take current.
 6. **Variance clip**, not min/max: compute the mean and standard deviation of the 3x3 current neighbourhood (including the centre, 9 samples) and clip history to `mean +/- gamma*sigma` with **`gamma = 1.0`**. `taa.h` already documents stale history surviving inside the looser min/max box on busy content. `gamma` is a compile-time constant, not a config key — it is not exposed until there is evidence a user needs to tune it.
 7. **Blend** by `taaBlend` and **dual-store** to output and history, keeping the existing single-dispatch trick.
