@@ -88,9 +88,16 @@ add_custom_command(TARGET config_writer_test POST_BUILD
 add_executable(debug_log_test debug_log_test.cpp debug_log.cpp)
 target_link_libraries(debug_log_test user32)
 
-# Pure CPU: the Halton sequence and the frustum-shift arithmetic from taa_jitter.h, with no GL
-# context - see taa_jitter_test.cpp.
-add_executable(taa_jitter_test taa_jitter_test.cpp taa_jitter.cpp config.cpp debug_log.cpp)
+# Pure CPU: the Halton sequence, the frustum-shift arithmetic, and the per-frame arming rule
+# from taa_jitter.h, with no GL context - see taa_jitter_test.cpp. gl_loader.cpp is linked in
+# only because taa_jitter.cpp's ApplyTaaJitterToFrustumFromCurrentViewport references
+# GetGlComputeApi(); with no context current, GetGlComputeApi() resolves to loaded=false and
+# that function's guard keeps it from ever touching GL - see taa_jitter.h.
+add_executable(taa_jitter_test taa_jitter_test.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
+
+# Pure CPU: projection_capture.h records only what the glFrustum wrapper hands it and never
+# touches the driver - see projection_capture_test.cpp.
+add_executable(projection_capture_test projection_capture_test.cpp projection_capture.cpp)
 
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
@@ -412,7 +419,8 @@ foreach(test_target
     window_override_test
     depth_view_test
     debug_log_test
-    taa_jitter_test)
+    taa_jitter_test
+    projection_capture_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()

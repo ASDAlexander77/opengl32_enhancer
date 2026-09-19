@@ -8,6 +8,9 @@ namespace {
 ProjectionParams g_captured;
 bool g_hasCaptured = false;
 
+ProjectionParams g_previous;
+bool g_hasPrevious = false;
+
 }  // namespace
 
 void CaptureProjectionFrustum(double left, double right, double bottom, double top,
@@ -36,4 +39,19 @@ bool GetCapturedProjection(ProjectionParams& out) {
     }
     out = g_captured;
     return true;
+}
+
+bool GetPreviousProjection(ProjectionParams& out) {
+    if (!g_hasPrevious) {
+        return false;
+    }
+    out = g_previous;
+    return true;
+}
+
+void AdvanceProjectionHistory() {
+    if (g_hasCaptured) {
+        g_previous = g_captured;
+        g_hasPrevious = true;
+    }
 }

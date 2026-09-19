@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "config.h"
 #include "taa_jitter.h"
 
 namespace {
@@ -174,11 +175,115 @@ bool CheckFrustumShift() {
     return ok;
 }
 
+bool CheckArming() {
+    bool ok = true;
+
+    const double kLeft = -1.0, kRight = 1.0, kBottom = -0.75, kTop = 0.75;
+    // Same 1600x1200 viewport as CheckFrustumShift, passed explicitly: ApplyTaaJitterToFrustum
+    // is pure and takes the viewport as arguments rather than reading GL_VIEWPORT itself (see
+    // taa_jitter.h) - that split is what lets this run with no GL context at all.
+    const int kWidth = 1600, kHeight = 1200;
+
+    // The arming rule also requires `taa` to be in the effect chain and taaJitter to be on (see
+    // AdvanceTaaJitter in taa_jitter.cpp). A default-constructed AnaxConfig has stageCount == 0,
+    // so without this every case below would be disarmed for a reason that has nothing to do
+    // with the one it means to test. Set it once, for every case in this function, via
+    // GetMutableAnaxConfig() (see config.h) - the same escape hatch world_capture_test.cpp and
+    // window_override_test.cpp use to drive a config directly, with no ini file involved.
+    AnaxConfig& config = GetMutableAnaxConfig();
+    config.stageCount = 0;
+    config.stages[config.stageCount++] = EffectKind::Taa;
+    config.taaJitter = true;
+
+    // Disarmed by default: nothing has told the module that a real TAA resolve is consuming
+    // the jitter, so it must not touch the game's projection. Jitter with nothing resolving it
+    // is strictly worse than no jitter - it is added shimmer and nothing else. The chain set up
+    // above already satisfies the arming rule's other two conditions, so this case is disarmed
+    // for exactly one reason: NotifyTaaRealPathRan(false).
+    {
+        NotifyTaaRealPathRan(false);
+        AdvanceTaaJitter();
+        double l = kLeft, r = kRight, b = kBottom, t = kTop;
+        ApplyTaaJitterToFrustum(l, r, b, t, kWidth, kHeight);
+        ok = Check(l == kLeft && r == kRight && b == kBottom && t == kTop,
+                   "a disarmed frame leaves the frustum bit-identical") && ok;
+
+        float dx = 1.0f, dy = 1.0f;
+        ok = Check(!GetTaaJitterApplied(dx, dy),
+                   "a disarmed frame reports no applied offset") && ok;
+    }
+
+    // Armed once the resolve reports that its real path ran. The signal is one frame lagged on
+    // purpose, which is why the Advance call sits between the notify and the apply.
+    {
+        NotifyTaaRealPathRan(true);
+        AdvanceTaaJitter();
+        double l = kLeft, r = kRight, b = kBottom, t = kTop;
+        ApplyTaaJitterToFrustum(l, r, b, t, kWidth, kHeight);
+        ok = Check(l != kLeft || b != kBottom,
+                   "an armed frame shifts the frustum") && ok;
+
+        float dx = 0.0f, dy = 0.0f;
+        ok = Check(GetTaaJitterApplied(dx, dy) && (dx != 0.0f || dy != 0.0f),
+                   "an armed frame reports the offset it applied") && ok;
+    }
+
+    // The previous frame's offset must survive the advance, because the resolve rebuilds the
+    // UNJITTERED previous frustum by subtracting exactly it. Reading the current offset there
+    // instead would leave a permanent sub-pixel error in every history lookup.
+    {
+        NotifyTaaRealPathRan(true);
+        AdvanceTaaJitter();
+        double l1 = kLeft, r1 = kRight, b1 = kBottom, t1 = kTop;
+        ApplyTaaJitterToFrustum(l1, r1, b1, t1, kWidth, kHeight);
+        float firstDx = 0.0f, firstDy = 0.0f;
+        GetTaaJitterApplied(firstDx, firstDy);
+
+        NotifyTaaRealPathRan(true);
+        AdvanceTaaJitter();
+        double l2 = kLeft, r2 = kRight, b2 = kBottom, t2 = kTop;
+        ApplyTaaJitterToFrustum(l2, r2, b2, t2, kWidth, kHeight);
+
+        float prevDx = 0.0f, prevDy = 0.0f;
+        ok = Check(GetPreviousTaaJitterApplied(prevDx, prevDy) &&
+                   NearlyEqual(prevDx, firstDx, 1e-12) && NearlyEqual(prevDy, firstDy, 1e-12),
+                   "the previous frame's offset is retained across an advance") && ok;
+
+        float curDx = 0.0f, curDy = 0.0f;
+        GetTaaJitterApplied(curDx, curDy);
+        ok = Check(!NearlyEqual(curDx, prevDx, 1e-12) || !NearlyEqual(curDy, prevDy, 1e-12),
+                   "consecutive armed frames use different offsets") && ok;
+    }
+
+    // Two glFrustum calls in one frame - a viewmodel drawn at a different field of view - must
+    // share that frame's offset. Two different offsets inside one frame would render the world
+    // and the viewmodel at inconsistent sub-pixel positions.
+    {
+        NotifyTaaRealPathRan(true);
+        AdvanceTaaJitter();
+        double la = kLeft, ra = kRight, ba = kBottom, ta = kTop;
+        ApplyTaaJitterToFrustum(la, ra, ba, ta, kWidth, kHeight);
+        float dxA = 0.0f, dyA = 0.0f;
+        GetTaaJitterApplied(dxA, dyA);
+
+        double lb = kLeft, rb = kRight, bb = kBottom, tb = kTop;
+        ApplyTaaJitterToFrustum(lb, rb, bb, tb, kWidth, kHeight);
+        float dxB = 0.0f, dyB = 0.0f;
+        GetTaaJitterApplied(dxB, dyB);
+
+        ok = Check(NearlyEqual(dxA, dxB, 1e-12) && NearlyEqual(dyA, dyB, 1e-12),
+                   "both glFrustum calls in one frame share that frame's offset") && ok;
+    }
+
+    return ok;
+}
+
 }  // namespace
 
 int main() {
     CheckHaltonSequence();
     CheckFrustumShift();
+    CheckArming();
 
     if (g_failures != 0) {
         printf("taa_jitter_test: %d FAILURE(S)\n", g_failures);
