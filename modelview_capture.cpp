@@ -73,8 +73,17 @@ void LatchCamera() {
         return;
     }
 
+    // glGetFloatv writes nothing at all when there is no current context, which would leave the
+    // default-constructed identity in place and record a camera at the world origin as though it
+    // were real - worse than recording nothing, because a consumer cannot tell the difference. A
+    // view matrix built from the fixed-function stack always has m[15] == 1, so a sentinel that
+    // survives the call means nothing was written and there is nothing to record.
     CameraMatrix taken;
+    taken.m[15] = 0.0f;
     glGetFloatv(kGlModelviewMatrix, taken.m);
+    if (taken.m[15] != 1.0f) {
+        return;
+    }
     g_current = taken;
     g_hasCurrent = true;
     g_latched = true;

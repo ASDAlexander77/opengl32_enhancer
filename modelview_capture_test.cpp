@@ -442,6 +442,37 @@ int main() {
         AdvanceCameraHistory();
     }
 
+    // --- Case 10: no current GL context. The wrapper's exported entry points can be reached in
+    // states a game's own rendering never produces, and glGetFloatv writes nothing when there is
+    // no context - leaving the default-constructed identity behind. Recording that would hand a
+    // consumer a plausible matrix for a camera at the world origin, which is worse than recording
+    // nothing. The contract is "no-op rather than guess"; this is what holds it.
+    wglMakeCurrent(nullptr, nullptr);
+    {
+        CameraMatrix before;
+        bool hadBefore = GetCapturedCamera(before);
+
+        BeginWorldPass();
+        pMatrixMode(GL_MODELVIEW);
+        NotifyMatrixMode(GL_MODELVIEW);
+        pLoadIdentity();
+        NotifyMatrixEdited();
+        pTranslatef(-1.0f, -2.0f, -3.0f);
+        NotifyMatrixEdited();
+        FinalizeCameraForFrame();
+
+        CameraMatrix after;
+        bool hasAfter = GetCapturedCamera(after);
+        if (hadBefore && hasAfter && !MatricesEqual(after.m, before.m)) {
+            PrintMatrix("after ", after.m);
+            PrintMatrix("before", before.m);
+        }
+        Check(hadBefore && hasAfter && MatricesEqual(after.m, before.m),
+              "no current GL context: the latch records nothing rather than a bogus identity");
+
+        AdvanceCameraHistory();
+    }
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);
