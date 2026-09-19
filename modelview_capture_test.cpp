@@ -116,6 +116,16 @@ void DrawEntity(float x, float y, float z, float yaw) {
     NotifyMatrixPop();
 }
 
+bool NearlyEqual(float a, float b, float tolerance) {
+    float d = a - b;
+    return (d < 0.0f ? -d : d) <= tolerance;
+}
+
+bool Vec3NearlyEqual(const float* v, float x, float y, float z, float tolerance) {
+    return NearlyEqual(v[0], x, tolerance) && NearlyEqual(v[1], y, tolerance) &&
+           NearlyEqual(v[2], z, tolerance);
+}
+
 }  // namespace
 
 int main() {
@@ -317,6 +327,89 @@ int main() {
         }
         Check(got && MatricesEqual(camera.m, knownCamera),
               "glOrtho disarms: a HUD pass with no camera pending cannot become the camera");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 7: history. During a frame, "previous" must be the LAST frame's camera - which
+    // is the whole point of keeping it, and what reprojection will consume.
+    {
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 1.0f, 2.0f, 3.0f);
+        float frameOne[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, frameOne);
+        FinalizeCameraForFrame();
+        AdvanceCameraHistory();
+
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 11.0f, 22.0f, 33.0f);
+        float frameTwo[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, frameTwo);
+        FinalizeCameraForFrame();
+
+        CameraMatrix current, previous;
+        bool gotCurrent = GetCapturedCamera(current);
+        bool gotPrevious = GetPreviousCamera(previous);
+        Check(gotCurrent && MatricesEqual(current.m, frameTwo),
+              "GetCapturedCamera() returns this frame's camera");
+        Check(gotPrevious && MatricesEqual(previous.m, frameOne),
+              "GetPreviousCamera() returns the previous frame's camera, not this one's");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 8: a second glFrustum within one frame - a viewmodel at its own FOV, a scope -
+    // is a sub-pass of the same camera and must not replace what was already latched.
+    {
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 4.0f, 5.0f, 6.0f);
+        float worldCamera[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, worldCamera);
+        DrawEntity(0.0f, 0.0f, 0.0f, 0.0f);   // latches here
+
+        BeginWorldPass();                      // a second frustum, same frame
+        SetWorldCamera(0.0f, 90.0f, 0.0f, 900.0f, 900.0f, 900.0f);
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, worldCamera)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("expected", worldCamera);
+        }
+        Check(got && MatricesEqual(camera.m, worldCamera),
+              "a second glFrustum in the same frame does not replace the latched camera");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 9: decomposition. The identity view matrix is the unambiguous case, and the
+    // Quake II sequence is the real one: whatever rotations precede it, the recovered world
+    // position must be the eye the engine translated by.
+    {
+        CameraMatrix identity;
+        CameraPose pose;
+        DecomposeCamera(identity, pose);
+        Check(Vec3NearlyEqual(pose.position, 0.0f, 0.0f, 0.0f, 1e-4f),
+              "DecomposeCamera: identity view matrix is at the world origin");
+        Check(Vec3NearlyEqual(pose.right, 1.0f, 0.0f, 0.0f, 1e-4f) &&
+              Vec3NearlyEqual(pose.up, 0.0f, 1.0f, 0.0f, 1e-4f) &&
+              Vec3NearlyEqual(pose.forward, 0.0f, 0.0f, -1.0f, 1e-4f),
+              "DecomposeCamera: identity view matrix looks down -Z with +Y up");
+
+        BeginWorldPass();
+        SetWorldCamera(12.0f, 34.0f, 0.0f, 128.0f, -64.0f, 48.0f);
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        DecomposeCamera(camera, pose);
+        if (got) {
+            printf("  recovered eye = %.3f/%.3f/%.3f (expected 128.000/-64.000/48.000)\n",
+                   pose.position[0], pose.position[1], pose.position[2]);
+        }
+        Check(got && Vec3NearlyEqual(pose.position, 128.0f, -64.0f, 48.0f, 1e-2f),
+              "DecomposeCamera: recovers the eye position from a real R_SetupGL matrix");
 
         AdvanceCameraHistory();
     }

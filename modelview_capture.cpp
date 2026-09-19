@@ -165,6 +165,21 @@ bool GetPreviousCamera(CameraMatrix& out) {
 }
 
 void DecomposeCamera(const CameraMatrix& in, CameraPose& out) {
-    (void)in;
-    (void)out;
+    // Column-major: element (row, col) is m[col * 4 + row]. The view matrix is [R | t] with R
+    // the world->view rotation, so R's ROWS are the camera's axes in world coordinates - and a
+    // row of R is a stride-4 walk of the stored array.
+    const float* m = in.m;
+
+    out.right[0]   =  m[0];  out.right[1]   =  m[4];  out.right[2]   =  m[8];
+    out.up[0]      =  m[1];  out.up[1]      =  m[5];  out.up[2]      =  m[9];
+    out.forward[0] = -m[2];  out.forward[1] = -m[6];  out.forward[2] = -m[10];
+
+    // The eye in world space is -R^T * t. R is orthonormal for any camera built from rotations
+    // and a translation, so the transpose is the inverse and no general inversion is needed -
+    // a game that scales its modelview before drawing the world would break that assumption,
+    // and no id Tech 2-era engine does.
+    const float tx = m[12], ty = m[13], tz = m[14];
+    out.position[0] = -(m[0] * tx + m[1] * ty + m[2]  * tz);
+    out.position[1] = -(m[4] * tx + m[5] * ty + m[6]  * tz);
+    out.position[2] = -(m[8] * tx + m[9] * ty + m[10] * tz);
 }
