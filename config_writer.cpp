@@ -49,6 +49,7 @@ const char* const kManagedKeys[] = {
     "depthVignetteThreshold",
     "chromaticAberrationStrength",
     "taaBlend",
+    "taaJitter",
     "shimmerSuppression",
     "sharpness",
     "fsrDenoise",
@@ -126,6 +127,7 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "depthVignetteThreshold") == 0)      { out = FormatFloat(config.depthVignetteThreshold); return true; }
     if (strcmp(key, "chromaticAberrationStrength") == 0) { out = FormatFloat(config.chromaticAberrationStrength); return true; }
     if (strcmp(key, "taaBlend") == 0)                    { out = FormatFloat(config.taaBlend); return true; }
+    if (strcmp(key, "taaJitter") == 0)                   { out = config.taaJitter ? "1" : "0"; return true; }
     if (strcmp(key, "shimmerSuppression") == 0)          { out = FormatFloat(config.shimmerSuppression); return true; }
     if (strcmp(key, "sharpness") == 0)                   { out = FormatFloat(config.sharpness); return true; }
     if (strcmp(key, "fsrDenoise") == 0)                  { out = config.fsrDenoise ? "1" : "0"; return true; }

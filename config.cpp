@@ -341,6 +341,27 @@ bool HasEffectStage(const AnaxConfig& config, EffectKind stage) {
     return false;
 }
 
+// See config.h for why this (and AnyStageNeedsWorldCapture below) live here rather than beside
+// StageNeedsDepth in post_effects.h.
+bool StageNeedsWorldCapture(EffectKind stage) {
+    switch (stage) {
+        case EffectKind::MotionBlur:
+        case EffectKind::Taa:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool AnyStageNeedsWorldCapture(const AnaxConfig& config) {
+    for (int i = 0; i < config.stageCount; ++i) {
+        if (StageNeedsWorldCapture(config.stages[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const char* EffectNameFor(EffectKind stage) {
     int index = (int)stage;
     if (index < 0 || index >= kStageNameCount) {
@@ -405,6 +426,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.scale = ParseClampedFloat(value, 0.5f, 1.0f, config.scale, "scale");
         } else if (strcmp(key, "taaBlend") == 0) {
             config.taaBlend = ParseClampedFloat(value, 0.0f, 1.0f, config.taaBlend, "taaBlend");
+        } else if (strcmp(key, "taaJitter") == 0) {
+            config.taaJitter = ParseBool(value, config.taaJitter, "taaJitter");
         } else if (strcmp(key, "acesStrength") == 0) {
             config.acesStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.acesStrength, "acesStrength");
         } else if (strcmp(key, "bloomThreshold") == 0) {
@@ -575,7 +598,7 @@ AnaxConfig ParseConfigFile(const char* path) {
     printf("[opengl32_enh_cpp] config: loaded from '%s' (effect=%s; scale=%.3f, acesStrength=%.3f, "
            "bloomThreshold=%.3f, bloomIntensity=%.3f, sharpness=%.3f, lutPath='%s', lutStrength=%.3f, "
            "vignetteIntensity=%.3f, vignetteRadius=%.3f, chromaticAberrationStrength=%.3f, "
-           "taaBlend=%.3f, ditherStrength=%.3f, fsrDenoise=%s, fsrFilmGrain=%.3f, "
+           "taaBlend=%.3f, taaJitter=%s, ditherStrength=%.3f, fsrDenoise=%s, fsrFilmGrain=%.3f, "
            "nrIntensity=%.3f, nrPasses=%d, nrColorStrength=%.3f, nrTonePreservation=%.3f, "
            "nrGrainPreservation=%.3f, localStructureStrength=%.3f, localToneStrength=%.3f, "
            "shimmerSuppression=%.3f, depthVignetteIntensity=%.3f, depthVignetteThreshold=%.3f, "
@@ -594,7 +617,8 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
            config.vignetteIntensity, config.vignetteRadius, config.chromaticAberrationStrength,
-           config.taaBlend, config.ditherStrength, config.fsrDenoise ? "true" : "false",
+           config.taaBlend, config.taaJitter ? "true" : "false",
+           config.ditherStrength, config.fsrDenoise ? "true" : "false",
            config.fsrFilmGrain,
            config.nrIntensity, config.nrPasses, config.nrColorStrength, config.nrTonePreservation,
            config.nrGrainPreservation, config.localStructureStrength, config.localToneStrength,

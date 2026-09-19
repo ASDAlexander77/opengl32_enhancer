@@ -353,8 +353,12 @@ void LogMotionBlurIfDue(const CameraMatrix& current, const CameraMatrix& previou
            "wrote=%s\n", thisFrame, degrees, wrote ? "yes" : "no");
 }
 
-// See post_effects.h. Every stage named here passes g_pipeline.depthTex to its Apply*() in the
-// switch below, and every stage that does must be named here.
+// See post_effects.h. Every stage that passes g_pipeline.depthTex to its Apply*() in the switch
+// below must be named here. `taa` is the one exception in the other direction: it is registered
+// here ahead of its own ApplyTaa() call actually taking depthTex, because a later change in this
+// plan gives `taa` a depth-based reprojection step, and the allocation gate this predicate feeds
+// must already include it when that lands - allocating one texture too early is cheap, allocating
+// it too late (an unpopulated depth path on the very frame it's needed) is not something to race.
 bool StageNeedsDepth(EffectKind stage) {
     switch (stage) {
         case EffectKind::DepthVignette:
@@ -363,6 +367,7 @@ bool StageNeedsDepth(EffectKind stage) {
         case EffectKind::Fog:
         case EffectKind::Ssr:
         case EffectKind::MotionBlur:
+        case EffectKind::Taa:
             return true;
         default:
             return false;
@@ -509,7 +514,7 @@ void ApplySelectedEffect(void* hdc) {
             break;
         }
     }
-    bool needCapture = HasEffectStage(config, EffectKind::MotionBlur);
+    bool needCapture = AnyStageNeedsWorldCapture(config);
     EnsurePipelineTextures(gl, nativeWidth, nativeHeight, dstWidth, dstHeight, needDepth, needCapture);
 
     auto restoreState = [&]() {

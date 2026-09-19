@@ -63,12 +63,12 @@ void LatchWorldFrame() {
     // Everything below this point costs a handful of glGetIntegerv calls, a full-resolution
     // glCopyTexSubImage2D of the back buffer with 8-bit->16F conversion, a glGetError() (a
     // driver sync point) and a permanently-allocated full-res RGBA16F texture - all of it wasted
-    // if motionblur (the only consumer, see motion_blur.h) isn't even listed. GetAnaxConfig()
-    // parses the ini once and caches the result for the process lifetime (see config.h), so this
-    // gate is a cached struct read plus a short loop over at most a couple of dozen stages - not
-    // a per-frame re-parse, and not something that tracks an ini edit made while the DLL is
-    // already loaded.
-    if (!HasEffectStage(GetAnaxConfig(), EffectKind::MotionBlur)) {
+    // if no stage that needs it (see StageNeedsWorldCapture in config.h) is even listed.
+    // GetAnaxConfig() parses the ini once and caches the result for the process lifetime (see
+    // config.h), so this gate is a cached struct read plus a short loop over at most a couple of
+    // dozen stages - not a per-frame re-parse, and not something that tracks an ini edit made
+    // while the DLL is already loaded.
+    if (!AnyStageNeedsWorldCapture(GetAnaxConfig())) {
         return;
     }
 

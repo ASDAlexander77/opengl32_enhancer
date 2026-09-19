@@ -29,4 +29,11 @@ void ApplySelectedEffect(void* hdc);
 // without being listed, so `effect=ssr` on its own allocated no depth texture and the stage did
 // nothing at all, while `effect=ssao, ssr` worked because ssao happened to request the depth
 // that ssr then used.
+//
+// This stays here, rather than moving to config.h alongside the analogous StageNeedsWorldCapture,
+// because it has exactly one consumer - post_effects.cpp, which declares and defines it in the
+// same file this header belongs to. StageNeedsWorldCapture has two consumers in two different
+// translation units (post_effects.cpp and world_capture.cpp), so IT lives in config.h, the
+// vocabulary both already share. Same reasoning, opposite header, because the two predicates
+// have a different number of callers.
 bool StageNeedsDepth(EffectKind stage);

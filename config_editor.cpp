@@ -209,6 +209,7 @@ void DrawParameters(AnaxConfig& config) {
     }
     if (ImGui::CollapsingHeader("Anti-aliasing")) {
         ImGui::SliderFloat("taaBlend", &config.taaBlend, 0.0f, 1.0f);
+        ImGui::Checkbox("taaJitter", &config.taaJitter);
         ImGui::SliderFloat("shimmerSuppression", &config.shimmerSuppression, 0.0f, 1.0f);
         ImGui::TextDisabled("taa blends across frames - it needs a moment to settle.");
     }

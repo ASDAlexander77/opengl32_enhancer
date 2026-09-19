@@ -149,11 +149,11 @@ bool CheckDepthStageSet() {
         {EffectKind::Fog,                 true,  "fog"},
         {EffectKind::Ssr,                 true,  "ssr"},
         {EffectKind::MotionBlur,          true,  "motionblur"},
+        {EffectKind::Taa,                 true,  "taa"},
         // A sample of stages that read colour only. If one of these ever starts reporting true
         // the pipeline pays for a depth blit every frame that does not need one.
         {EffectKind::Bloom,               false, "bloom"},
         {EffectKind::Gamma,               false, "gamma"},
-        {EffectKind::Taa,                 false, "taa"},
         {EffectKind::LightShafts,         false, "lightshafts"},
         {EffectKind::NVScaler,            false, "nvscaler"},
         {EffectKind::None,                false, "none"},
@@ -166,6 +166,40 @@ bool CheckDepthStageSet() {
         snprintf(what, sizeof(what), "StageNeedsDepth(%s) == %s",
                  kExpected[i].name, kExpected[i].needsDepth ? "true" : "false");
         allMatched = Check(actual == kExpected[i].needsDepth, what) && allMatched;
+    }
+    return allMatched;
+}
+
+// Pins the set of stages that need the pre-HUD world-only colour capture - see
+// StageNeedsWorldCapture() in config.h. Same shape and same honesty as CheckDepthStageSet()
+// above, and the same limits apply: this is a table, not an integration run. It proves the
+// predicate names every stage that actually wants the capture, which is the half that went
+// wrong before (two hand-written copies of the same check, only one of which got updated when
+// a second consumer showed up). It does NOT prove that AnyStageNeedsWorldCapture's own loop -
+// or either of its two call sites - actually calls this predicate; that stays a reading of the
+// code (post_effects.cpp's needCapture line and world_capture.cpp's own gate).
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckWorldCaptureStageSet() {
+    struct Expectation { EffectKind stage; bool needsCapture; const char* name; };
+    const Expectation kExpected[] = {
+        {EffectKind::MotionBlur,          true,  "motionblur"},
+        {EffectKind::Taa,                 true,  "taa"},
+        // A sample of stages that don't need it. If one of these ever starts reporting true the
+        // pipeline pays for a full-resolution capture and a permanent texture every frame that
+        // does not need one.
+        {EffectKind::Bloom,               false, "bloom"},
+        {EffectKind::Gamma,               false, "gamma"},
+        {EffectKind::None,                false, "none"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        bool actual = StageNeedsWorldCapture(kExpected[i].stage);
+        char what[160];
+        snprintf(what, sizeof(what), "StageNeedsWorldCapture(%s) == %s",
+                 kExpected[i].name, kExpected[i].needsCapture ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].needsCapture, what) && allMatched;
     }
     return allMatched;
 }
@@ -246,6 +280,7 @@ int main() {
     pGlViewport(0, 0, width, height);
 
     bool ok = CheckDepthStageSet();
+    ok = CheckWorldCaptureStageSet() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {

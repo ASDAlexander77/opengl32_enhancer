@@ -531,6 +531,7 @@ vignetteIntensity=0.25
 vignetteRadius=0.7
 chromaticAberrationStrength=0.3
 taaBlend=0.85
+taaJitter=true
 sharpness=0.75
 ditherStrength=0.7
 ```

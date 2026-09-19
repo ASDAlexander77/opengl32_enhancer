@@ -122,6 +122,9 @@ int main() {
     config.ssrUpThreshold = 0.55f;
     config.motionBlurStrength = 0.77f;
     config.motionBlurMaxRadius = 0.12f;
+    // Default is true, so set it false here - otherwise the round trip would pass even if
+    // WriteConfigToIni never wrote this key at all.
+    config.taaJitter = false;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -188,6 +191,7 @@ int main() {
                "float value round-tripped (brightness)") && ok;
     ok = Check(reloaded.nrPasses == 3, "int value round-tripped (nrPasses)") && ok;
     ok = Check(reloaded.fxIndicator == expectedIndicator, "bool value round-tripped (fxIndicator)") && ok;
+    ok = Check(reloaded.taaJitter == false, "bool value round-tripped (taaJitter)") && ok;
     ok = Check(reloaded.textureEffect == EffectKind::Invert, "enum value round-tripped (textureEffect)") && ok;
     ok = Check(reloaded.stageCount == 3 &&
                reloaded.stages[0] == EffectKind::Ssao &&
