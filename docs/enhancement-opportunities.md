@@ -90,14 +90,32 @@ driver with `glGetFloatv` rather than recomputed, so the captured value cannot
 drift from what the game's GL holds; the whole module decides *when*, never
 *what*.
 
-What remains a guess is the "when". It is validated against Quake II's
-`R_SetupGL` and against a real GL driver in `modelview_capture_test.cpp`, but
-**not yet against Anachronox** — `cameraLogInterval` exists so that check can
-be made, and it has not been made. An engine that builds its view matrix
-without `glFrustum`, or edits the modelview at depth 0 before its camera
-sequence, would defeat the heuristic. `GetCapturedCamera()` returns false in
-the first case rather than guessing; the second fails silently, and is the
-reason `cameraLogInterval` exists.
+What remains a guess is the "when" — and on 2026-09-19 that guess was checked in
+Anachronox with `cameraLogInterval=60`, not only against Quake II's `R_SetupGL`
+and a real GL driver in `modelview_capture_test.cpp`. **It holds.** Four things
+in the log agree, and they are worth recording because each fails differently if
+the latch picks the wrong matrix:
+
+- `up` stays within 0.946..1.000 of world +Z across every sample, and is exactly
+  `(0, 0, 1)` whenever the camera is level. Quake's world up is +Z; a transposed
+  or sign-flipped basis would wander instead.
+- A corridor walk logs ~570 units of travel along +Y at near-constant speed,
+  decelerating to a stop, while the other two axes drift under 4 units.
+- Through that walk `forward` reads `(0.05, 0.986, -0.155)` — along the
+  direction of travel. Position and orientation are derived separately from the
+  same matrix, so their agreement is a cross-check the log makes on itself.
+- Standing still logs the position identical to the decimal for nineteen
+  consecutive samples (~18 s). Jitter while stationary is the signature of
+  latching something that is not the camera, and there is none.
+
+Pitching down moved `forward.z` to -0.32 while `up.z` fell to 0.947, which only
+a correct decomposition does.
+
+That is one engine, not a proof. An engine that builds its view matrix without
+`glFrustum`, or edits the modelview at depth 0 before its camera sequence, would
+still defeat the heuristic. `GetCapturedCamera()` returns false in the first case
+rather than guessing; the second fails silently, and is why `cameraLogInterval`
+stays in the shipped config rather than being removed now the check has passed.
 
 ## Tier 3 — pixel format (blocked on a spike)
 
