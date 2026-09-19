@@ -29,7 +29,8 @@
 //     glPushMatrix, a glOrtho, or the swap, whichever comes first. All three are safe because
 //     the modelview still holds the camera at each - glPushMatrix copies the top of stack
 //     without modifying it, and Quake II's R_SetGL2D issues its glOrtho before it touches the
-//     modelview. Exactly one glGetFloatv per frame results.
+//     modelview. Exactly one glGetFloatv per frame results, on the happy path - if the m[15]
+//     sentinel below bails out, the pending flag stays set and the next latch point retries.
 //   - The first world pass of a frame wins. A later glFrustum in the same frame (a viewmodel at
 //     a different FOV, a scope) is a sub-pass of the same camera.
 //
@@ -61,8 +62,8 @@ struct CameraMatrix {
 
 // The same thing in world space, which is what a human reading a log and a stage reasoning
 // about "up" both actually want. R is the view matrix's upper-left 3x3; its ROWS are the
-// camera's axes expressed in world coordinates, which is why right/up/forward read off columns
-// of the stored array.
+// camera's axes expressed in world coordinates, which is why right/up/forward are each reached
+// by a stride-4 walk of the stored array.
 // Deliberately zero rather than an identity-looking default: a zero basis is obviously
 // uninitialised at a glance in a log, where (0,0,-1) would read as a real direction.
 struct CameraPose {
@@ -105,11 +106,15 @@ void AdvanceCameraHistory();
 
 // --- Accessors.
 
-// The camera latched for the current frame, or false if no world pass has ever been captured.
+// The last camera ever latched, or false if no world pass has ever been captured. This can be
+// stale: a frame with no world pass (see "Where it breaks" above) leaves it holding whatever the
+// last successful latch recorded.
 bool GetCapturedCamera(CameraMatrix& out);
 
-// The camera latched for the previous frame, or false until two frames have been captured.
-// What reprojection needs; nothing consumes it yet.
+// The camera latched for the previous frame, or false until the first frame finishes - at which
+// point it returns true with `previous` equal to `current`, since there is only one latch to
+// report, until the next frame's latch moves `current` on. What reprojection needs; nothing
+// consumes it yet.
 bool GetPreviousCamera(CameraMatrix& out);
 
 // Turns a view matrix into a world-space position and basis. Pure function, no state.

@@ -442,6 +442,51 @@ int main() {
         AdvanceCameraHistory();
     }
 
+    // --- Case 11: matrix mode. An engine may edit its PROJECTION matrix after establishing the
+    // frustum - an oblique near plane, a jitter offset - and those edits arrive at the same
+    // NotifyMatrixEdited hook a modelview edit does. Only the GL_MODELVIEW guard tells them apart.
+    // The modelview is deliberately left holding something that is NOT the camera, so mistaking a
+    // projection edit for a camera edit captures visibly wrong numbers rather than the right ones
+    // by luck.
+    {
+        // Frame A: a known camera.
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 7.0f, 8.0f, 9.0f);
+        float knownCamera[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, knownCamera);
+        FinalizeCameraForFrame();
+        AdvanceCameraHistory();
+
+        // Frame B: leave a non-camera matrix in the modelview BEFORE the world pass is armed, so
+        // it cannot legitimately be picked up...
+        pMatrixMode(GL_MODELVIEW);
+        NotifyMatrixMode(GL_MODELVIEW);
+        pLoadIdentity();
+        NotifyMatrixEdited();
+        pTranslatef(-100.0f, -200.0f, -300.0f);
+        NotifyMatrixEdited();
+
+        // ...then arm, and edit only the PROJECTION matrix. BeginWorldPass leaves the mode on
+        // GL_PROJECTION, which is exactly the state such edits arrive in.
+        BeginWorldPass();
+        pTranslatef(0.25f, 0.25f, 0.0f);
+        NotifyMatrixEdited();
+        pLoadIdentity();
+        NotifyMatrixEdited();
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, knownCamera)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("expected", knownCamera);
+        }
+        Check(got && MatricesEqual(camera.m, knownCamera),
+              "a GL_PROJECTION-mode matrix edit is not mistaken for a camera edit");
+
+        AdvanceCameraHistory();
+    }
+
     // --- Case 10: no current GL context. The wrapper's exported entry points can be reached in
     // states a game's own rendering never produces, and glGetFloatv writes nothing when there is
     // no context - leaving the default-constructed identity behind. Recording that would hand a
@@ -478,6 +523,10 @@ int main() {
     ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
 
-    printf(g_failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", g_failures);
+    if (g_failures == 0) {
+        printf("ALL PASS\n");
+    } else {
+        printf("%d FAILURE(S)\n", g_failures);
+    }
     return g_failures == 0 ? 0 : 1;
 }
