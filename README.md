@@ -185,6 +185,16 @@ does not exist anywhere in the interception surface to be read. A character
 walking across an otherwise still frame can therefore still ghost. Turning a
 corner cannot.
 
+**Status: confirmed working in Anachronox, partially validated.** The
+reprojected path was run in-game and reported as looking good, on a chain with
+no window override, so no real upscale was in play. Two things were asked
+about specifically and not separately confirmed: whether HUD and subtitle text
+stays crisp through a camera turn, and whether static geometry is free of
+sub-pixel wobble when standing still. Both are covered by GPU tests — a HUD
+pixel is asserted bit-identical to the current frame, and a static camera's
+history fetch is asserted to land bit-exactly on the pixel's own centre — but
+neither has been checked by eye against a real scene.
+
 Frames that do not supply everything the reprojected path needs — depth, this
 frame's and the previous frame's projection, both cameras and the pre-HUD
 capture — fall back to the older motion-vector-free blend, where
