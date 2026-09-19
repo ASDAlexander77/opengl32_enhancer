@@ -219,6 +219,12 @@ add_executable(world_capture_test world_capture_test.cpp world_capture.cpp gl_lo
     config.cpp debug_log.cpp)
 target_link_libraries(world_capture_test opengl32 gdi32 user32)
 
+# Checks the pure reprojection matrix on the CPU and the blur stage against a real GL context -
+# see motion_blur_test.cpp.
+add_executable(motion_blur_test motion_blur_test.cpp motion_blur.cpp gl_loader.cpp
+    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp)
+target_link_libraries(motion_blur_test opengl32 gdi32 user32)
+
 # Creates a real GL context, drives the matrix-call sequence a Quake II-family engine makes
 # (world pass, entity push/pop, HUD ortho pass) alongside modelview_capture.h's hooks, and
 # checks the captured camera against the driver's own GL_MODELVIEW_MATRIX - see
@@ -428,6 +434,7 @@ foreach(test_target
     ssr_test
     modelview_capture_test
     world_capture_test
+    motion_blur_test
     chromatic_aberration_test
     smaa_test
     nr_test
