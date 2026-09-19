@@ -120,6 +120,8 @@ int main() {
     config.ssrIntensity = 0.31f;
     config.ssrMaxDistance = 640.0f;
     config.ssrUpThreshold = 0.55f;
+    config.motionBlurStrength = 0.77f;
+    config.motionBlurMaxRadius = 0.12f;
     config.gamma = 2.2f;
     config.brightness = 1.4f;
     config.nrPasses = 3;
@@ -176,6 +178,10 @@ int main() {
                "float value round-tripped (ssrMaxDistance)") && ok;
     ok = Check(reloaded.ssrUpThreshold > 0.54f && reloaded.ssrUpThreshold < 0.56f,
                "float value round-tripped (ssrUpThreshold)") && ok;
+    ok = Check(reloaded.motionBlurStrength > 0.76f && reloaded.motionBlurStrength < 0.78f,
+               "float value round-tripped (motionBlurStrength)") && ok;
+    ok = Check(reloaded.motionBlurMaxRadius > 0.11f && reloaded.motionBlurMaxRadius < 0.13f,
+               "float value round-tripped (motionBlurMaxRadius)") && ok;
     ok = Check(reloaded.gamma > 2.19f && reloaded.gamma < 2.21f,
                "float value round-tripped (gamma)") && ok;
     ok = Check(reloaded.brightness > 1.39f && reloaded.brightness < 1.41f,

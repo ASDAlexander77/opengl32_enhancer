@@ -16,6 +16,7 @@
 #include "texture_filter.h"
 #include "projection_capture.h"
 #include "modelview_capture.h"
+#include "world_capture.h"
 #include "window_override.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
@@ -1654,6 +1655,7 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
     }
     CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
     NotifyWorldProjection();
+    NotifyWorldPassBegan();
     __proc_glFrustum(left, right, bottom, top, zNear, zFar);
 }
 
@@ -3149,6 +3151,7 @@ extern "C" __declspec(dllexport) void __stdcall glOrtho(GLdouble left, GLdouble 
         }
     }
     NotifyTwoDProjection();
+    NotifyTwoDPassBegan();
     __proc_glOrtho(left, right, bottom, top, zNear, zFar);
 }
 
@@ -5881,6 +5884,7 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     FinalizeCameraForFrame();
     ApplySelectedEffect(p0);
     AdvanceCameraHistory();
+    InvalidateWorldFrame();
     return __proc_wglSwapBuffers(p0);
 }
 

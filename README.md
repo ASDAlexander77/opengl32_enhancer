@@ -32,6 +32,7 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Distance fog: fog](#distance-fog-fog)
   - [Light shafts: lightshafts](#light-shafts-lightshafts)
   - [Screen-space reflections: ssr](#screen-space-reflections-ssr)
+  - [Camera motion blur: motionblur](#camera-motion-blur-motionblur)
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
@@ -107,6 +108,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `fog` | Per-pixel distance fog — fades distance toward a colour |
 | `lightshafts` | Volumetric god rays radiating from the brightest thing in frame |
 | `ssr` | Screen-space reflections in upward-facing surfaces |
+| `motionblur` | Camera motion blur — smears the frame along the camera's own movement |
 | `depthvignette` | Darkens by scene depth rather than screen corners (experimental) |
 | `gamma` | Gamma / brightness correction — a real curve, so black stays black |
 | `dither` | Ordered dither, masks 8-bit banding |
@@ -363,6 +365,39 @@ matrix reveals:
 Get it wrong and the symptom is unmistakable: reflections appear on walls instead of floors. A
 game whose view matrix is never captured at all keeps the old view-space behaviour rather than
 losing its reflections.
+
+### Camera motion blur: `motionblur`
+
+Smears the frame along the camera's own movement between the previous frame and this one —
+reprojecting each pixel's depth-derived world position through last frame's camera and measuring
+how far it moved on screen.
+
+It is **camera motion only, permanently** — not a limitation to be lifted later. This proxy
+intercepts fixed-function draw calls, not per-object transforms, so an individual object's
+velocity never exists anywhere in the interception surface to be read. An NPC walking across an
+otherwise-still frame will not smear; turning or moving the camera will.
+
+Like `ssao`/`dof`/`fog`/`ssr` it needs the game's depth buffer and projection, and it additionally
+needs both this frame's and the previous frame's camera (see `ssrWorldUpAxis` above for how the
+camera is reconstructed) and a copy of the frame from *before* the HUD is drawn, so HUD and
+dialogue pixels can be told apart from world pixels and excluded from the blur rather than
+smearing text into the scene behind it. Any one of those being unavailable no-ops the stage rather
+than guessing.
+
+| Setting | What it does |
+| --- | --- |
+| `motionBlurStrength` | `0`..`1`, a multiplier on the measured screen-space velocity. `0` is an exact no-op. **Default is `0.5`**, unlike every other intensity setting on this page - `motionblur` isn't in the shipped `effect=` line, so listing it at all is already the opt-in; once listed, it should visibly do something rather than need a second value changed too |
+| `motionBlurMaxRadius` | `0`..`0.5`, a **fraction of the screen** (not a world unit like `ssaoRadius`) — the longest smear allowed. A scene cut or a teleport produces an enormous inter-frame camera delta that would otherwise smear the whole screen; this bounds that without needing cut detection |
+
+Put `motionblur` **early** in the chain, before `bilinear`/`nvscaler`/`fsr`, for the same reason as
+`ssao`/`dof`/`fog`/`ssr`: it reads the game's depth buffer, which only exists at the game's own
+native render resolution, so listed after a real upscale it can only no-op (logged once).
+
+**Status: unit-tested, not yet validated in a running game.** The "first `glOrtho` means the world
+is finished" assumption that separates world pixels from HUD pixels (see `world_capture.h`) has
+not been confirmed against Anachronox or any other title — see
+`docs/enhancement-opportunities.md` for what that validation involves and what to look for
+(sharp HUD, smeared world) once it has been run.
 
 ### Local contrast: `localcontrast`
 

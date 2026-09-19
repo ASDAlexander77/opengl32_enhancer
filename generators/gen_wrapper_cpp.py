@@ -213,6 +213,7 @@ def emit_cpp(funcs):
     lines.append('#include "texture_filter.h"')
     lines.append('#include "projection_capture.h"')
     lines.append('#include "modelview_capture.h"')
+    lines.append('#include "world_capture.h"')
     lines.append('#include "window_override.h"')
     lines.append("")
     lines.append(TYPEDEFS)
@@ -275,6 +276,10 @@ def emit_cpp(funcs):
             lines.append("    FinalizeCameraForFrame();")
             lines.append(f"    ApplySelectedEffect({params_call});")
             lines.append("    AdvanceCameraHistory();")
+            # See world_capture.h: invalidated AFTER the effect chain runs, since the chain is
+            # the consumer of this frame's world-only capture - invalidating on entry would
+            # destroy it before anything could read it.
+            lines.append("    InvalidateWorldFrame();")
         if name == "wglCreateContext":
             # See window_override.h: resizes the game's window to config.h's
             # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
@@ -291,9 +296,13 @@ def emit_cpp(funcs):
             # is what tells the camera capture that the modelview it is about to see is the
             # camera's and not the HUD's.
             lines.append("    NotifyWorldProjection();")
+            # See world_capture.h: the same arm also tells the world-only frame capture that a
+            # world pass has begun, so the first glOrtho after it is the pre-HUD instant.
+            lines.append("    NotifyWorldPassBegan();")
         if name == "glOrtho":
             # The other half of that discrimination - the 2D/HUD pass begins here.
             lines.append("    NotifyTwoDProjection();")
+            lines.append("    NotifyTwoDPassBegan();")
         if name == "glMatrixMode":
             lines.append(f"    NotifyMatrixMode({params_call});")
         if name == "glPushMatrix":

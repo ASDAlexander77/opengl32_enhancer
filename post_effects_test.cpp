@@ -148,6 +148,7 @@ bool CheckDepthStageSet() {
         {EffectKind::Dof,                 true,  "dof"},
         {EffectKind::Fog,                 true,  "fog"},
         {EffectKind::Ssr,                 true,  "ssr"},
+        {EffectKind::MotionBlur,          true,  "motionblur"},
         // A sample of stages that read colour only. If one of these ever starts reporting true
         // the pipeline pays for a depth blit every frame that does not need one.
         {EffectKind::Bloom,               false, "bloom"},

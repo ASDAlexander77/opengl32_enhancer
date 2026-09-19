@@ -121,6 +121,7 @@ const StageName kStageNames[] = {
     {EffectKind::Fog,                 "fog"},
     {EffectKind::LightShafts,         "lightshafts"},
     {EffectKind::Ssr,                 "ssr"},
+    {EffectKind::MotionBlur,          "motionblur"},
     {EffectKind::Gamma,               "gamma"},
 };
 const int kStageNameCount = (int)(sizeof(kStageNames) / sizeof(kStageNames[0]));
@@ -504,6 +505,10 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.ssrThickness = ParseClampedFloat(value, 0.1f, 4096.0f, config.ssrThickness, "ssrThickness");
         } else if (strcmp(key, "ssrUpThreshold") == 0) {
             config.ssrUpThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.ssrUpThreshold, "ssrUpThreshold");
+        } else if (strcmp(key, "motionBlurStrength") == 0) {
+            config.motionBlurStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.motionBlurStrength, "motionBlurStrength");
+        } else if (strcmp(key, "motionBlurMaxRadius") == 0) {
+            config.motionBlurMaxRadius = ParseClampedFloat(value, 0.0f, 0.5f, config.motionBlurMaxRadius, "motionBlurMaxRadius");
         } else if (strcmp(key, "ssrWorldUpAxis") == 0) {
             // Deliberately not ParseClampedInt: clamping "w" to a valid axis would silently pick
             // one, and the wrong axis is not a subtle degradation - it puts reflections on walls
@@ -580,6 +585,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "shaftsIntensity=%.3f, shaftsDensity=%.3f, shaftsDecay=%.3f, shaftsThreshold=%.3f, "
            "ssrIntensity=%.3f, ssrMaxDistance=%.3f, ssrThickness=%.3f, ssrUpThreshold=%.3f, "
            "ssrWorldUpAxis=%c, "
+           "motionBlurStrength=%.3f, motionBlurMaxRadius=%.3f, "
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', cameraLogInterval=%d, "
@@ -600,6 +606,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.shaftsIntensity, config.shaftsDensity, config.shaftsDecay, config.shaftsThreshold,
            config.ssrIntensity, config.ssrMaxDistance, config.ssrThickness, config.ssrUpThreshold,
            "xyz"[config.ssrWorldUpAxis],
+           config.motionBlurStrength, config.motionBlurMaxRadius,
            config.gamma, config.brightness,
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath, config.cameraLogInterval,
