@@ -89,6 +89,33 @@ void SetWorldCamera(float pitch, float yaw, float roll, float eyeX, float eyeY, 
     NotifyMatrixEdited();
 }
 
+// Quake II's R_SetGL2D: the HUD pass. Note the order - the projection is switched to ortho
+// BEFORE the modelview is touched, which is exactly what makes glOrtho a safe latch point.
+void BeginHudPass() {
+    pMatrixMode(GL_PROJECTION);
+    NotifyMatrixMode(GL_PROJECTION);
+    pLoadIdentity();
+    NotifyMatrixEdited();
+    pOrtho(0.0, 256.0, 256.0, 0.0, -99999.0, 99999.0);
+    NotifyTwoDProjection();
+    pMatrixMode(GL_MODELVIEW);
+    NotifyMatrixMode(GL_MODELVIEW);
+    pLoadIdentity();
+    NotifyMatrixEdited();
+}
+
+// R_RotateForEntity, as every Quake II entity path issues it: inside a push/pop pair.
+void DrawEntity(float x, float y, float z, float yaw) {
+    pPushMatrix();
+    NotifyMatrixPush();
+    pTranslatef(x, y, z);
+    NotifyMatrixEdited();
+    pRotatef(yaw, 0.0f, 0.0f, 1.0f);
+    NotifyMatrixEdited();
+    pPopMatrix();
+    NotifyMatrixPop();
+}
+
 }  // namespace
 
 int main() {
@@ -175,6 +202,89 @@ int main() {
         }
         Check(got && MatricesEqual(camera.m, fromDriver),
               "captured matrix is bit-identical to the driver's GL_MODELVIEW_MATRIX");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 3: the camera is taken AT the first entity push, so a depth-0 modelview edit
+    // afterwards - a viewmodel or an alpha pass setting up its own transform - cannot replace
+    // it. Asserting only that a balanced push/pop leaves the camera alone would prove nothing:
+    // the pop restores it either way, so that passes with no gate at all.
+    {
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 0.0f, 0.0f, 10.0f, 20.0f, 30.0f);
+
+        float cameraFromDriver[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, cameraFromDriver);
+
+        DrawEntity(500.0f, 600.0f, 700.0f, 45.0f);   // the camera is latched here
+
+        pTranslatef(1000.0f, 0.0f, 0.0f);            // depth 0, after the latch
+        NotifyMatrixEdited();
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, cameraFromDriver)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("camera  ", cameraFromDriver);
+        }
+        Check(got && MatricesEqual(camera.m, cameraFromDriver),
+              "camera is latched at the first entity push, not at swap");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 4: the HUD pass must not become the camera. It runs LAST in a real frame, so
+    // "the most recent modelview at swap time" is precisely the wrong answer.
+    {
+        BeginWorldPass();
+        SetWorldCamera(0.0f, 180.0f, 0.0f, -40.0f, 15.0f, 8.0f);
+
+        float cameraFromDriver[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, cameraFromDriver);
+
+        BeginHudPass();
+        pTranslatef(32.0f, 32.0f, 0.0f);
+        NotifyMatrixEdited();
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, cameraFromDriver)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("camera  ", cameraFromDriver);
+        }
+        Check(got && MatricesEqual(camera.m, cameraFromDriver),
+              "HUD ortho pass does not overwrite the camera");
+
+        AdvanceCameraHistory();
+    }
+
+    // --- Case 5: a push/pop pair BEFORE the camera sequence must not latch early. Nothing is
+    // pending at that point, so there is nothing to take, and the camera established afterwards
+    // is still the one captured.
+    {
+        BeginWorldPass();
+        pMatrixMode(GL_MODELVIEW);
+        NotifyMatrixMode(GL_MODELVIEW);
+        DrawEntity(1.0f, 2.0f, 3.0f, 90.0f);
+
+        SetWorldCamera(5.0f, 270.0f, 0.0f, 77.0f, 88.0f, 99.0f);
+
+        float cameraFromDriver[16] = {};
+        pGetFloatv(GL_MODELVIEW_MATRIX, cameraFromDriver);
+
+        FinalizeCameraForFrame();
+
+        CameraMatrix camera;
+        bool got = GetCapturedCamera(camera);
+        if (got && !MatricesEqual(camera.m, cameraFromDriver)) {
+            PrintMatrix("captured", camera.m);
+            PrintMatrix("camera  ", cameraFromDriver);
+        }
+        Check(got && MatricesEqual(camera.m, cameraFromDriver),
+              "a push/pop pair before the camera sequence does not latch early");
 
         AdvanceCameraHistory();
     }

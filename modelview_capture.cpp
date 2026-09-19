@@ -7,6 +7,7 @@
 namespace {
 
 const unsigned int kGlModelviewMatrix = 0x0BA6;
+const unsigned int kGlModelview = 0x1700;
 
 typedef void (__stdcall *PfnGlGetFloatv)(unsigned int pname, float* params);
 
@@ -57,6 +58,10 @@ bool g_pending = false;  // a depth-0 modelview edit happened while armed
 bool g_latched = false;  // the camera for this frame has been read
 bool g_loggedFirst = false;
 
+// GL's initial matrix mode is GL_MODELVIEW, so that is the honest starting value.
+unsigned int g_matrixMode = kGlModelview;
+int g_modelviewDepth = 0;
+
 // Reads the driver's modelview matrix, if one is pending and none has been taken this frame.
 // Idempotent within a frame, which is what lets all three latch points call it unconditionally.
 void LatchCamera() {
@@ -89,20 +94,41 @@ void NotifyWorldProjection() {
 }
 
 void NotifyTwoDProjection() {
+    // Safe as a latch point because an engine switches the PROJECTION to ortho before it
+    // touches the modelview - the modelview still holds the camera at this instant.
+    LatchCamera();
+    g_armed = false;
 }
 
 void NotifyMatrixMode(unsigned int mode) {
-    (void)mode;
+    g_matrixMode = mode;
 }
 
 void NotifyMatrixPush() {
+    if (g_matrixMode != kGlModelview) {
+        return;
+    }
+    // The primary latch point: the first push away from depth 0 is the engine starting to draw
+    // something with its own transform, and a push copies the top of stack without modifying
+    // it, so the camera is still there to be read.
+    if (g_modelviewDepth == 0) {
+        LatchCamera();
+    }
+    ++g_modelviewDepth;
 }
 
 void NotifyMatrixPop() {
+    if (g_matrixMode != kGlModelview) {
+        return;
+    }
+    if (g_modelviewDepth > 0) {
+        --g_modelviewDepth;
+    }
 }
 
 void NotifyMatrixEdited() {
-    if (g_armed && !g_latched) {
+    // Depth 0 is what separates camera setup from an entity's own transform; see the header.
+    if (g_armed && !g_latched && g_matrixMode == kGlModelview && g_modelviewDepth == 0) {
         g_pending = true;
     }
 }
@@ -119,6 +145,7 @@ void AdvanceCameraHistory() {
     g_armed = false;
     g_pending = false;
     g_latched = false;
+    g_modelviewDepth = 0;
 }
 
 bool GetCapturedCamera(CameraMatrix& out) {
