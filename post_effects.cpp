@@ -27,6 +27,7 @@
 #include "vignette.h"
 #include "chromatic_aberration.h"
 #include "taa.h"
+#include "taa_jitter.h"
 #include "dither.h"
 #include "gamma.h"
 #include "smaa.h"
@@ -700,9 +701,75 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::ChromaticAberration:
                 wrote = ApplyChromaticAberration(src, dst, dstW, dstH, config.chromaticAberrationStrength);
                 break;
-            case EffectKind::Taa:
-                wrote = ApplyTaa(src, dst, dstW, dstH, config.taaBlend, config.shimmerSuppression);
+            case EffectKind::Taa: {
+                // The real path needs depth, both projections, both cameras and the pre-HUD
+                // capture. Any one missing falls back to ApplyTaa's motion-vector-free path
+                // rather than guessing - and the report back to taa_jitter.h is what arms or
+                // disarms the NEXT frame's jitter, so it must happen on BOTH paths, every
+                // frame this stage runs. Jitter that nothing resolves is pure added shimmer.
+                ProjectionParams taaCur;
+                ProjectionParams taaPrev;
+                CameraMatrix taaCamCur;
+                CameraMatrix taaCamPrev;
+                unsigned int taaWorldTex = 0;
+                int taaWorldW = 0, taaWorldH = 0;
+                bool taaHaveInputs = depthCaptured && GetCapturedProjection(taaCur) &&
+                                     GetPreviousProjection(taaPrev) &&
+                                     GetCapturedCamera(taaCamCur) &&
+                                     GetPreviousCamera(taaCamPrev) &&
+                                     GetWorldOnlyFrame(taaWorldTex, taaWorldW, taaWorldH) &&
+                                     g_pipeline.captureTex != 0;
+
+                bool ranReal = false;
+                if (taaHaveInputs) {
+                    // Split out from taaHaveInputs for the same reason motionblur's is below:
+                    // a size mismatch is a diagnosable event, not one of several legitimately
+                    // transient "not available yet" conditions. Behaviour is the same either
+                    // way - the fallback path runs this frame.
+                    bool taaDimsMatch = taaWorldW == dstW && taaWorldH == dstH &&
+                                        g_pipeline.captureWidth == dstW &&
+                                        g_pipeline.captureHeight == dstH;
+                    if (!taaDimsMatch) {
+                        static bool warnedTaaDimMismatch = false;
+                        if (!warnedTaaDimMismatch) {
+                            printf("[opengl32_enh_cpp] post_effects: taa's captured inputs "
+                                   "don't match this frame's size (world %dx%d, capture %dx%d, "
+                                   "need %dx%d) - the viewport likely changed between this "
+                                   "frame's first glOrtho and now. The motion-vector-free "
+                                   "fallback runs until the sizes agree again.\n",
+                                   taaWorldW, taaWorldH, g_pipeline.captureWidth,
+                                   g_pipeline.captureHeight, dstW, dstH);
+                            warnedTaaDimMismatch = true;
+                        }
+                    } else {
+                        // The previous frustum as CAPTURED is the jittered one. History holds
+                        // the previous frame's resolved output, which is defined at pixel
+                        // centres, so the projection into it must be unjittered - subtract
+                        // exactly the offset that was applied to THAT frame, not this one.
+                        float prevDx = 0.0f, prevDy = 0.0f;
+                        if (GetPreviousTaaJitterApplied(prevDx, prevDy)) {
+                            taaPrev.left -= prevDx;
+                            taaPrev.right -= prevDx;
+                            taaPrev.bottom -= prevDy;
+                            taaPrev.top -= prevDy;
+                        }
+
+                        float taaReprojection[16];
+                        MotionBlurReprojection(taaCamCur, taaCamPrev, taaReprojection);
+                        wrote = ApplyTaaReal(src, dst, g_pipeline.depthTex, taaWorldTex,
+                                             g_pipeline.captureTex, dstW, dstH, taaCur, taaPrev,
+                                             taaReprojection, config.taaBlend);
+                        ranReal = wrote;
+                    }
+                }
+
+                if (!ranReal) {
+                    wrote = ApplyTaa(src, dst, dstW, dstH, config.taaBlend,
+                                     config.shimmerSuppression);
+                }
+                NotifyTaaRealPathRan(ranReal);
                 break;
+            }
             case EffectKind::Dither:
                 wrote = ApplyDither(src, dst, dstW, dstH, config.ditherStrength);
                 break;

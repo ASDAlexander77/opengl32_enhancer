@@ -1,5 +1,7 @@
 #pragma once
 
+#include "projection_capture.h"
+
 // Motion-vector-free temporal antialiasing ("TAA-lite"): blends the current frame with a
 // persistent history texture, clamping the history sample into the current frame's local
 // 3x3 neighborhood min/max first to bound ghosting on moving content (this proxy has no
@@ -43,3 +45,52 @@
 // shader init failed.
 bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend,
               float shimmerSuppression);
+
+// ORDERING: this stage softens the image. History is resampled and re-filtered every frame, so
+// fine detail loses a little contrast each time it is carried forward - that is inherent to
+// accumulating a resampled history, not a defect to tune out. The conventional remedy is a mild
+// sharpener listed AFTER this one: `effect=..., taa, cas, ...`. That is the exact OPPOSITE of
+// motion_blur.h's rule, where a following sharpener destroys the effect by amplifying the local
+// contrast the blur removed; here the sharpener restores contrast the resolve removed. Do not
+// generalise either rule to the other stage.
+//
+// The real path below also reads depth, so - like motion blur - it must come before any real
+// upscale (see StageNeedsDepth in post_effects.h).
+
+// The real temporal antialiasing path, used when the frame supplies everything it needs:
+// depth, this frame's and the previous frame's projection, both cameras, and the pre-HUD
+// world-only capture. ApplyTaa() above stays exactly as it is and remains the fallback for
+// frames and engines that supply less - post_effects.cpp's EffectKind::Taa case is what
+// chooses between them; this file exposes both and picks neither.
+//
+// Unlike ApplyTaa(), history is fetched from where each pixel actually WAS, by unprojecting
+// this pixel's depth with `currentProjection` - which must be the JITTERED frustum, because
+// that is what the depth buffer was rendered with - reprojecting through `reprojection`
+// (MotionBlurReprojection's 16 floats, previous * inverse(current)), and projecting into
+// `previousProjection`, which must be UNJITTERED, because history holds the previous frame's
+// resolved output and that is defined at pixel centres. Mixing those two up double-counts the
+// sub-pixel offset and leaves a permanent wobble.
+//
+// worldTexture and captureTexture are the pre-HUD and finished copies of this frame; where
+// they differ the game drew an overlay, and those pixels take the current frame untouched so
+// HUD text neither ghosts nor softens.
+//
+// `shimmerSuppression` is deliberately absent: it exists to approximate, without motion
+// vectors, what reprojection does properly, and it would fight the jitter here. It keeps its
+// full meaning on ApplyTaa()'s fallback path.
+//
+// Shares ApplyTaa()'s single ping-pong history, which is correct - they are two paths through
+// one stage and only one of them can run in any given frame - so switching between the paths
+// does not invalidate history and deliberately does not reset it.
+//
+// Returns true if dstTexture was written; false if any input was missing or degenerate, if GL
+// 4.3 compute support is unavailable, if this path's shader failed to build, or if the dispatch
+// raised a GL error.
+bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
+                  unsigned int depthTexture, unsigned int worldTexture,
+                  unsigned int captureTexture,
+                  int width, int height,
+                  const ProjectionParams& currentProjection,
+                  const ProjectionParams& previousProjection,
+                  const float reprojection[16],
+                  float blend);

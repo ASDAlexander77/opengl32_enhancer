@@ -150,8 +150,11 @@ target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and calls ApplyTaa() four times in a
 # row, checking the ping-pong history buffer and neighborhood clamp reproduce a static
-# scene's color with no drift and no GL error - see taa_test.cpp.
-add_executable(taa_test taa_test.cpp taa.cpp gl_loader.cpp)
+# scene's color with no drift and no GL error. Then exercises ApplyTaaReal() - the reprojected,
+# HUD-masked, variance-clipped path - which is why taa_jitter.cpp (and the config/debug_log it
+# pulls in) is linked here: the anti-aliasing fixture drives the same jitter the game gets.
+# See taa_test.cpp.
+add_executable(taa_test taa_test.cpp taa.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
 target_link_libraries(taa_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, writes an identity .cube LUT fixture,
@@ -323,7 +326,7 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp debug_log.cpp gl_loader.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
-    chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
+    chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
     local_contrast.cpp fx_indicator.cpp window_override.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
@@ -350,7 +353,7 @@ add_executable(config_editor WIN32
     config_editor.cpp editor_scene.cpp config_writer.cpp debug_log.cpp
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp dither.cpp gamma.cpp
+    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp

@@ -97,7 +97,7 @@ only if it is named there; omit it (or set `effect=none`) to turn it off.
 | `lutgrading` | 3D-LUT color grading from a `.cube` file |
 | `vignette` | Darkens the corners |
 | `chromaticaberration` | Lens-style edge fringing |
-| `taa` | Temporal anti-aliasing |
+| `taa` | Temporal anti-aliasing (reprojected, with sub-pixel jitter) |
 | `smaa` | Spatial anti-aliasing (SMAA) |
 | `cas` | AMD FidelityFX Contrast Adaptive Sharpening (sharpen-only) |
 | `sharpen` | NVIDIA Image Scaling adaptive sharpen |
@@ -164,18 +164,39 @@ anti-aliasing.
 
 | | `taa` | `smaa` |
 | --- | --- | --- |
-| Method | Blends current frame with history | Single-frame edge detection + morphological reconstruction |
-| Strength | Very effective on static or slow-moving scenes | No motion artifacts at all; consistent during camera movement |
-| Weakness | Can ghost or fail to smooth during fast motion | Purely spatial, so generally blurrier on fine static detail |
+| Method | Jitters the projection sub-pixel, then accumulates history reprojected along the camera's motion | Single-frame edge detection + morphological reconstruction |
+| Strength | Genuinely resolves detail below one pixel; very effective on static and on camera-moving scenes alike | No motion artifacts at all; consistent during camera movement |
+| Weakness | Objects that move under a still camera can still ghost; softens slightly | Purely spatial, so generally blurrier on fine static detail |
 
-`taa` has no access to the game's motion vectors — a `wglSwapBuffers` proxy
-has no way to obtain them — which is precisely why it can struggle exactly
-when anti-aliasing matters most. It does automatically cut a pixel's history
-weight the larger that pixel's raw frame-to-frame difference is, so a fast
-scene change (a cut, a snap-turn) converges in about one frame rather than
-visibly trailing for several — but ordinary fast *motion* within a still-
-continuous scene has no such sharp signal to key off, and remains where `taa`
-is weakest.
+`taa` jitters the game's projection by a fraction of a pixel each frame
+(`taaJitter`, on by default), so successive frames carry genuinely new
+samples rather than the same sample over and over — that is what turns a
+temporal blend into real anti-aliasing. It then fetches history from where
+each pixel actually *was*, by unprojecting this frame's depth and reprojecting
+it through the camera's own movement between the two frames, and clips what
+comes back to one standard deviation of the current frame's local
+neighbourhood. Pixels the game drew an overlay on are passed through
+untouched, so HUD and subtitle text neither ghosts nor softens.
+
+**The limit, plainly: the camera is handled, individual objects are not.**
+There are no per-object motion vectors — a `wglSwapBuffers` proxy sees
+fixed-function geometry, not per-object transforms, so an object's velocity
+does not exist anywhere in the interception surface to be read. A character
+walking across an otherwise still frame can therefore still ghost. Turning a
+corner cannot.
+
+Frames that do not supply everything the reprojected path needs — depth, this
+frame's and the previous frame's projection, both cameras and the pre-HUD
+capture — fall back to the older motion-vector-free blend, where
+`shimmerSuppression` applies and `taaBlend` is only a ceiling: that path cuts
+a pixel's history weight the larger its raw frame-to-frame difference is, so a
+cut or a snap-turn converges in about one frame rather than trailing for
+several.
+
+Because history is resampled and re-filtered every frame, `taa` softens the
+image a little. The conventional remedy is a mild sharpener listed **after**
+it — `effect=..., taa, cas, ...`. Note this is the exact opposite of
+`motionblur`, where a following sharpener undoes the effect.
 
 ### Choosing a sharpener: sharpen vs FSR vs CAS
 

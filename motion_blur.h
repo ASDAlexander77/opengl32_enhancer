@@ -25,6 +25,8 @@ void MotionBlurReprojection(const CameraMatrix& current, const CameraMatrix& pre
 // precisely what a blur removes, so `effect=..., motionblur, nvscaler, ...` produces a much
 // weaker smear than the same list without it - and nothing logs, because both stages are
 // working exactly as specified. List sharpeners BEFORE motionblur, or not at all alongside it.
+// taa.h's ORDERING block states the exact opposite rule for that stage - a sharpener listed
+// AFTER `taa` is the conventional pairing there - so neither rule generalises to the other.
 //
 // This stage also reads depth, so it must come before any real upscale for the usual reason
 // (see StageNeedsDepth in post_effects.h).
