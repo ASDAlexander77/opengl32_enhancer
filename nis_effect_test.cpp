@@ -12,7 +12,9 @@
 // a texture-unit binding mismatch between the C++ dispatch code and the shaders'
 // layout(binding=N) declarations), which a plain glGetError()-only check cannot detect.
 #include <windows.h>
+#include <cmath>
 #include <cstdio>
+#include <vector>
 
 #include "gl_loader.h"
 #include "nis_effect.h"
@@ -32,6 +34,7 @@ const unsigned int GL_READ_FRAMEBUFFER   = 0x8CA8;
 const unsigned int GL_COLOR_ATTACHMENT0  = 0x8CE0;
 const unsigned int GL_RGBA               = 0x1908;
 const unsigned int GL_UNSIGNED_BYTE      = 0x1401;
+const unsigned int GL_FLOAT              = 0x1406;
 
 unsigned int CreatePipelineTexture(const GlComputeApi& gl, int width, int height) {
     unsigned int tex = 0;
@@ -88,6 +91,83 @@ bool RunOnce(ApplyFn applyFn, const char* name, unsigned int srcTex, unsigned in
 
     printf("PASS: %s ran with no GL error, center pixel = (%u,%u,%u,%u)\n",
            name, pixel[0], pixel[1], pixel[2], pixel[3]);
+    return true;
+}
+
+// NIS's adaptive sharpen adds its correction straight onto the sampled colour, so on real
+// detail it overshoots: NVIDIA's own SDK writes that sum into a UNORM target, where the store
+// saturates for free. This port's target is rgba16f, which does not - so the clamp has to be in
+// the shader, and this is the test that says so.
+//
+// Deliberately NOT the flat clear colour the checks above use. A flat field plus one hard step
+// edge gives an unsharp mask nothing to work with: measured against the real driver, NVScaler
+// returned that input bit-identically at sharpness 0.0 and 0.75 alike, which is exactly why the
+// unclamped store shipped and survived. The pattern below is fine sinusoidal detail - what a
+// game frame is actually made of - and it reproduces the overshoot on the first call.
+//
+// The input is confined to [0.32, 0.95] so the assertion needs no tolerance argument: every
+// value outside [0, 1] afterwards was manufactured by the sharpener, and on the way to an 8-bit
+// back buffer it is a blown-out or crushed halo around every edge. Worse, a stage listed after
+// this one sees it as real signal - `bloom` with the shipped 0.8 threshold turns each bright
+// halo into a glow.
+bool CheckStaysInRange(ApplyFn applyFn, const char* name, int width, int height,
+                       unsigned int readFbo) {
+    const GlComputeApi& gl = GetGlComputeApi();
+
+    std::vector<float> input((size_t)width * height * 4);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float fine = 0.5f + 0.18f * sinf((float)x * 0.7f) * cosf((float)y * 0.55f);
+            float v = (x < width / 2) ? fine : fine * 0.75f + 0.15f;
+            if (x == width / 4) { v = 0.95f; }
+            float* px = &input[((size_t)y * width + x) * 4];
+            px[0] = v;
+            px[1] = v * 0.8f + 0.1f;
+            px[2] = v * 0.9f;
+            px[3] = 1.0f;
+        }
+    }
+
+    unsigned int srcTex = CreatePipelineTexture(gl, width, height);
+    gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_FLOAT, input.data());
+    unsigned int dstTex = CreatePipelineTexture(gl, width, height);
+
+    bool wrote = applyFn(srcTex, dstTex, width, height, 1.0f, 0.75f);
+    if (!wrote) {
+        printf("FAIL: %s (range) did not write\n", name);
+        gl.glDeleteTextures(1, &srcTex);
+        gl.glDeleteTextures(1, &dstTex);
+        return false;
+    }
+
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, readFbo);
+    gl.glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
+    gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
+    std::vector<float> output((size_t)width * height * 4, 0.0f);
+    gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_FLOAT, output.data());
+
+    float lowest = 1.0f;
+    float highest = 0.0f;
+    int outOfRange = 0;
+    for (size_t i = 0; i < output.size(); i += 4) {
+        for (int c = 0; c < 3; ++c) {
+            float v = output[i + c];
+            if (v < lowest) { lowest = v; }
+            if (v > highest) { highest = v; }
+            if (v < 0.0f || v > 1.0f) { outOfRange++; }
+        }
+    }
+
+    gl.glDeleteTextures(1, &srcTex);
+    gl.glDeleteTextures(1, &dstTex);
+
+    if (outOfRange != 0) {
+        printf("FAIL: %s pushed %d channels outside [0,1] on input confined to [0.32,0.95] "
+               "- output range [%.4f, %.4f]\n", name, outOfRange, lowest, highest);
+        return false;
+    }
+    printf("PASS: %s kept detailed input inside [0,1] - output range [%.4f, %.4f]\n",
+           name, lowest, highest);
     return true;
 }
 
@@ -166,6 +246,9 @@ int main() {
     // and every call ran 1:1, so this is the case that would have silently done nothing.
     ok = RunOnce(&ApplyNVScaler, "ApplyNVScaler (scale=0.5)", srcTex, dstTex, width, height, readFbo, 0.5f) && ok;
     ok = RunOnce(&SharpenAdapter, "ApplyNVSharpen (second call)", srcTex, dstTex, width, height, readFbo) && ok;
+
+    ok = CheckStaysInRange(&ApplyNVScaler, "ApplyNVScaler", width, height, readFbo) && ok;
+    ok = CheckStaysInRange(&SharpenAdapter, "ApplyNVSharpen", width, height, readFbo) && ok;
 
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
