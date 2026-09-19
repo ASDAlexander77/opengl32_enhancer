@@ -57,6 +57,36 @@ int main() {
               "the advance moves the newly captured frustum into the previous slot");
     }
 
+    // A frame with NO glFrustum call at all - a menu, a loading screen, a frame the engine
+    // skipped. The three histories (projection, camera, jitter) are documented as one set
+    // describing one frame, and the other two already sit such a frame out: modelview_capture
+    // gates its promotion on g_latched, taa_jitter on g_applied, both of which reset every
+    // advance. This pins that AdvanceProjectionHistory() does the same - it promotes only what
+    // THIS frame captured - so the previous slot keeps meaning "the last frame that actually
+    // drew a world pass" rather than being re-stamped on frames that drew none.
+    //
+    // HONEST LIMIT, and it is an unusual one: this case cannot fail against the ungated
+    // `if (g_hasCaptured)` version it replaced, and the mutation check confirms it does not.
+    // The two are value-equivalent by construction: g_captured only ever changes inside
+    // CaptureProjectionFrustum(), which is also the only thing that sets the "captured this
+    // frame" flag, so an ungated advance on an empty frame can only re-copy the identical
+    // frustum it already copied. g_hasPrevious latches the same way in both. The gate is a
+    // correctness-preserving clarification, and this case exists to pin the invariant the
+    // header now states against the change that WOULD make it observable - anything that
+    // resets, clears or otherwise writes g_captured outside a capture.
+    AdvanceProjectionHistory();
+    CaptureProjectionFrustum(-3.0, 3.0, -2.25, 2.25, 1.0, 4096.0);
+    AdvanceProjectionHistory();   // the -3.0 frustum's own frame ends here: it IS promoted
+    AdvanceProjectionHistory();   // an empty frame: nothing to promote, previous must stand
+    {
+        ProjectionParams prev;
+        ProjectionParams cur;
+        Check(GetPreviousProjection(prev) && prev.left == -3.0f,
+              "an advance with no frustum captured this frame leaves the previous slot alone");
+        Check(GetCapturedProjection(cur) && cur.left == -3.0f,
+              "and leaves the most recent captured frustum readable, so stages still have one");
+    }
+
     if (g_failures != 0) {
         printf("projection_capture_test: %d FAILURE(S)\n", g_failures);
         return 1;

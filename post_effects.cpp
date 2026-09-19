@@ -355,11 +355,11 @@ void LogMotionBlurIfDue(const CameraMatrix& current, const CameraMatrix& previou
 }
 
 // See post_effects.h. Every stage that passes g_pipeline.depthTex to its Apply*() in the switch
-// below must be named here. `taa` is the one exception in the other direction: it is registered
-// here ahead of its own ApplyTaa() call actually taking depthTex, because a later change in this
-// plan gives `taa` a depth-based reprojection step, and the allocation gate this predicate feeds
-// must already include it when that lands - allocating one texture too early is cheap, allocating
-// it too late (an unpopulated depth path on the very frame it's needed) is not something to race.
+// below must be named here. `taa` is named because its real path, ApplyTaaReal(), takes
+// g_pipeline.depthTex and unprojects it - it is a depth consumer like any other here. (Its
+// TAA-lite fallback, ApplyTaa(), does not read depth; that is what
+// StageIsSkippedWhenDepthUnavailable() below is for, and it is a question about what to do when
+// depth is missing, not about whether the stage ever wants it.)
 bool StageNeedsDepth(EffectKind stage) {
     switch (stage) {
         case EffectKind::DepthVignette:
@@ -373,6 +373,21 @@ bool StageNeedsDepth(EffectKind stage) {
         default:
             return false;
     }
+}
+
+// See post_effects.h. Only asked about stages StageNeedsDepth() already returned true for, and
+// only once the pipeline has moved past a real upscale, where the game's depth buffer no longer
+// exists at the current resolution.
+//
+// `taa` is the one false, and deliberately not a general exemption: it is the only depth stage
+// with a second, depth-free implementation to fall back to (ApplyTaa's motion-vector-free
+// TAA-lite - see taa.h, which exposes both paths). Skipping it would silently delete a stage
+// that used to work: `taa` after `bilinear`/`nvscaler`/`fsr` was the shipped effect= layout
+// before the real path existed, and every such config would lose its anti-aliasing entirely for
+// one log line. Every other depth stage here has nothing to run without depth, so skipping it
+// and saying so is the whole of what can be done.
+bool StageIsSkippedWhenDepthUnavailable(EffectKind stage) {
+    return StageNeedsDepth(stage) && stage != EffectKind::Taa;
 }
 
 void ApplySelectedEffect(void* hdc) {
@@ -610,17 +625,40 @@ void ApplySelectedEffect(void* hdc) {
         // resolution there is no depth data left to sample, so a depth-consuming stage listed
         // after the upscaler can only no-op. Logged once so a misordered effect= list is
         // diagnosable instead of silently doing nothing.
+        //
+        // `taa` is the one depth stage that is NOT dropped here, because it is the one with a
+        // depth-free fallback to run instead - see StageIsSkippedWhenDepthUnavailable() above
+        // for why that is not a general exemption. It falls through with taaRealPathAvailable
+        // false, which is what its case below tests to decline the real path: running that
+        // path here would hand it a native-resolution depth buffer against a window-resolution
+        // frame. The fallback still runs, so NotifyTaaRealPathRan(false) is still reached and
+        // the jitter still disarms.
         bool isDepthStage = StageNeedsDepth(stage);
+        bool taaRealPathAvailable = true;
         if (isDepthStage && !atNativeRes) {
-            if (!warnedDepthAfterUpscale) {
-                printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale stage - "
-                       "the game's depth buffer only exists at its native resolution, so this "
-                       "stage is being skipped. List ssao/dof/fog/ssr/motionblur/depthvignette/"
-                       "taa BEFORE bilinear/nvscaler/fsr in effect= instead.\n",
-                       EffectNameFor(stage));
-                warnedDepthAfterUpscale = true;
+            if (StageIsSkippedWhenDepthUnavailable(stage)) {
+                if (!warnedDepthAfterUpscale) {
+                    printf("[opengl32_enh_cpp] post_effects: '%s' is listed after an upscale "
+                           "stage - the game's depth buffer only exists at its native "
+                           "resolution, so this stage is being skipped. List ssao/dof/fog/ssr/"
+                           "motionblur/depthvignette BEFORE bilinear/nvscaler/fsr in effect= "
+                           "instead.\n", EffectNameFor(stage));
+                    warnedDepthAfterUpscale = true;
+                }
+                continue;
             }
-            continue;
+
+            taaRealPathAvailable = false;
+            static bool warnedTaaAfterUpscale = false;
+            if (!warnedTaaAfterUpscale) {
+                printf("[opengl32_enh_cpp] post_effects: 'taa' is listed after an upscale stage "
+                       "- the game's depth buffer only exists at its native resolution, so the "
+                       "reprojected path is unavailable at this position and the "
+                       "motion-vector-free fallback runs instead (sub-pixel jitter stays off, "
+                       "since nothing is resolving it). List 'taa' BEFORE bilinear/nvscaler/fsr "
+                       "in effect= to get the real one.\n");
+                warnedTaaAfterUpscale = true;
+            }
         }
 
         bool isUpscaleStage = (stage == EffectKind::Bilinear || stage == EffectKind::NVScaler ||
@@ -714,7 +752,12 @@ void ApplySelectedEffect(void* hdc) {
                 CameraMatrix taaCamPrev;
                 unsigned int taaWorldTex = 0;
                 int taaWorldW = 0, taaWorldH = 0;
-                bool taaHaveInputs = depthCaptured && GetCapturedProjection(taaCur) &&
+                // taaRealPathAvailable is false only when this stage was listed after a real
+                // upscale: g_pipeline.depthTex is then the game's native-resolution depth and
+                // dstW/dstH are the window's, so the real path must decline rather than be fed
+                // mismatched inputs. The gate above has already logged it once.
+                bool taaHaveInputs = taaRealPathAvailable &&
+                                     depthCaptured && GetCapturedProjection(taaCur) &&
                                      GetPreviousProjection(taaPrev) &&
                                      GetCapturedCamera(taaCamCur) &&
                                      GetPreviousCamera(taaCamPrev) &&

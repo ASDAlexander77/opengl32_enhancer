@@ -170,6 +170,60 @@ bool CheckDepthStageSet() {
     return allMatched;
 }
 
+// Pins which depth stages are dropped outright when the chain has already passed a real upscale
+// - see StageIsSkippedWhenDepthUnavailable() in post_effects.h. The table half of the same
+// question CheckDepthStageSet() above pins, and it exists for a failure with the same shape and
+// the same absence of symptoms: `taa` reads depth on its real path, so registering it with
+// StageNeedsDepth() (correct, for the allocation gate) also handed it to the chain's skip gate,
+// and `effect=..., bilinear, ..., taa, ...` with windowWidth/windowHeight set - the shipped
+// layout before the reprojected path existed - went from working TAA-lite to no stage at all.
+//
+// What this proves and what it does not, stated plainly because the distinction matters here:
+//   - PROVES: `taa` is excluded from the skip set and every other depth stage is still in it,
+//     so the exemption cannot silently widen to ssao/ssr/dof/fog/motionblur/depthvignette.
+//   - DOES NOT PROVE: that ApplySelectedEffect()'s loop actually falls through to ApplyTaa()
+//     and reaches NotifyTaaRealPathRan(false) at that position. Exercising that needs a real
+//     GL context, a window-size override, and an effect= list this test is not allowed to
+//     invent (it reads the SHIPPED opengl32_enhancer.ini on purpose - see the file header). It
+//     stays a reading of the code: post_effects.cpp's gate sets taaRealPathAvailable=false and
+//     does NOT `continue`, the Taa case ANDs that into taaHaveInputs so the real path declines,
+//     and NotifyTaaRealPathRan(ranReal) sits after the `if (!ranReal)` fallback on the one path
+//     out of the case.
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckDepthStageSkipSet() {
+    struct Expectation { EffectKind stage; bool skipped; const char* name; };
+    const Expectation kExpected[] = {
+        // Every depth stage but taa: nothing to run without depth, so dropping it and saying
+        // so in the log is all there is to do.
+        {EffectKind::DepthVignette,       true,  "depthvignette"},
+        {EffectKind::Ssao,                true,  "ssao"},
+        {EffectKind::Dof,                 true,  "dof"},
+        {EffectKind::Fog,                 true,  "fog"},
+        {EffectKind::Ssr,                 true,  "ssr"},
+        {EffectKind::MotionBlur,          true,  "motionblur"},
+        // The exemption, and the whole point of this table.
+        {EffectKind::Taa,                 false, "taa"},
+        // Stages that never wanted depth are not in the skip set either - they never reach the
+        // gate at all, and a true here would mean the predicate had stopped agreeing with
+        // StageNeedsDepth().
+        {EffectKind::Bloom,               false, "bloom"},
+        {EffectKind::Gamma,               false, "gamma"},
+        {EffectKind::NVScaler,            false, "nvscaler"},
+        {EffectKind::None,                false, "none"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        bool actual = StageIsSkippedWhenDepthUnavailable(kExpected[i].stage);
+        char what[160];
+        snprintf(what, sizeof(what), "StageIsSkippedWhenDepthUnavailable(%s) == %s",
+                 kExpected[i].name, kExpected[i].skipped ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].skipped, what) && allMatched;
+    }
+    return allMatched;
+}
+
 // Pins the set of stages that need the pre-HUD world-only colour capture - see
 // StageNeedsWorldCapture() in config.h. Same shape and same honesty as CheckDepthStageSet()
 // above, and the same limits apply: this is a table, not an integration run. It proves the
@@ -280,6 +334,7 @@ int main() {
     pGlViewport(0, 0, width, height);
 
     bool ok = CheckDepthStageSet();
+    ok = CheckDepthStageSkipSet() && ok;
     ok = CheckWorldCaptureStageSet() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;

@@ -20,9 +20,10 @@ void ApplySelectedEffect(void* hdc);
 // must not drift apart, which is why it is one function and not two lists: once before the
 // chain runs, to decide whether to allocate and blit the depth texture at all (a stage whose
 // depth was never captured no-ops, silently and with nothing in the log to explain it), and
-// once per stage inside the chain, to skip a depth stage listed after an upscaler - the game's
+// once per stage inside the chain, to detect a depth stage listed after an upscaler - the game's
 // depth exists only at its native resolution, so past that point there is nothing left to
-// sample. Exported for post_effects_test.cpp, which pins the set.
+// sample. What the chain then DOES about that is StageIsSkippedWhenDepthUnavailable()'s
+// question, not this one's. Exported for post_effects_test.cpp, which pins the set.
 //
 // Keeping this in step with ApplySelectedEffect()'s switch is manual: if you add a stage that
 // takes g_pipeline.depthTex, add it here too. It was out of step once - `ssr` consumed depth
@@ -37,3 +38,14 @@ void ApplySelectedEffect(void* hdc);
 // vocabulary both already share. Same reasoning, opposite header, because the two predicates
 // have a different number of callers.
 bool StageNeedsDepth(EffectKind stage);
+
+// Of the stages StageNeedsDepth() names, which must be dropped from the chain outright when the
+// pipeline has already passed a real upscale and the game's depth is no longer available at the
+// current resolution. Every one of them except `taa`, which alone has a depth-free second
+// implementation (taa.h's ApplyTaa, the motion-vector-free TAA-lite) and therefore falls through
+// to that instead of vanishing. See the definition in post_effects.cpp for why this is a named
+// exception rather than a general one, and post_effects_test.cpp, which pins the set.
+//
+// Asking this about a stage StageNeedsDepth() returns false for is meaningless and answers
+// false; the chain only consults it inside the `isDepthStage && !atNativeRes` branch.
+bool StageIsSkippedWhenDepthUnavailable(EffectKind stage);

@@ -106,7 +106,12 @@ void ApplyTaaJitterToFrustum(double& left, double& right, double& bottom, double
     JitterFrustumBounds(left, right, bottom, top, jx, jy, viewportWidth, viewportHeight, dx, dy);
 
     // Latched, not accumulated: a second glFrustum in the same frame re-derives the identical
-    // offset from the identical frame index, so this simply re-records the same numbers.
+    // PIXEL offset from the identical frame index, so the world and a viewmodel are shifted by
+    // the same visible amount. The frustum-unit numbers recorded here are not necessarily the
+    // same, because dx = jx * (right - left) / width scales with the extent, and a viewmodel is
+    // exactly the case that arrives with a different one. Last call of the frame wins, which is
+    // what the resolve wants: post_effects.cpp pairs these with projection_capture.h's frustum,
+    // and that keeps the most recent call too, so the pair always describes the same window.
     g_appliedDx = dx;
     g_appliedDy = dy;
     g_applied = (dx != 0.0f || dy != 0.0f);

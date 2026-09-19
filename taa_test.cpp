@@ -121,7 +121,9 @@ void UploadDepth(const GlComputeApi& gl, unsigned int tex, int width, int height
 // These run after the TAA-lite blocks in main(), which leave a valid 64x64 history behind: the
 // ping-pong pair is only reset when the size changes, and it does not change here. So no
 // fixture below may assume its first call takes the historyValid=0 passthrough - each one
-// primes history with its own content instead, and says how.
+// primes history with its own content instead, and says how. The exception is the
+// anti-aliasing fixture, which calls ResetRealHistory() to force the passthrough rather than
+// depend on what ran before it; see its own comment for why that one cannot afford to inherit.
 
 const int kRealW = 64;
 const int kRealH = 64;
@@ -362,6 +364,46 @@ bool CheckRealOffscreenHistoryIsRejected(const GlComputeApi& gl, unsigned int re
     return ok;
 }
 
+// Empties the real path's history, by the only lever a caller has: taa.cpp's EnsureTextures()
+// reallocates the ping-pong and clears historyValid whenever the size changes, so one throwaway
+// call at a DIFFERENT size does it. The next call back at kRealW x kRealH changes the size
+// again and clears it a second time, which is the one that matters - the fixture that follows
+// then genuinely starts from no history at all.
+//
+// Everything about this call is disposable; only the size change is load-bearing. It is not a
+// check and asserts nothing: if ApplyTaaReal declines it (no compute support), the fixtures
+// cannot run either and main() has already bailed.
+void ResetRealHistory(const GlComputeApi& gl) {
+    const int kResetW = 32, kResetH = 32;
+    const int n = kResetW * kResetH;
+
+    unsigned int src = CreatePipelineTexture(gl, kResetW, kResetH);
+    unsigned int dst = CreatePipelineTexture(gl, kResetW, kResetH);
+    unsigned int world = CreatePipelineTexture(gl, kResetW, kResetH);
+    unsigned int capture = CreatePipelineTexture(gl, kResetW, kResetH);
+    unsigned int depth = CreateDepthTexture(gl, kResetW, kResetH);
+
+    unsigned char* flat = new unsigned char[(size_t)n * 4];
+    for (size_t i = 0; i < (size_t)n * 4; ++i) { flat[i] = 0; }
+    UploadRgba(gl, src, kResetW, kResetH, flat);
+    UploadRgba(gl, world, kResetW, kResetH, flat);
+    UploadRgba(gl, capture, kResetW, kResetH, flat);
+
+    float* depthPixels = new float[n];
+    FillDepth(depthPixels, n);
+    UploadDepth(gl, depth, kResetW, kResetH, depthPixels);
+
+    float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    const ProjectionParams proj = RealProjection();
+    ApplyTaaReal(src, dst, depth, world, capture, kResetW, kResetH, proj, proj, identity,
+                 0.0f, 0.0f, 0.85f);
+
+    delete[] flat; delete[] depthPixels;
+    gl.glDeleteTextures(1, &src); gl.glDeleteTextures(1, &dst);
+    gl.glDeleteTextures(1, &world); gl.glDeleteTextures(1, &capture);
+    gl.glDeleteTextures(1, &depth);
+}
+
 // THE HEADLINE CLAIM: that jitter plus accumulation actually anti-aliases. Every other test
 // here checks that the stage does not break something; this one checks that it does its job.
 //
@@ -372,17 +414,20 @@ bool CheckRealOffscreenHistoryIsRejected(const GlComputeApi& gl, unsigned int re
 // un-jittered frame gives. With jitter forced to zero every frame is identical, the edge texel
 // is 0 in all of them, and no intermediate value can appear; that is the mutation.
 //
-// kAaFrames is three full jitter periods rather than one for a reason that is easy to miss:
-// this fixture inherits whatever history the fixture before it left at 64x64, and at blend=0.85
-// that contamination only decays by 15% per call. One period of eight is not enough calls to
-// drive it under the lower bound, so a zero-jitter build would still show a leftover
-// intermediate value and the mutation would go unnoticed. Three periods leaves it at well under
-// one 8-bit level while the jittered case has long since reached its steady cycle.
+// This fixture starts by FORCING a history reset (ResetRealHistory below) instead of relying on
+// enough frames to decay what the previous fixture left in the shared 64x64 ping-pong. The
+// earlier version did the latter, with kAaFrames tuned to out-decay whatever happened to be
+// there at blend=0.85 - which made the mutation's visibility a property of the fixture ORDER.
+// Insert a fixture ahead of this one, or change blend, and a zero-jitter build would keep
+// showing a leftover intermediate value and pass. With history genuinely empty on the first
+// call, the only thing that can produce an intermediate value here is the jitter.
 bool CheckRealJitterAntiAliases(const GlComputeApi& gl, unsigned int readFbo) {
     bool ok = true;
     const int n = kRealW * kRealH;
     const float kEdgeX = 32.25f;   // deliberately NOT on a texel boundary
-    const int kAaFrames = 24;      // three full periods of TaaJitterOffset's 8-frame sequence
+    const int kAaFrames = 8;       // one full period of TaaJitterOffset's 8-frame sequence
+
+    ResetRealHistory(gl);
 
     unsigned int src = CreatePipelineTexture(gl, kRealW, kRealH);
     unsigned int dst = CreatePipelineTexture(gl, kRealW, kRealH);
@@ -475,8 +520,9 @@ void BuildSteepRamp(unsigned char* pixels, int width, int height) {
 //
 // A CONSTANT offset is used rather than the Halton cycle on purpose: a cycling offset partly
 // averages out, while a constant one drives the error to a steady value that either is or is
-// not there. kAlignFrames is generous for the same reason the anti-aliasing fixture's count is -
-// history inherited from the fixture before this one decays only 15% per call.
+// not there. kAlignFrames is generous because this fixture, unlike the anti-aliasing one above,
+// does inherit the 64x64 history its predecessor left, and that contamination decays only 15%
+// per call at blend=0.85.
 bool CheckRealJitteredFetchStaysOnTheGrid(const GlComputeApi& gl, unsigned int readFbo) {
     bool ok = true;
     const int n = kRealW * kRealH;

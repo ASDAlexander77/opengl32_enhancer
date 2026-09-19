@@ -1,9 +1,10 @@
 #pragma once
 
 // Records the game's CAMERA (view) matrix once per frame, so stages can relate this frame's
-// pixels to the previous frame's. Recording only - like projection_capture.h, every hook here
-// is a notification issued before the real call is forwarded, and none of them changes what the
-// game renders.
+// pixels to the previous frame's. Recording only - every hook here is a notification issued
+// before the real call is forwarded, and none of them changes what the game renders. Once true
+// of projection_capture.h as well, and no longer: the bounds it records are the ones
+// taa_jitter.h has already shifted, which is deliberate and documented there.
 //
 // projection_capture.h already records the world PROJECTION. That is only half of what is needed
 // to place a pixel in space: the projection says how view space maps to the screen, but not

@@ -69,7 +69,10 @@ bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int h
 // (MotionBlurReprojection's 16 floats, previous * inverse(current)), and projecting into
 // `previousProjection`, which must be UNJITTERED, because history holds the previous frame's
 // resolved output and that is defined at pixel centres. Mixing those two up double-counts the
-// sub-pixel offset and leaves a permanent wobble.
+// sub-pixel offset and leaves a permanent wobble: at taaBlend=0.85 the history recursion turns
+// the Halton cycle's -0.0547 px mean into a steady displacement whose own mean is -0.3099 px
+// (the closed form blend*mean/(1-blend)), swinging from +0.01 to -0.48 px across the eight
+// frames of the cycle. Not a rounding detail - a visible crawl on any static edge.
 //
 // worldTexture and captureTexture are the pre-HUD and finished copies of this frame; where
 // they differ the game drew an overlay, and those pixels take the current frame untouched so

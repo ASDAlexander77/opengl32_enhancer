@@ -48,8 +48,11 @@ void AdvanceTaaJitter();
 // no-op that leaves the bounds bit-identical otherwise. Pure - `viewportWidth`/`viewportHeight`
 // are passed in rather than read from GL here, which is what lets taa_jitter_test.cpp check
 // this with no GL context at all. Every glFrustum call within one frame receives that frame's
-// single offset, so a viewmodel drawn at a different field of view stays consistent with the
-// world.
+// single PIXEL offset, so a viewmodel drawn at a different field of view is shifted by the same
+// visible amount as the world and stays consistent with it. The frustum-unit offset reported by
+// GetTaaJitterApplied() is that pixel offset scaled by the call's own extent, so it is NOT the
+// same number for two calls of different field of view - the last call of the frame is the one
+// latched, matching the frustum projection_capture.h keeps.
 void ApplyTaaJitterToFrustum(double& left, double& right, double& bottom, double& top,
                              int viewportWidth, int viewportHeight);
 

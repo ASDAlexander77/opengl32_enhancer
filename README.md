@@ -196,8 +196,18 @@ several.
 List `taa` **before** `bilinear`/`nvscaler`/`fsr`. Its reprojected path reads
 the game's depth buffer, which only exists at the game's own render resolution,
 so listed after one of those while it is doing a real upscale (windowWidth/
-windowHeight larger than the game's mode) the stage is skipped outright and says
-so in the log — the same rule `ssao`/`ssr`/`motionblur` already follow.
+windowHeight larger than the game's mode) the reprojected path is unavailable
+and the motion-vector-free fallback runs instead, with a line in the log saying
+so. `taa` is the only depth stage that degrades rather than being skipped —
+`ssao`/`ssr`/`motionblur`/`dof`/`fog`/`depthvignette` have nothing to run
+without depth and are dropped outright.
+
+**Cost.** Enabling `taa` adds a full-resolution copy of the back buffer every
+frame, taken before the game draws its HUD, plus one permanently allocated
+full-res RGBA16F texture to hold it. That is how the reprojected path knows
+which pixels are overlay and must be passed through untouched. `motionblur`
+needs the same capture and the two **share** it, so listing both costs no more
+than listing either alone.
 
 Because history is resampled and re-filtered every frame, `taa` softens the
 image a little. The conventional remedy is a mild sharpener listed **after**

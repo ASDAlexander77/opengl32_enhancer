@@ -114,6 +114,8 @@ bool CheckFrustumShift() {
                    "jx=0.5 shifts left and right by half a pixel of frustum width") && ok;
         ok = Check(NearlyEqual(b, kBottom, 1e-12) && NearlyEqual(t, kTop, 1e-12),
                    "a horizontal-only jitter leaves bottom and top untouched") && ok;
+        // 1e-9 rather than the 1e-12 above because dx/dy are floats by design - see the
+        // reconstruction block below for the full reasoning, which applies verbatim here.
         ok = Check(NearlyEqual(dx, expected, 1e-9) && NearlyEqual(dy, 0.0, 1e-9),
                    "the applied offsets are reported in frustum units") && ok;
     }
@@ -255,24 +257,62 @@ bool CheckArming() {
                    "consecutive armed frames use different offsets") && ok;
     }
 
-    // Two glFrustum calls in one frame - a viewmodel drawn at a different field of view - must
-    // share that frame's offset. Two different offsets inside one frame would render the world
-    // and the viewmodel at inconsistent sub-pixel positions.
+    // Two glFrustum calls in one frame - a viewmodel drawn at a genuinely different field of
+    // view - must be shifted by the same PIXEL offset. That, not an equal frustum-unit offset,
+    // is the property that holds and the one that matters: the world and the viewmodel have to
+    // land at the same sub-pixel position on screen, and the frustum-unit numbers cannot match
+    // when the extents differ, because dx = jx * (right - left) / width scales with the extent.
+    //
+    // The second frustum is twice as wide and twice as tall, so an implementation that
+    // re-derived the pixel offset per call (correct) and one that reused the first call's
+    // frustum-unit shift (wrong - it would halve the viewmodel's apparent shift) differ by a
+    // clean factor of two here.
     {
         NotifyTaaRealPathRan(true);
         AdvanceTaaJitter();
+
         double la = kLeft, ra = kRight, ba = kBottom, ta = kTop;
         ApplyTaaJitterToFrustum(la, ra, ba, ta, kWidth, kHeight);
         float dxA = 0.0f, dyA = 0.0f;
         GetTaaJitterApplied(dxA, dyA);
 
-        double lb = kLeft, rb = kRight, bb = kBottom, tb = kTop;
+        // A wider frustum: the viewmodel's own field of view, same viewport.
+        const double kWideLeft = 2.0 * kLeft, kWideRight = 2.0 * kRight;
+        const double kWideBottom = 2.0 * kBottom, kWideTop = 2.0 * kTop;
+        double lb = kWideLeft, rb = kWideRight, bb = kWideBottom, tb = kWideTop;
         ApplyTaaJitterToFrustum(lb, rb, bb, tb, kWidth, kHeight);
         float dxB = 0.0f, dyB = 0.0f;
         GetTaaJitterApplied(dxB, dyB);
 
-        ok = Check(NearlyEqual(dxA, dxB, 1e-12) && NearlyEqual(dyA, dyB, 1e-12),
-                   "both glFrustum calls in one frame share that frame's offset") && ok;
+        // Recover each call's pixel offset by undoing its own scaling. Tolerance as at :117 and
+        // explained at :151-154 - the reported offsets are floats by design.
+        const double pxA = (double)dxA * (double)kWidth / (kRight - kLeft);
+        const double pyA = (double)dyA * (double)kHeight / (kTop - kBottom);
+        const double pxB = (double)dxB * (double)kWidth / (kWideRight - kWideLeft);
+        const double pyB = (double)dyB * (double)kHeight / (kWideTop - kWideBottom);
+        ok = Check(NearlyEqual(pxA, pxB, 1e-9) && NearlyEqual(pyA, pyB, 1e-9),
+                   "both glFrustum calls in one frame are shifted by the same pixel offset") && ok;
+
+        // The bounds really were shifted, by each frustum's own scale - so the check above is
+        // not passing on two offsets that are both zero. Tested on the pair rather than on x
+        // alone: TaaJitterOffset's first sample of every cycle is jx=0 exactly (Halton(1,2) is
+        // 0.5), and which sample this block lands on depends on how many advances the checks
+        // above it happened to make. jy is never zero - Halton(n,3) cannot equal 0.5 - so the
+        // magnitude of the pair always is not.
+        const double shiftA = (la - kLeft) * (la - kLeft) + (ba - kBottom) * (ba - kBottom);
+        ok = Check(shiftA > 0.0 &&
+                   NearlyEqual(lb - kWideLeft, 2.0 * (la - kLeft), 1e-9) &&
+                   NearlyEqual(bb - kWideBottom, 2.0 * (ba - kBottom), 1e-9),
+                   "the wider frustum is shifted by twice the frustum-unit offset of the narrow "
+                   "one, for the same pixel offset") && ok;
+
+        // And the consequence for the resolve: the latched frustum-unit offset is the LAST
+        // call's, which is the one that matches the frustum projection_capture.h also kept.
+        const double latchedGap = ((double)dxB - (double)dxA) * ((double)dxB - (double)dxA) +
+                                  ((double)dyB - (double)dyA) * ((double)dyB - (double)dyA);
+        ok = Check(NearlyEqual(dxB, 2.0 * (double)dxA, 1e-9) &&
+                   NearlyEqual(dyB, 2.0 * (double)dyA, 1e-9) && latchedGap > 0.0,
+                   "the latched offset is the last call's, in that call's own frustum units") && ok;
     }
 
     return ok;

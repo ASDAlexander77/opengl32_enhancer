@@ -51,9 +51,22 @@ bool GetCapturedProjection(ProjectionParams& out);
 // point projected last frame, and a game may change field of view between the two.
 bool GetPreviousProjection(ProjectionParams& out);
 
-// wglSwapBuffers, AFTER the post-effect chain: this frame's frustum becomes the previous one.
+// wglSwapBuffers, AFTER the post-effect chain: this frame's frustum becomes the previous one,
+// IF this frame captured one. A frame with no glFrustum call (a menu, a loading screen) leaves
+// the previous slot alone rather than re-promoting an older frustum as though it belonged to
+// the frame just finished - see the definition for what that would cost a consumer.
 // Deliberately the same tick as modelview_capture.h's AdvanceCameraHistory() and
 // taa_jitter.h's AdvanceTaaJitter(), because a consumer reads projection, camera and jitter
 // history as one set describing one frame - if they advanced at different moments they would
-// describe different frames and the reprojection would be silently wrong.
+// describe different frames and the reprojection would be silently wrong. The promotion rule
+// matches AdvanceCameraHistory()'s for the same reason: that one promotes only if the camera
+// was latched this frame, this one only if a frustum was captured.
+//
+// One residual, stated rather than implied: taa_jitter.h's history is the third member of that
+// set and does NOT follow this rule - it clears its "has previous" flag on any frame that
+// applied no jitter. So after a frame with no glFrustum, this slot still holds the last
+// world-pass frustum (with that frame's jitter baked in) while GetPreviousTaaJitterApplied()
+// reports nothing to subtract, and the resolve is off by up to half a pixel until the next
+// jittered frame rotates through. Bounded and transient, and it is a taa_jitter.h question,
+// not one this file can answer on its own.
 void AdvanceProjectionHistory();
