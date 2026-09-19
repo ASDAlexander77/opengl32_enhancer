@@ -75,17 +75,28 @@ The heuristic mirrors the projection one and adds a second axis:
 Sampling on every matrix call would work but wastes a driver query per call.
 Instead the read is deferred to the one moment the camera is known to be final:
 
-- **`glFrustum`** — a new world pass begins. Rotate `current -> previous`,
-  clear `pending` and `latched`. History rotates *here*, not at swap, so a
-  stage reading at swap time sees a stable current/previous pair.
-- **`glOrtho`** — disarm.
-- A matrix edit while **armed, mode == `GL_MODELVIEW`, depth == 0** sets
-  `pending = true`. No GL call is made.
-- **Latch** — read `GL_MODELVIEW_MATRIX` at the first of: `glPushMatrix` while
-  pending, `glOrtho` while pending, or `wglSwapBuffers` while pending. Set
-  `latched`; ignore everything until the next `glFrustum`.
+- **`glFrustum`** — a world pass begins. Arm.
+- **`glOrtho`** — latch if pending, then disarm.
+- A matrix edit while **armed, mode == `GL_MODELVIEW`, depth == 0, not yet
+  latched** sets `pending = true`. No GL call is made.
+- **Latch** — read `GL_MODELVIEW_MATRIX` at the first of: a depth-0
+  `glPushMatrix` while pending, `glOrtho` while pending, or `wglSwapBuffers`
+  while pending. Set `latched`; ignore everything until the frame ends.
+- **Frame end** — after `ApplySelectedEffect` at `wglSwapBuffers`, rotate
+  `current -> previous` and clear `armed`, `pending`, `latched` and the depth
+  counter.
 
 Exactly one `glGetFloatv` per frame.
+
+History advances at frame end rather than at `glFrustum` because an engine may
+establish more than one frustum per frame (a viewmodel drawn at a different
+FOV, a scope). Rotating at `glFrustum` would then leave "previous" holding
+*this* frame's earlier camera rather than the last frame's. Rotating after
+`ApplySelectedEffect` is frame-accurate and still leaves a stage reading at
+swap time a stable current/previous pair. It also makes the latch rule
+**the first world pass of a frame wins**: later frustums in the same frame are
+sub-passes of the same camera, and clearing the depth counter at frame end
+stops an unbalanced push/pop from drifting across frames.
 
 All three latch points are safe because the modelview still holds the camera at
 each: `glPushMatrix` copies the top of stack without modifying it, and Quake
@@ -130,7 +141,7 @@ hooks and gain one more each.
 | `glRotatef` / `glRotated` | `NotifyMatrixEdited()` |
 | `glTranslatef` / `glTranslated` | `NotifyMatrixEdited()` |
 | `glScalef` / `glScaled` | `NotifyMatrixEdited()` |
-| `wglSwapBuffers` | `FinalizeCameraForFrame()`, before `ApplySelectedEffect` |
+| `wglSwapBuffers` | `FinalizeCameraForFrame()` before `ApplySelectedEffect`, `AdvanceCameraHistory()` after it |
 
 All sixteen are already exported and forwarded in `wrapper.def`; no new exports
 are needed.
@@ -153,10 +164,24 @@ struct CameraPose {
     float forward[3];                  // -(m[2], m[6], m[10])
 };
 
+// Hooks, called from the generated wrapper. Recording only.
+void NotifyWorldProjection();                // glFrustum
+void NotifyTwoDProjection();                 // glOrtho
+void NotifyMatrixMode(unsigned int mode);    // glMatrixMode
+void NotifyMatrixPush();                     // glPushMatrix
+void NotifyMatrixPop();                      // glPopMatrix
+void NotifyMatrixEdited();                   // the eleven modelview-modifying calls
+void FinalizeCameraForFrame();               // wglSwapBuffers, before the effect chain
+void AdvanceCameraHistory();                 // wglSwapBuffers, after the effect chain
+
 bool GetCapturedCamera(CameraMatrix& out);   // false until the first latch
 bool GetPreviousCamera(CameraMatrix& out);   // false until the second
 void DecomposeCamera(const CameraMatrix& in, CameraPose& out);
 ```
+
+No test-only reset is exported. The unit test asserts the
+"nothing captured yet" case first, before anything latches, and uses
+`AdvanceCameraHistory()` as its frame boundary thereafter.
 
 `DecomposeCamera` exists because the in-game verification log needs readable
 numbers. `GetPreviousCamera` is the single forward-looking element: three lines
@@ -196,9 +221,11 @@ the ones that fail:
 4. A frame with no `glFrustum` leaves `GetCapturedCamera()` false.
 5. A push/pop pair *before* the camera sequence must not latch early; the
    camera established afterwards is the one captured.
-6. Two consecutive world passes: `GetPreviousCamera()` returns the first while
-   `GetCapturedCamera()` returns the second.
-7. `DecomposeCamera` recovers a known eye position and basis from a matrix
+6. Two consecutive frames: `GetPreviousCamera()` returns the first frame's
+   camera while `GetCapturedCamera()` returns the second's.
+7. A second `glFrustum` within one frame, followed by a different modelview,
+   does **not** replace the camera already latched that frame.
+8. `DecomposeCamera` recovers a known eye position and basis from a matrix
    built by real `glRotatef`/`glTranslatef`.
 
 ### In-game
@@ -222,11 +249,14 @@ New: `modelview_capture.h`, `modelview_capture.cpp`,
 Modified: `generators/gen_wrapper_cpp.py` and the regenerated `wrapper.cpp`;
 `CMakeLists.txt` (the DLL's source list — it links the generated `wrapper.cpp`,
 which is what calls the hooks — plus the new test target; no existing test
-target needs it, since no stage consumes the capture yet); `config.h`, `config.cpp`,
-`config_writer.cpp`, `config_editor.cpp`, `opengl32_enhancer.ini`, `README.md`
-for `cameraLogInterval`; `docs/enhancement-opportunities.md` to record the
-outcome.
+target needs it, since no stage consumes the capture yet); `config.h`,
+`config.cpp`, `opengl32_enhancer.ini`, `README.md` for `cameraLogInterval`;
+`docs/enhancement-opportunities.md` to record the outcome.
 
-`config_writer.cpp` keeps an explicit key allow-list. Omitting the new key
-there means the editor silently drops it on save — the hazard
-`docs/enhancement-opportunities.md` calls out by name.
+`config_writer.cpp` and `config_editor.cpp` are deliberately **not** touched.
+`docs/enhancement-opportunities.md` warns that `config_writer.cpp`'s allow-list
+silently drops keys omitted from it, but that list is "every key the editor can
+change" — `windowWidth`, `windowHeight` and `frameDumpKey` are all absent from
+it for the same reason, and lines for unmanaged keys are copied through
+untouched on save. `cameraLogInterval` is a diagnostic the editor does not
+expose, so it belongs with those.
