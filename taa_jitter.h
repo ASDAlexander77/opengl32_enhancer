@@ -53,23 +53,26 @@ void AdvanceTaaJitter();
 void ApplyTaaJitterToFrustum(double& left, double& right, double& bottom, double& top,
                              int viewportWidth, int viewportHeight);
 
-// What the generated glFrustum wrapper (see generators/gen_wrapper_cpp.py) actually calls,
-// before CaptureProjectionFrustum, so the capture records the frustum GL is actually given.
-// Reads GL_VIEWPORT through GetGlComputeApi(), skipping the read entirely when gl.loaded is
-// false (no current GL context - true of every unit test in this project), and otherwise
-// delegates to ApplyTaaJitterToFrustum() above. Deliberately has no unit test of its own:
-// beyond the gl.loaded guard it is nothing but a viewport read and a delegation, and the logic
-// actually worth checking already has a test, on the pure function above.
+// Must be called from the generated glFrustum wrapper (see generators/gen_wrapper_cpp.py),
+// before CaptureProjectionFrustum, so that the capture records the frustum GL is actually
+// given. Reads GL_VIEWPORT through GetGlComputeApi(), skipping the read entirely when
+// gl.loaded is false (no current GL context - true of every unit test in this project), and
+// otherwise delegates to ApplyTaaJitterToFrustum() above. Deliberately has no unit test of its
+// own: beyond the gl.loaded guard it is nothing but a viewport read and a delegation, and the
+// logic actually worth checking already has a test, on the pure function above.
 void ApplyTaaJitterToFrustumFromCurrentViewport(double& left, double& right,
                                                 double& bottom, double& top);
 
 // The offset applied this frame and last, in FRUSTUM UNITS. False when that frame was not
-// jittered. The resolve subtracts the PREVIOUS one to rebuild the unjittered previous frustum.
+// jittered. Whatever performs TAA's temporal resolve must subtract the PREVIOUS one to rebuild
+// the unjittered previous frustum - that is the reason this history exists at all.
 bool GetTaaJitterApplied(float& dx, float& dy);
 bool GetPreviousTaaJitterApplied(float& dx, float& dy);
 
-// Called by taa.cpp every frame the stage runs, reporting whether its REAL path ran (as opposed
-// to the TAA-lite fallback). This arms the next frame's jitter.
+// Must be called by post_effects.cpp's ApplySelectedEffect(), at the EffectKind::Taa case,
+// every frame the stage runs - that is the only place that knows whether the real path or the
+// TAA-lite fallback ran; taa.cpp exposes both paths but does not choose between them. This
+// call arms the next frame's jitter.
 //
 // Jitter that nothing resolves is not neutral - it is pure added shimmer - so it is switched on
 // only by evidence that a real resolve is consuming it. The one-frame lag is harmless because
