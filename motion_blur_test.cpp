@@ -467,6 +467,90 @@ bool CheckGpuMotionBlur() {
              ok;
     }
 
+    // A LONG smear must come out continuous, not as a row of discrete copies. This is what
+    // forces the tap count to follow the velocity instead of sitting at a fixed 8: at a short
+    // velocity 8 taps land roughly a pixel apart and the result is smooth, but at the long
+    // smears that actually read as motion blur they land several pixels apart and the eye sees
+    // ghosting - the same image stamped 8 times - rather than blur.
+    //
+    // The fixture is deliberately not the sinusoid the other cases use: a single bright column
+    // on a flat field makes a gap unambiguous. Every output pixel between the column and the far
+    // end of its trail must have picked up SOME of the column, because a continuous smear has no
+    // holes in it. Counting lit pixels along the trail and requiring nearly all of them is what
+    // a fixed tap count cannot satisfy.
+    {
+        // The taps run FORWARD along the velocity vector, so the trail falls on the side the
+        // camera came from - to the left of the column here. Placed at x=100 so a ~40px trail
+        // fits entirely on screen instead of being clipped at x=0.
+        const int kCol = 100;           // the bright column's x
+        const unsigned char kDim = 40, kBright = 230;
+        static unsigned char flatPixels[kWidth * kHeight * 4];
+        for (int y = 0; y < kHeight; ++y) {
+            for (int x = 0; x < kWidth; ++x) {
+                unsigned char v = (x == kCol) ? kBright : kDim;
+                unsigned char* px = &flatPixels[(y * kWidth + x) * 4];
+                px[0] = v; px[1] = v; px[2] = v; px[3] = 255;
+            }
+        }
+        // world == capture everywhere, so nothing is classified as HUD and the trail is not
+        // broken by tap rejection - which would otherwise be indistinguishable from a gap.
+        UploadRgba(gl, src, W, H, flatPixels);
+        UploadRgba(gl, capture, W, H, flatPixels);
+        UploadRgba(gl, world, W, H, flatPixels);
+
+        // A pure view-space X translation shifts every pixel at this depth by the same amount,
+        // so the expected trail length is the same for the whole row. 37.5 units at eye distance
+        // 100 through this frustum works out to about 40 pixels at 128 wide.
+        CameraMatrix current;
+        CameraMatrix moved;
+        moved.m[12] = 37.5f;
+        float reprojection[16];
+        MotionBlurReprojection(current, moved, reprojection);
+
+        bool wrote = ApplyMotionBlur(src, dst, depth, world, capture, W, H, projection,
+                                      reprojection, 1.0f, 0.5f);
+        ok = Check(wrote, "long-smear case ran") && ok;
+
+        // Ghosting is a GAP problem, not a brightness problem: the eye reads a run of
+        // untouched pixels between copies, not the exact weight each copy carries. So the
+        // measure is the longest unlit run inside the trail. A fixed 8 taps over a 40px smear
+        // leaves holes about 5px wide, which is plainly visible stamping; taps that follow the
+        // velocity leave at most a pixel, which is not. Counting "how many pixels are brighter
+        // than X" instead would just be measuring the threshold.
+        // Two passes: find where the trail ends, then measure gaps only INSIDE it. Scanning
+        // past the end would just measure the unlit background and swamp the real signal.
+        int lastLit = kCol;
+        for (int x = kCol - 1; x >= 0; --x) {
+            unsigned char px[4];
+            ReadPixel(dst, x, 64, px);
+            if (px[0] > kDim + 2) { lastLit = x; }
+        }
+        int trail = kCol - lastLit;
+
+        int longestGap = 0, gap = 0;
+        for (int x = kCol - 1; x >= lastLit; --x) {
+            unsigned char px[4];
+            ReadPixel(dst, x, 64, px);
+            if (px[0] > kDim + 2) {
+                gap = 0;
+            } else {
+                gap++;
+                if (gap > longestGap) { longestGap = gap; }
+            }
+        }
+
+        ok = Check(trail >= 20, "the smear is long enough for this case to mean anything") && ok;
+        ok = Check(longestGap <= 2,
+                   "a long smear is continuous, not a row of discrete ghost copies") && ok;
+        printf("       trail spans %d px, longest unlit run inside it %d px\n",
+               trail, longestGap);
+
+        // Put the sinusoid fixtures back for whatever runs after this.
+        UploadRgba(gl, src, W, H, capturePixels);
+        UploadRgba(gl, capture, W, H, capturePixels);
+        UploadRgba(gl, world, W, H, worldPixels);
+    }
+
     // ApplyMotionBlur's return-value contract - "returns true ONLY if it actually wrote
     // dstTexture" - had zero coverage above: every call so far discards the bool. Task 4 is
     // about to swap its ping-pong buffer on that return value, so a stage that declines (a guard

@@ -95,14 +95,28 @@ const char* kMotionBlurShaderSource =
     // looking for a test that kills this line instead; there isn't one to find.
     "    if (len < 1e-6) { imageStore(outputImage, coord, src); return; }\n"
     "    if (len > params.w) { velocity *= params.w / len; }\n"
+    // The tap count follows the velocity instead of sitting at a fixed number, because a fixed
+    // count only looks like blur at one smear length. Spread 8 taps over the long smears that
+    // actually read as motion blur and they land several pixels apart, so the eye sees the same
+    // image stamped a few times - ghosting - rather than a smear. Spacing is held near two
+    // pixel, which is what motion_blur_test.cpp's continuity case pins - it measures the longest
+    // unlit run inside a smeared line, because ghosting is a gap the eye reads, not a weight.
+    //
+    // Taps sample with texture() rather than texelFetch() so a tap landing between texels is
+    // filtered across both instead of snapping to one, which keeps the trail smooth rather than
+    // stepped where the stride does not divide evenly. The ceiling of 32 bounds the per-pixel
+    // cost; past it the stride grows again, which is a far better failure than an unbounded
+    // loop, and maxRadius already caps how long the smear can get.
+    "    float lengthInPixels = length(velocity * vec2(size));\n"
+    "    int taps = int(clamp(floor(lengthInPixels) + 2.0, 8.0, 32.0));\n"
     "    vec3 sum = src.rgb;\n"
     "    float count = 1.0;\n"
-    "    for (int i = 1; i < 8; ++i) {\n"
-    "        vec2 tapUv = uv - velocity * (float(i) / 7.0);\n"
-    "        ivec2 tap = ivec2(clamp(tapUv, vec2(0.0), vec2(1.0)) * vec2(size));\n"
-    "        tap = clamp(tap, ivec2(0), size - ivec2(1));\n"
+    "    for (int i = 1; i < taps; ++i) {\n"
+    "        vec2 tapUv = uv - velocity * (float(i) / float(taps - 1));\n"
+    "        vec2 clampedUv = clamp(tapUv, vec2(0.0), vec2(1.0));\n"
+    "        ivec2 tap = clamp(ivec2(clampedUv * vec2(size)), ivec2(0), size - ivec2(1));\n"
     "        if (IsHud(tap)) { continue; }\n"
-    "        sum += texelFetch(colorTex, tap, 0).rgb;\n"
+    "        sum += texture(colorTex, clampedUv).rgb;\n"
     "        count += 1.0;\n"
     "    }\n"
     "    imageStore(outputImage, coord, vec4(sum / count, src.a));\n"

@@ -386,16 +386,33 @@ than guessing.
 
 | Setting | What it does |
 | --- | --- |
-| `motionBlurStrength` | `0`..`1`, a multiplier on the measured screen-space velocity. `0` is an exact no-op. **Default is `0.5`**, unlike every other intensity setting on this page - `motionblur` isn't in the shipped `effect=` line, so listing it at all is already the opt-in; once listed, it should visibly do something rather than need a second value changed too |
+| `motionBlurStrength` | `0`..`4`, a multiplier on the measured screen-space velocity. `0` is an exact no-op. **Default is `1.5`**, and the range is wider than every other intensity here on purpose: `1.0` means "smear over exactly one frame of camera motion", which at 60fps is ~16ms and reads as a shimmer rather than as blur. `2`-`3` is a heavy cinematic look. Also unlike the others it defaults non-zero, because `motionblur` isn't in the shipped `effect=` line - listing it is already the opt-in |
 | `motionBlurMaxRadius` | `0`..`0.5`, a **fraction of the screen** (not a world unit like `ssaoRadius`) — the longest smear allowed. A scene cut or a teleport produces an enormous inter-frame camera delta that would otherwise smear the whole screen; this bounds that without needing cut detection |
 
 Put `motionblur` **early** in the chain, before `bilinear`/`nvscaler`/`fsr`, for the same reason as
 `ssao`/`dof`/`fog`/`ssr`: it reads the game's depth buffer, which only exists at the game's own
 native render resolution, so listed after a real upscale it can only no-op (logged once).
 
-**Status: unit-tested, not yet validated in a running game.** The "first `glOrtho` means the world
-is finished" assumption that separates world pixels from HUD pixels (see `world_capture.h`) has
-not been confirmed against Anachronox or any other title — see
+**Do not list a sharpener after it.** `nvscaler`, `cas` and `sharpen` amplify local contrast,
+which is exactly what a blur removes, so `..., motionblur, nvscaler, ...` comes out visibly weaker
+than the same list without the sharpener. Nothing warns about it, because both stages are doing
+precisely what they were told. Put sharpeners before `motionblur`, or drop them while tuning it.
+
+**What a correct result looks like**, so it isn't mistaken for a broken one: turning smears the
+whole frame; strafing past nearby geometry smears strongly; strafing across open space smears
+weakly; walking straight forward barely smears near the centre of the screen. That last one is
+real parallax rather than a fault - walk toward something and the point you are looking at hardly
+moves on screen. An NPC crossing an otherwise still frame never smears at all, because the proxy
+cannot see per-object motion.
+
+If nothing appears to blur, set `cameraLogInterval=60` and check the log for
+`motion_blur: frame N turned X deg ... wrote=yes`, which separates "the stage never ran" from
+"the camera didn't move" from "something downstream undid it".
+
+**Status: produces visible blur in Anachronox, partially validated.** The stage was confirmed to blur the
+world there once a trailing `nvscaler` was removed from the chain. What has NOT been explicitly
+checked is the HUD: the "first `glOrtho` means the world is finished" assumption that separates
+world pixels from HUD pixels (see `world_capture.h`) was not reported on either way — see
 `docs/enhancement-opportunities.md` for what that validation involves and what to look for
 (sharp HUD, smeared world) once it has been run.
 

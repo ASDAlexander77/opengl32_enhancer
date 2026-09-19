@@ -136,7 +136,13 @@ struct AnaxConfig {
     // it to your own `effect=` list already IS the opt-in, and a non-zero default means it does
     // something visible the moment it's added instead of requiring a second value to be found
     // and changed too.
-    float motionBlurStrength = 0.5f;           // MotionBlur, 0 = exact no-op
+    // The range is 0..4, not the 0..1 every other intensity setting uses, and that is
+    // deliberate rather than sloppy. 1.0 means "smear over exactly one frame of camera motion",
+    // which at 60fps is about 16ms - film looks blurry at 24fps with a 180-degree shutter, so
+    // one frame at 60fps is genuinely a small smear. Values above 1 are what read as motion
+    // blur rather than as a shimmer. Measured in Anachronox: 0.5 came back as "a little bit of
+    // blur but not strong".
+    float motionBlurStrength = 1.5f;           // MotionBlur, 0 = exact no-op
     float motionBlurMaxRadius = 0.05f;         // MotionBlur
 
     // Gamma. `gamma` is the display exponent (1.0 = no-op, >1 brightens the midtones, <1

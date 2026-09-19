@@ -350,6 +350,35 @@ int main() {
         Check(config.fsrFilmGrain == 1.0f, "out-of-range fsrFilmGrain (5.0) clamps to max 1.0");
     }
 
+    // motionBlurStrength's range is 0..4, not the 0..1 every other intensity uses, and the
+    // difference is the whole point: 1.0 means "smear over exactly one frame of camera motion",
+    // which at 60fps is about 16ms and reads as a barely-there shimmer rather than motion blur.
+    // Measured in Anachronox, the shipped 0.5 came back as "a little bit of blur but not strong"
+    // - and it had been capped at 1.0 regardless. A clamp that silently ate everything above 1.0
+    // would reproduce that symptom exactly and leave no trace in the log, so it is pinned here.
+    {
+        WriteFixture("config_test_motionblur_range.ini",
+            "motionBlurStrength=3.0\n"
+            "motionBlurMaxRadius=0.2\n");
+        AnaxConfig config = ParseConfigFile("config_test_motionblur_range.ini");
+        Check(config.motionBlurStrength == 3.0f,
+              "motionBlurStrength=3.0 survives parsing (range is 0..4, not 0..1)");
+        Check(config.motionBlurMaxRadius == 0.2f, "parses motionBlurMaxRadius=0.2");
+    }
+    {
+        WriteFixture("config_test_motionblur_clamp.ini", "motionBlurStrength=9.0\n");
+        AnaxConfig config = ParseConfigFile("config_test_motionblur_clamp.ini");
+        Check(config.motionBlurStrength == 4.0f,
+              "out-of-range motionBlurStrength (9.0) clamps to max 4.0");
+    }
+    {
+        AnaxConfig config = ParseConfigFile("config_test_does_not_exist.ini");
+        Check(config.motionBlurStrength == 1.5f,
+              "missing file falls back to default motionBlurStrength=1.5");
+        Check(config.motionBlurMaxRadius == 0.05f,
+              "missing file falls back to default motionBlurMaxRadius=0.05");
+    }
+
     // nr and localcontrast parse like every other stage/parameter, including nrPasses' int
     // clamp (ParseClampedInt, not the float path everything else here uses).
     {

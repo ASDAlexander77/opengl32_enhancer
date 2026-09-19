@@ -20,6 +20,15 @@
 void MotionBlurReprojection(const CameraMatrix& current, const CameraMatrix& previous,
                             float out[16]);
 
+// ORDERING, learned the hard way in Anachronox: a sharpening stage listed AFTER this one
+// visibly undoes it. `nvscaler`, `cas` and `sharpen` all amplify local contrast, which is
+// precisely what a blur removes, so `effect=..., motionblur, nvscaler, ...` produces a much
+// weaker smear than the same list without it - and nothing logs, because both stages are
+// working exactly as specified. List sharpeners BEFORE motionblur, or not at all alongside it.
+//
+// This stage also reads depth, so it must come before any real upscale for the usual reason
+// (see StageNeedsDepth in post_effects.h).
+
 // Runs the stage, called from post_effects.cpp's ApplySelectedEffect(). srcTexture and
 // dstTexture are width x height RGBA16F 2D textures owned by the caller; depthTexture is the
 // depth attachment the pipeline blitted for this frame.
@@ -33,7 +42,7 @@ void MotionBlurReprojection(const CameraMatrix& current, const CameraMatrix& pre
 // projection comes from GetCapturedProjection() and is what makes unprojecting raw depth
 // possible at all. reprojection is MotionBlurReprojection()'s 16 floats.
 //
-// strength is GetAnaxConfig().motionBlurStrength, 0..1: a multiplier on the measured
+// strength is GetAnaxConfig().motionBlurStrength, 0..4: a multiplier on the measured
 // screen-space velocity. 0 declines outright and returns false without writing dstTexture at
 // all - see the return contract below, not "reproduces the input bit-exact": there is no input
 // reproduced into dst for a caller to read. maxRadius is

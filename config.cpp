@@ -506,7 +506,7 @@ AnaxConfig ParseConfigFile(const char* path) {
         } else if (strcmp(key, "ssrUpThreshold") == 0) {
             config.ssrUpThreshold = ParseClampedFloat(value, 0.0f, 1.0f, config.ssrUpThreshold, "ssrUpThreshold");
         } else if (strcmp(key, "motionBlurStrength") == 0) {
-            config.motionBlurStrength = ParseClampedFloat(value, 0.0f, 1.0f, config.motionBlurStrength, "motionBlurStrength");
+            config.motionBlurStrength = ParseClampedFloat(value, 0.0f, 4.0f, config.motionBlurStrength, "motionBlurStrength");
         } else if (strcmp(key, "motionBlurMaxRadius") == 0) {
             config.motionBlurMaxRadius = ParseClampedFloat(value, 0.0f, 0.5f, config.motionBlurMaxRadius, "motionBlurMaxRadius");
         } else if (strcmp(key, "ssrWorldUpAxis") == 0) {
