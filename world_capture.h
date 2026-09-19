@@ -1,0 +1,43 @@
+#pragma once
+
+// Captures a copy of the frame BEFORE the game draws its HUD, so a stage can tell an overlay
+// pixel from a world pixel. Depth cannot do this: Quake II's R_SetGL2D disables depth testing
+// to draw the HUD, and depth writes require depth testing, so HUD pixels never write depth -
+// they keep whatever the world wrote behind them.
+//
+// WHEN, not what. `glFrustum` arms a world pass and the first `glOrtho` of the frame fires the
+// latch, which is the same discrimination modelview_capture.h and projection_capture.h already
+// make at the same two hook points. At the first `glOrtho` the world is finished and the 2D
+// pass has not started, so the back buffer at that instant is exactly the world.
+//
+// Unlike the post-effect chain, this runs INSIDE the game's own GL state, so it saves and
+// restores the active texture unit, the 2D texture binding, the read buffer and the read
+// framebuffer binding around its one copy. See texture_effect.cpp, which does the same at
+// glTexImage2D.
+//
+// Where it breaks, and how it degrades:
+//   - 3D drawn AFTER the first glOrtho (a rendered portrait inside a dialogue box, an inset
+//     viewport) is absent from the capture, so those pixels differ from the finished frame and
+//     read as HUD to a consumer: they simply do not get the effect. Never corruption.
+//   - A frame that issues no glOrtho leaves no capture, and GetWorldOnlyFrame() returns false.
+//   - A game that draws its HUD without glOrtho never captures at all. False, not a guess.
+
+// glFrustum: a world pass is starting.
+void NotifyWorldPassBegan();
+
+// glOrtho: the 2D pass is starting, so the world is complete. Latches on the first call of a
+// frame that was armed; later calls in the same frame do nothing.
+void NotifyTwoDPassBegan();
+
+// Called at swap AFTER the effect chain has run - the chain is the consumer, so invalidating
+// on entry would destroy the very frame it needs. Mirrors AdvanceCameraHistory() in
+// modelview_capture.h, which is called at the same point for the same reason.
+void InvalidateWorldFrame();
+
+// The world-only frame for THIS frame, or false if none was latched. Never returns a stale
+// texture: a frame with no world pass fails closed rather than handing back the previous
+// frame's world, because being wrong here would be invisible.
+//
+// `width`/`height` are the viewport at latch time. A consumer whose own dimensions differ must
+// decline rather than sample a mismatched texture.
+bool GetWorldOnlyFrame(unsigned int& texture, int& width, int& height);
