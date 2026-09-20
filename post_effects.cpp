@@ -388,6 +388,18 @@ bool StageNeedsDepth(EffectKind stage) {
     }
 }
 
+// See post_effects.h.
+ColorSpace ColorSpaceFor(EffectKind stage) {
+    switch (stage) {
+        case EffectKind::LutGrading:
+        case EffectKind::Dither:
+        case EffectKind::Gamma:
+            return ColorSpace::Display;
+        default:
+            return ColorSpace::Linear;
+    }
+}
+
 // See post_effects.h. Only asked about stages StageNeedsDepth() already returned true for, and
 // only once the pipeline has moved past a real upscale, where the game's depth buffer no longer
 // exists at the current resolution.

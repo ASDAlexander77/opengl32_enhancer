@@ -57,6 +57,31 @@ bool StageIsSkippedWhenDepthUnavailable(EffectKind stage);
 // chain. Same-file reasoning as StageNeedsDepth: one consumer, post_effects.cpp.
 bool AnyUpscaleStageListed(const AnaxConfig& config);
 
+// The colour space a value in the pipeline is currently in.
+//
+// `Linear` is light: the quantity that may legitimately be averaged, blurred, thresholded or
+// tone-mapped. `Display` is sRGB-encoded - what the 8-bit back buffer holds and what the game
+// handed us. The distinction matters because sRGB is roughly a 2.2-power encoding, so the
+// average of two encoded values is NOT the encoding of their average.
+enum class ColorSpace {
+    Linear,
+    Display,
+};
+
+// Which space a stage wants to be handed. Only consulted when srgbCorrect=1; with it off the
+// chain never asks, and no conversion is ever generated.
+//
+// Three of the twenty-five stages want `Display`, and each for the same underlying reason -
+// they are about the OUTPUT rather than about the light. Everything else averages, filters or
+// blends, and all of those are only meaningful on light.
+//
+// `acestonemap` is deliberately `Linear` and this is the subtle one: the Narkowicz fit takes
+// linear scene light and produces a display-referred range whose values must still be encoded
+// afterwards (`color = ACESFitted(linear); color = encode(color);`). Its output is therefore
+// still 'linear, not yet encoded'. That is what lets this be a single per-stage lookup rather
+// than a separate input and output space for every stage.
+ColorSpace ColorSpaceFor(EffectKind stage);
+
 // Whether ApplySelectedEffect can return without doing anything. Extracted as a predicate
 // rather than left inline because the supersampling term is the line that stands between a
 // working frame and a black screen: with a render target armed, this function's present blit

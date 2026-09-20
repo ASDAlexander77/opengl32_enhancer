@@ -445,6 +445,68 @@ bool CheckResolveHalvingSteps() {
     return ok;
 }
 
+// The colour space each stage wants to be handed - see ColorSpaceFor in post_effects.h.
+// Every one of the twenty-five EffectKind values is listed, not just the three interesting
+// ones: a stage added later without a considered space is exactly the failure this catches,
+// and a test that only pinned the Display ones would not catch it.
+bool CheckColorSpaceFor() {
+    struct Row { EffectKind stage; ColorSpace expected; const char* why; };
+    const Row rows[] = {
+        // The three that want display-referred values.
+        {EffectKind::LutGrading, ColorSpace::Display,
+         ".cube LUTs are authored against encoded input; a linear value reads the wrong cell"},
+        {EffectKind::Dither, ColorSpace::Display,
+         "it exists to hide the quantisation of the final 8-bit write"},
+        {EffectKind::Gamma, ColorSpace::Display,
+         "an output correction - it should act on what is about to be shown"},
+
+        // acestonemap is the one most likely to be got wrong, so it is pinned with its
+        // reasoning: the Narkowicz fit maps linear light into a display-referred RANGE whose
+        // values still have to be encoded afterwards, so its output is still 'linear, not yet
+        // encoded'. If this were Display, every stage would need separate in and out spaces.
+        {EffectKind::AcesToneMap, ColorSpace::Linear,
+         "the Narkowicz fit takes linear light and its output still needs encoding"},
+
+        // Everything else averages, filters or blends, and all of those want light.
+        {EffectKind::None, ColorSpace::Linear, "no stage, no opinion"},
+        {EffectKind::Invert, ColorSpace::Linear, "a per-pixel transform on light"},
+        {EffectKind::Bilinear, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::NVScaler, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::Bloom, ColorSpace::Linear, "threshold and blur both weight luminance"},
+        {EffectKind::Sharpen, ColorSpace::Linear, "a neighbourhood weighting"},
+        {EffectKind::Vignette, ColorSpace::Linear, "a multiply on light"},
+        {EffectKind::ChromaticAberration, ColorSpace::Linear, "resamples per channel"},
+        {EffectKind::Taa, ColorSpace::Linear, "blends against history"},
+        {EffectKind::Smaa, ColorSpace::Linear, "blends along detected edges"},
+        {EffectKind::Fsr, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::Cas, ColorSpace::Linear, "a neighbourhood weighting"},
+        {EffectKind::Nr, ColorSpace::Linear, "denoising is an average"},
+        {EffectKind::LocalContrast, ColorSpace::Linear, "a local mean"},
+        {EffectKind::DepthVignette, ColorSpace::Linear, "a multiply on light"},
+        {EffectKind::Ssao, ColorSpace::Linear, "an occlusion multiply on light"},
+        {EffectKind::Dof, ColorSpace::Linear, "a blur"},
+        {EffectKind::Fog, ColorSpace::Linear, "a blend towards a fog colour"},
+        {EffectKind::LightShafts, ColorSpace::Linear, "radial accumulation is an average"},
+        {EffectKind::Ssr, ColorSpace::Linear, "a blend of reflected light"},
+        {EffectKind::MotionBlur, ColorSpace::Linear, "a directional average"},
+    };
+
+    bool ok = true;
+    for (const Row& row : rows) {
+        char what[256];
+        snprintf(what, sizeof(what), "%s wants %s (%s)", EffectNameFor(row.stage),
+                 row.expected == ColorSpace::Display ? "display" : "linear", row.why);
+        ok = Check(ColorSpaceFor(row.stage) == row.expected, what) && ok;
+    }
+
+    // The count is asserted, not assumed. Adding an EffectKind without adding a row here
+    // would otherwise leave the new stage's space silently unpinned, which is the whole
+    // failure this table exists to prevent.
+    ok = Check((int)(sizeof(rows) / sizeof(rows[0])) == 25,
+               "all 25 EffectKind values have a pinned colour space") && ok;
+    return ok;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -533,6 +595,7 @@ int main() {
     ok = CheckShouldSkipEffectChain() && ok;
     ok = CheckShouldSkipAllWork() && ok;
     ok = CheckResolveHalvingSteps() && ok;
+    ok = CheckColorSpaceFor() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
