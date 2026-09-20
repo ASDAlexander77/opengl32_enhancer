@@ -21,9 +21,10 @@ namespace {
 // GL_RGBA, GL_UNSIGNED_BYTE, GL_COLOR_BUFFER_BIT, ...) already comes from <GL/gl.h>.
 const unsigned int GL_FRAMEBUFFER               = 0x8D40;
 const unsigned int GL_READ_FRAMEBUFFER          = 0x8CA8;
+const unsigned int GL_DRAW_FRAMEBUFFER          = 0x8CA9;
 const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
 const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
-// GL_TEXTURE_BINDING_2D is already in <GL/gl.h> (core GL 1.1) - not redefined here.
+// GL_TEXTURE_BINDING_2D and GL_RGBA8 are already in <GL/gl.h> in this build - not redefined here.
 
 int g_failures = 0;
 
@@ -199,6 +200,53 @@ int main() {
         Check(!IsSupersampleActive(), "and nothing is armed");
         Check(GetGameFramebuffer() == 0, "so the game keeps rendering into framebuffer 0");
         Check(GetGameReadBuffer() == GL_BACK, "and the read buffer is GL_BACK again");
+    }
+
+    // --- the downsample averages rather than point-samples ---
+    {
+        ResetRenderTargetState();
+        GetMutableAnaxConfig().renderWidth = 1280;
+        GetMutableAnaxConfig().renderHeight = 960;
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+
+        // Two vertical halves, black and white, in the offscreen target. Downsampled 2:1 the
+        // seam column must come back grey; a point sample can only ever return 0 or 255.
+        BindRenderTarget();
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(0, 0, 640, 960);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glScissor(640, 0, 640, 960);
+        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+
+        // One 2x1 destination pixel straddling the seam, resolved with GL_LINEAR.
+        unsigned int dstFbo = 0, dstTex = 0;
+        gl.glGenTextures(1, &dstTex);
+        gl.glBindTexture(GL_TEXTURE_2D, dstTex);
+        gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, 1, 1);
+        gl.glGenFramebuffers(1, &dstFbo);
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, dstFbo);
+        gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0);
+
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+        gl.glReadBuffer(GetGameReadBuffer());
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dstFbo);
+        gl.glBlitFramebuffer(0, 0, 1280, 960, 0, 0, 1, 1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+        unsigned char resolved[4] = {0, 0, 0, 0};
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, dstFbo);
+        gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, resolved);
+
+        Check(resolved[0] > 60 && resolved[0] < 195,
+              "the downsample averages the two halves rather than point-sampling one");
+
+        gl.glDeleteFramebuffers(1, &dstFbo);
+        gl.glDeleteTextures(1, &dstTex);
     }
 
     wglMakeCurrent(nullptr, nullptr);

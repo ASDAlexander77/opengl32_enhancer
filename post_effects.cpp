@@ -1053,7 +1053,17 @@ void ApplySelectedEffect(void* hdc) {
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pair[cur], 0);
     gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, curWidth, curHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    // With supersampling armed the finished image is larger than the window, and THIS BLIT IS
+    // THE RESOLVE - the linear shrink is what turns the extra samples into antialiasing. Without
+    // it the blit is the 1:1 copy it has always been.
+    // dstWidth/dstHeight is the window's client size, computed near the top of this same
+    // function - NOT the game's own viewport, which is the size the image would have been
+    // WITHOUT this feature. Blitting to that would put the finished frame in a corner.
+    int presentWidth = IsSupersampleActive() ? dstWidth : curWidth;
+    int presentHeight = IsSupersampleActive() ? dstHeight : curHeight;
+    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, presentWidth, presentHeight,
+                         GL_COLOR_BUFFER_BIT,
+                         IsSupersampleActive() ? GL_LINEAR : GL_NEAREST);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
