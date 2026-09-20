@@ -128,13 +128,18 @@ bool EnsureRenderTarget();            // size/context-keyed create
 void BindRenderTarget();              // after the real SwapBuffers returns
 void NotifyGameViewport(int x, int y, int width, int height);
 void ScaleGameRect(int& x, int& y, int& width, int& height);   // pure, no GL
-void GetPresentSize(int& width, int& height);
 void ResetRenderTargetState();
 ```
 
 `GetGameReadBuffer()` is not cosmetic. `glReadBuffer(GL_BACK)` is invalid
 against a framebuffer object, so every capture site would begin throwing
 `GL_INVALID_OPERATION` if it were left as-is.
+
+The destination of the present blit is the WINDOW's client size, which
+`post_effects.cpp` already computes as `dstWidth`/`dstHeight` in the same
+function as the blit. An earlier draft of this spec listed a `GetPresentSize()`
+returning the game's own reference viewport instead; that was wrong, and would
+have put a finished 3200x2400 frame into a 640x480 corner of a 2400x1800 window.
 
 `ScaleGameRect` is deliberately pure and GL-free so the entire scaling rule is
 testable without a context, following `taa_jitter.h` and `texture_mipmap.h`.
