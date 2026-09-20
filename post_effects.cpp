@@ -799,27 +799,28 @@ void ApplySelectedEffect(void* hdc) {
             cur = 1 - cur;
             space = ColorSpace::Linear;
         }
-        // captureTex holds the pristine frame and arrives encoded like pair[0] did. Its two
-        // consumers - taa and motionblur - are both Linear stages and receive it ALONGSIDE
-        // pipeline textures, so leaving it encoded would have them compare a linear image
-        // against an encoded one. That is a worse error than the one this feature removes.
+        // captureTex is deliberately NOT decoded, and this is the trap: it LOOKS like a frame
+        // that ought to be linear alongside the rest of the pipeline, and it is not read as
+        // light anywhere. Its only two consumers, taa.cpp and motion_blur.cpp, each fetch it at
+        // exactly one place - inside IsHud - where it is compared against worldTex and against
+        // nothing else:
         //
-        // It has no ping-pong partner, so the decoded result goes to the free half of the
-        // pair and is copied back. The copy goes through presentFbo and glCopyTexSubImage2D
-        // rather than glCopyImageSubData, which is NOT resolved in GlComputeApi - and this
-        // is the same FBO-and-copy route captureTex was filled by twenty lines above, so it
-        // needs no new entry point at all.
-        if (space == ColorSpace::Linear && needCapture && g_pipeline.captureTex != 0) {
-            if (ApplySrgbDecode(g_pipeline.captureTex, pair[1 - cur], curWidth, curHeight)) {
-                gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
-                gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                          pair[1 - cur], 0);
-                gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_pipeline.presentFbo);
-                gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
-                gl.glBindTexture(GL_TEXTURE_2D, g_pipeline.captureTex);
-                gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, curWidth, curHeight);
-            }
-        }
+        //     IsHud(c) = any(abs(captureTex[c] - worldTex[c]) > 1/128)
+        //
+        // A difference between two textures is space-invariant as long as BOTH sides share a
+        // space. worldTex belongs to world_capture.h and nothing here converts it, so decoding
+        // captureTex alone converts one operand of that comparison and not the other. Mid-grey
+        // is 0.5 encoded and 0.214 linear - a delta of 0.286, thirty-six times the threshold -
+        // so every non-black pixel would read as HUD, motionblur would return its source
+        // frame-wide and taa's reprojected resolve would be bypassed everywhere. The feature
+        // would silently switch both stages off rather than make them more correct.
+        //
+        // Decoding BOTH would be self-consistent but still worse: the threshold is documented
+        // in both shaders as sitting "just clear of 8-bit quantisation (1/255)", which is a
+        // claim about ENCODED values. Decoding compresses differences near black, so the mask
+        // would quietly lose sensitivity in shadows. Leaving the pair encoded is the calibrated
+        // choice, not merely the cheap one. The pipeline image those stages actually filter
+        // arrives separately, through currentTex/colorTex, and that one IS linear.
     }
 
     for (int i = 0; i < config.stageCount; ++i) {
