@@ -29,7 +29,7 @@ do their work:
 - `nr`, `localcontrast`, `dof`, `motionblur`, `taa`, `smaa` all filter, and a
   filter is a weighted average.
 - The supersample resolve. Its halvings average pixels, so black against white
-  resolves to 128 where correct linear averaging gives **188**. This is the
+  resolves to 127 where correct linear averaging gives **188**. This is the
   largest single visible instance of the bug and it sits in the feature that
   exists specifically to average pixels well.
 
@@ -136,7 +136,6 @@ Per frame, with `srgbCorrect=1`:
 ```
 capture into pair[0]          (sRGB-encoded, from the game's framebuffer)
 decode pair[0]                -> space = Linear
-decode captureTex             (see below)
 for each stage in effect=:
     if ColorSpaceFor(stage) != space:
         insert a conversion pass; space = ColorSpaceFor(stage)
@@ -163,14 +162,53 @@ that cancel. The four combinations:
 With `srgbCorrect=0` not one of those conversions is generated and the frame
 takes exactly the path it takes today.
 
-### `captureTex` is decoded too
+**This table is the exact power-of-two case.** The encode that closes the
+bracket runs after the halving loop but before the final remainder blit (the
+non-power-of-two leftover under 2x that always follows the halvings), so only
+an exact 2x/4x/8x ratio resolves entirely in linear light. At 3x, one halving
+runs linear and the residual 1.5x shrink runs on already-encoded values; below
+2x supersampling, `steps` is 0 and the whole downsample is that one remainder
+blit on encoded values — `srgbCorrect` changes nothing about the resolve at
+that ratio at all. `ResolveHalvingSteps` explicitly supports 3x and 5x, so
+this is a real gap, not a corner case, and this project's test suite only
+exercises exact 2x and 4x so it does not see it. Fixing it — shrinking the
+remainder in linear too — is a known follow-up, not done here because it is a
+structural change to the present path that needs its own non-power-of-two
+test.
 
-`captureTex` holds the pristine, unmodified frame and is filled directly from
-the game's framebuffer, so it arrives sRGB-encoded. Its two consumers — `taa`
-and `motionblur` — are both `Linear` stages and receive it alongside pipeline
-textures. Without the same decode they would compare a linear image against an
-encoded one, which is a worse error than the one this feature removes. It gets
-the same decode pass, at the same point.
+### Neither `captureTex` nor `worldTex` is converted
+
+This looks like an omission — `captureTex` holds the pristine, unmodified
+frame and is filled directly from the game's framebuffer, so it arrives
+sRGB-encoded like everything else this feature decodes. It is deliberately
+left alone, and so is `worldTex`.
+
+Both textures have exactly one reader each: `taa.cpp` and `motion_blur.cpp`
+fetch them, together, at exactly one place — inside `IsHud` — where they are
+compared only against **each other**:
+
+```
+IsHud(c) = any(abs(captureTex[c] - worldTex[c]) > 1/128)
+```
+
+Neither is read as light anywhere. The frames those two stages actually
+filter arrive separately, through `currentTex`/`colorTex`, and those ARE
+converted normally. A difference between two textures is space-invariant as
+long as both sides share a space, and `worldTex` belongs to `world_capture.h`
+— nothing in this feature touches it — so decoding `captureTex` alone would
+convert one operand of that comparison and not the other. Mid-grey is 0.5
+encoded and 0.214 linear: a delta of 0.286, thirty-six times the 1/128
+threshold, so nearly every non-black pixel would register as HUD and both
+`taa` and `motionblur` would silently become frame-wide no-ops — the opposite
+of what this feature is supposed to do. This was caught as a Critical defect
+during implementation and the decode was removed.
+
+Decoding **both** would be self-consistent but still worse: both shaders'
+own comments document the threshold as sitting "just clear of 8-bit
+quantisation (1/255)" — a claim about encoded values. Decoding compresses
+differences near black, so the mask would quietly lose sensitivity in
+shadows. Leaving the pair encoded is the calibrated choice, not merely the
+cheap one.
 
 ### TAA's private history
 
@@ -234,7 +272,7 @@ editor does not expose it, so the writer has no business writing it back.
   claiming something the format cannot deliver.
 
 - **The resolve averages linear.** A black/white pattern supersampled 2x with
-  `srgbCorrect=1` comes back at **188**, not 128. This is the one test that
+  `srgbCorrect=1` comes back at **188**, not 127. This is the one test that
   proves the ordering decision (decision 4) and the only one that would survive
   someone moving the encode before the resolve.
 
@@ -252,8 +290,10 @@ project's standard: passing alone proves nothing.
   variant of that test this mutation survives, which is precisely the shipped
   `effect=` line's shape.
 - Give `lutgrading` the `Linear` space — the table test must fail.
-- Skip the `captureTex` decode — needs a `motionblur`/`taa` case to be lethal;
-  if no assertion catches it, say so rather than claiming coverage.
+- Reintroduce a decode of `captureTex` (the regression this feature actually
+  shipped with once) — needs a `motionblur`/`taa` case where `IsHud` sees a
+  non-black pixel to be lethal; there is no such case in the suite today, so
+  say so rather than claiming coverage.
 
 ### What testing cannot establish
 

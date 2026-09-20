@@ -1258,14 +1258,22 @@ void ApplySelectedEffect(void* hdc) {
     // steps is 0 whenever the source is already within 2x, which includes every frame with
     // supersampling off - so this whole block is skipped and the present stays the single blit
     // it has always been.
+
     // The resolve's halvings are averages, and averages are the whole reason this feature
     // exists - so the resolve must see light. A chain ending in a display-space stage is
     // decoded once more first.
     //
-    // Conditional on there BEING halvings, and that is not an optimisation for its own sake:
-    // with no resolve nothing is averaged, so the space no longer matters and a chain ending
-    // display-referred is already in the space the 8-bit write wants. Forcing a decode there
-    // would just be an encode's inverse, two passes that cancel.
+    // Conditional on there BEING halvings - and this is where the coverage actually ends. This
+    // decode only reaches the halving loop below; the encode that closes the bracket runs right
+    // after that loop and BEFORE the remainder blit in part two below, so only an EXACT
+    // power-of-two ratio (2x, 4x, 8x...) resolves entirely in linear light. At 3x, one halving
+    // here runs linear and the residual 1.5x shrink in part two runs on already-encoded values.
+    // Below 2x, steps is 0: the whole downsample IS that single remainder blit, on encoded
+    // values, so srgbCorrect changes nothing about the resolve at that ratio at all.
+    // ResolveHalvingSteps explicitly supports 3x and 5x, so this is not a corner case - it is a
+    // known follow-up. Not fixed here: shrinking the remainder in linear too is a structural
+    // change to the present path and needs its own non-power-of-two test: this file's suite
+    // only exercises exact 2x and 4x, so it cannot see the gap.
     //
     // Without this, the SHIPPED effect= line - which ends '... dither, gamma', both
     // display-space stages - would have gone straight back into the bug this feature fixes.

@@ -641,8 +641,23 @@ and **188** averaging light - both measured by the test suite. With
 `srgbCorrect=1` the chain decodes once after capture, runs entirely in linear
 light, and encodes once on present; three stages that want display-referred
 values instead - `lutgrading`, `dither`, `gamma` - get a conversion inserted
-around them, and the resolve is always fed linear regardless of what the
-chain ends in.
+around them, and the halving steps of the resolve are fed linear regardless
+of what the chain ends in.
+
+**The resolve is only fully linear at exact power-of-two ratios.** The encode
+runs after the halving steps but before the final remainder blit, so a 2x,
+4x or 8x supersample resolves entirely in linear light, but a 3x resolve runs
+one halving in linear and shrinks the residual 1.5x on already-encoded
+values, and below 2x supersampling there are no halvings at all - the whole
+downsample is that one remainder blit, on encoded values, and `srgbCorrect`
+changes nothing about the resolve at that ratio. This is a known follow-up,
+not fixed here.
+
+Vendor-supplied stages are a separate gap this switch does not cover:
+`smaa`, `fsr`, `nvscaler` and `cas` each hard-code an internal threshold
+calibrated against gamma-space input (`smaa`'s edge-detection threshold is
+the clearest example), with no config knob to retune it. "Expect to re-tune
+your values" below does not apply to them - there is nothing exposed to turn.
 
 Off by default, and not a drop-in improvement: every tuned value in a working
 `effect=` line - `bloomThreshold`, `acesStrength`, LUT strength, dither

@@ -1166,7 +1166,7 @@ int main() {
     // fxIndicator is deliberately NOT forced off here, unlike the two identity cases above, and
     // that is a checked decision rather than an oversight: the badge is a 45x33 plate 8 texels
     // from the top-right corner of the 512x512 pre-resolve image, so after the 2:1 halving it
-    // occupies rows 235-252 of the 256-row result. The row sampled below is row 128. The two
+    // occupies rows 235-251 of the 256-row result. The row sampled below is row 128. The two
     // cannot meet, and these cases measure a mean rather than comparing against inputPixels.
     struct ResolveCase { EffectKind lastStage; const char* label; };
     const ResolveCase resolveCases[] = {
@@ -1189,8 +1189,7 @@ int main() {
         // invert+invert composes to identity; gamma at 1/1 is documented to be exact.
         mutableConfig.stageCount = 2;
         mutableConfig.stages[0] = EffectKind::Invert;
-        mutableConfig.stages[1] = rc.lastStage == EffectKind::Invert ? EffectKind::Invert
-                                                                     : EffectKind::Gamma;
+        mutableConfig.stages[1] = rc.lastStage;
         mutableConfig.gamma = 1.0f;
         mutableConfig.brightness = 1.0f;
         mutableConfig.srgbCorrect = true;
@@ -1201,7 +1200,9 @@ int main() {
         NotifyFrameBoundary();
         NotifyGameViewport(0, 0, width, height);
         ArmSupersampleForFrame(EnsureRenderTarget());
-        if (Check(IsSupersampleActive(), "linear resolve: supersampling armed")) {
+        bool armed = Check(IsSupersampleActive(), "linear resolve: supersampling armed");
+        ok = armed && ok;
+        if (armed) {
             BindRenderTarget();
             pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
 

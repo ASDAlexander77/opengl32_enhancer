@@ -208,7 +208,7 @@ struct AnaxConfig {
     // is decoded once after capture and encoded once on present. Every stage that averages,
     // blurs, thresholds or tone-maps is weighting light rather than an encoding of it -
     // including the supersample resolve, where black against white resolves to 188 rather
-    // than 128. See docs/superpowers/specs/2026-09-20-srgb-correctness-design.md.
+    // than 127. See docs/superpowers/specs/2026-09-20-srgb-correctness-design.md.
     //
     // Off by default because turning it on changes every image the chain produces:
     // bloomThreshold, acesStrength and every tuned intensity stop meaning what they meant.
