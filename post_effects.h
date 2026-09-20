@@ -56,3 +56,11 @@ bool StageIsSkippedWhenDepthUnavailable(EffectKind stage);
 // call site in ApplySelectedEffect(), which uses this only to log that once, not to change the
 // chain. Same-file reasoning as StageNeedsDepth: one consumer, post_effects.cpp.
 bool AnyUpscaleStageListed(const AnaxConfig& config);
+
+// Whether ApplySelectedEffect can return without doing anything. Extracted as a predicate
+// rather than left inline because the supersampling term is the line that stands between a
+// working frame and a black screen: with a render target armed, this function's present blit
+// is the ONLY thing that moves the offscreen image onto the display, so returning early
+// there shows the player nothing at all. Inline, that term was pinned by no test - the suite
+// stayed green with it deleted.
+bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersampleActive);

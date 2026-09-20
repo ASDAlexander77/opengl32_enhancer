@@ -300,6 +300,56 @@ bool CheckAnyUpscaleStageListed() {
     return allMatched;
 }
 
+// Pins ShouldSkipEffectChain() (post_effects.h) against all eight combinations of its three
+// booleans - the truth table IS the specification here, so every row is written out rather than
+// sampled. This exists because the inline version of this decision regressed silently: deleting
+// the supersampling term left the suite 100% green, since nothing exercised
+// ApplySelectedEffect() with an empty effect= list AND supersampling armed (post_effects_test's
+// own integration run below reads the real shipped ini, which has neither). Extracting the
+// three inputs as plain booleans makes that combination reachable from a fast, no-context test.
+//
+// stageCount is represented as "zero" rather than an int, since the predicate only ever asks
+// whether it's zero - covering 0 and 1 is exactly as complete as covering 0 and 1000000.
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckShouldSkipEffectChain() {
+    struct Expectation {
+        bool stageCountZero;
+        bool hasRealUpscale;
+        bool supersampleActive;
+        bool skip;
+        const char* name;
+    };
+    const Expectation kExpected[] = {
+        // The two rows that matter most - see post_effects.h's comment on
+        // ShouldSkipEffectChain() for why the second one is the whole reason this predicate
+        // exists.
+        {true,  false, false, true,  "stageCount 0, no upscale, not supersampling (today's behaviour - must not change)"},
+        {true,  false, true,  false, "stageCount 0, no upscale, supersampling (the black-screen case)"},
+        // The remaining six: any one of a non-empty chain, a real upscale already running, or
+        // supersampling being active is independently enough to mean there IS something for
+        // the present blit to show, so nothing here should ever skip.
+        {true,  true,  false, false, "stageCount 0, real upscale, not supersampling"},
+        {true,  true,  true,  false, "stageCount 0, real upscale, supersampling"},
+        {false, false, false, false, "stageCount >0, no upscale, not supersampling"},
+        {false, false, true,  false, "stageCount >0, no upscale, supersampling"},
+        {false, true,  false, false, "stageCount >0, real upscale, not supersampling"},
+        {false, true,  true,  false, "stageCount >0, real upscale, supersampling"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        int stageCount = kExpected[i].stageCountZero ? 0 : 1;
+        bool actual = ShouldSkipEffectChain(stageCount, kExpected[i].hasRealUpscale,
+                                             kExpected[i].supersampleActive);
+        char what[192];
+        snprintf(what, sizeof(what), "ShouldSkipEffectChain(%s) == %s",
+                 kExpected[i].name, kExpected[i].skip ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].skip, what) && allMatched;
+    }
+    return allMatched;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -379,6 +429,7 @@ int main() {
     ok = CheckDepthStageSkipSet() && ok;
     ok = CheckWorldCaptureStageSet() && ok;
     ok = CheckAnyUpscaleStageListed() && ok;
+    ok = CheckShouldSkipEffectChain() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {

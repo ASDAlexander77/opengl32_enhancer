@@ -409,6 +409,14 @@ bool AnyUpscaleStageListed(const AnaxConfig& config) {
     return false;
 }
 
+// See post_effects.h. The only case that must stay non-skipping is the one that regressed
+// before this predicate existed: stageCount 0, no real upscale, supersampling active - the
+// chain has nothing to run, but the present blit further down is still the only thing that
+// puts the offscreen render target on screen, so skipping there means black.
+bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersampleActive) {
+    return stageCount == 0 && !hasRealUpscale && !supersampleActive;
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -538,11 +546,9 @@ void ApplySelectedEffect(void* hdc) {
         }
     }
 
-    // IsSupersampleActive() joins this condition because the present blit below is the ONLY
-    // thing that moves the offscreen render target onto the screen. Returning early with
-    // supersampling armed means nothing is ever presented, and the player sees black - which
-    // an empty effect= list is the most natural way to hit while testing.
-    if (config.stageCount == 0 && !hasRealUpscale && !IsSupersampleActive()) {
+    // See ShouldSkipEffectChain() in post_effects.h for why supersampling being active is part
+    // of this decision.
+    if (ShouldSkipEffectChain(config.stageCount, hasRealUpscale, IsSupersampleActive())) {
         return;
     }
 
