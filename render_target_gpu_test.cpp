@@ -215,6 +215,38 @@ int main() {
               "disarming after having been armed puts framebuffer 0 back");
     }
 
+    // --- a latch revoked by a mode change unbinds too, not just disarms ---
+    // Revocation (render_target.h's amendment) has two halves, and the CPU test can only see
+    // one: that the frame stops scaling. The other half is that the render target has to come
+    // off the binding at the same moment, because the two are the same invariant. Without it the
+    // revoking frame draws its native-sized image into the corner of an oversized target that
+    // nothing will present, and the next capture reads a framebuffer the game never drew into -
+    // one garbage frame, self-healing, and exactly the split-brain state this module exists to
+    // prevent. Deleting only the unbind from the revocation block leaves the CPU test green, so
+    // this case is what earns that line its coverage.
+    {
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        BindRenderTarget();
+        Check(IsSupersampleActive() && (unsigned int)GetGameFramebuffer() != 0,
+              "the frame before the mode change is armed and bound");
+
+        // The next frame is armed in the ordinary way, against the 640x480 reference the
+        // previous frame left behind - and then the game's first viewport of that frame says it
+        // has changed mode. That revokes the latch mid-frame.
+        NotifyFrameBoundary();
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        NotifyGameViewport(0, 0, 800, 600);
+
+        Check(!IsSupersampleActive(), "the mode change revoked the latch");
+        int boundAfterRevoke = -1;
+        gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundAfterRevoke);
+        Check(boundAfterRevoke == 0,
+              "revoking the latch mid-frame puts framebuffer 0 back, not just disarming");
+    }
+
     // --- and the never-armed path is still a true no-op ---
     // The obvious fix for the case above - an unconditional glBindFramebuffer(0) whenever not
     // armed - would break the promise that this feature switched off changes nothing: the

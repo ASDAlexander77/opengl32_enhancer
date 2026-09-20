@@ -27,8 +27,16 @@
 //     by the numbers its own arming decision was made from.
 //   - NotifyGameViewport revokes the latch - disarms for the remainder of the frame and
 //     unbinds the render target - when the frame's first viewport is not the snapshot. Either
-//     we scale by the reference we validated, or we do not scale at all and the frame falls
-//     back to framebuffer 0 unscaled.
+//     we scale by the reference we validated, or we do not scale at all.
+//
+// Revocation is not free, and the cost is paid by the revoking frame. Whatever the game drew
+// between the swap hook's BindRenderTarget and that first glViewport - in practice a glClear,
+// sometimes more - went into the render target we are now abandoning, and is discarded: the
+// frame restarts against framebuffer 0 on top of whatever the back buffer already held. One
+// frame, on a video mode change, where the game is about to redraw everything anyway. A scissor
+// rectangle scaled by the old snapshot can also survive into the revoking frame, since only the
+// viewport is re-set at the frame's start. Both are accepted: a mode-change frame that is one
+// frame stale is a far better failure than a frame scaled by a reference nothing validated.
 //
 // Revocation can happen at most once a frame (only the first viewport of a frame is examined)
 // and only ever in the safe direction: armed -> unarmed, never the reverse. The frame after a

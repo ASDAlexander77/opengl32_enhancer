@@ -493,13 +493,23 @@ void ApplySelectedEffect(void* hdc) {
     }
 
     // With supersampling armed, what the game drew into is the offscreen render target, and its
-    // size is known exactly rather than inferred. Taking it from GL_VIEWPORT instead would
+    // size is known exactly rather than inferred. Taking the SIZE from GL_VIEWPORT instead would
     // assume the frame's LAST viewport is the full-frame one - a second empirical assumption on
     // top of render_target.h's documented first-viewport one, and one nothing checks: a game
     // that leaves a sub-viewport set at swap would have its frame captured, sized and presented
-    // as if that sub-viewport were the whole image. Everything downstream - the frame dump, the
-    // colour and depth captures, the pipeline texture sizes and the present blit's source
-    // rectangle - is sized from these two numbers, so setting them here fixes all of it at once.
+    // as if that sub-viewport were the whole image.
+    //
+    // This fixes the size for every consumer of it at once: the frame dump, the colour and depth
+    // captures, the pipeline texture sizes, hasRealUpscale's comparison against the window, and
+    // the present blit's source rectangle via curWidth/curHeight.
+    //
+    // It does NOT remove the assumption from this function entirely, and two readers of the live
+    // viewport deliberately remain. viewportX/viewportY below are still the LAST viewport's
+    // origin, so a game whose final pass targets an offset sub-viewport still fails
+    // hasRealUpscale's origin test and loses reconstruction for that frame. And the degenerate
+    // check just above still rejects the frame on the last viewport's size, so a game that ends
+    // its frame on a zero-sized viewport is skipped even though the render target is fine. Both
+    // are narrow and both self-heal on the next frame; neither is fixed here.
     if (IsSupersampleActive()) {
         GetRenderTargetSize(nativeWidth, nativeHeight);
     }

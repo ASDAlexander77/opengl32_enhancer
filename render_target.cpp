@@ -196,8 +196,22 @@ void ReleaseRenderTargetBinding() {
     if (!g_targetBound) {
         return;
     }
+    // The flag is cleared BEFORE the call can be skipped, not after it succeeds: if we cannot
+    // issue the call it is because the context that owned this binding is gone, and a binding in
+    // a dead context is not a thing there is anything left to release.
     g_targetBound = false;
-    GetGlComputeApi().glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // Every other step of the swap sequence sits behind a gl.loaded check somewhere upstream;
+    // this one does not, because it runs on the path where the feature is switched OFF.
+    // GetGlComputeApi() zeroes itself on a context change, and a context whose entry points
+    // never resolved at all is routine - no context current, or the throwaway software-GL
+    // context games create to query the WGL extension string. Calling through a null pointer
+    // there would turn a handled degradation into an access violation inside the game's swap,
+    // which is the worst direction a proxy DLL can fail in.
+    const GlComputeApi& gl = GetGlComputeApi();
+    if (!gl.loaded || gl.glBindFramebuffer == nullptr) {
+        return;
+    }
+    gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 // Drops the record without touching GL - only ResetRenderTargetState, the test hook, wants this.
