@@ -51,6 +51,7 @@
 #include "frame_dump.h"
 #include "gl_loader.h"
 #include "window_override.h"
+#include "srgb_convert.h"
 
 // Same no-<windows.h> discipline as the rest of this DLL (see config.cpp's equivalent block and
 // wrapper.cpp's header comment): <windows.h> declares dllimport wgl*/gl* names that collide with
@@ -782,6 +783,45 @@ void ApplySelectedEffect(void* hdc) {
     bool atNativeRes = true;
     static bool warnedDepthAfterUpscale = false;
 
+    // The sRGB bracket opens here - see srgb_convert.h and the design doc. The frame the game
+    // drew is sRGB-encoded; every stage below wants light. Decoding once here and encoding
+    // once on present is what makes the whole chain correct, rather than each stage having to
+    // know about the encoding.
+    //
+    // Decoded into pair[1] and the ping-pong advanced, exactly like a stage - the conversion
+    // IS a stage in every respect except that the user did not list it. It sits here, just
+    // below the ping-pong's own declarations rather than up at the capture itself, because
+    // cur/curWidth/curHeight are what it advances and they do not exist any earlier; nothing
+    // between the capture and this point touches colour.
+    ColorSpace space = ColorSpace::Display;
+    if (config.srgbCorrect) {
+        if (ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Linear;
+        }
+        // captureTex holds the pristine frame and arrives encoded like pair[0] did. Its two
+        // consumers - taa and motionblur - are both Linear stages and receive it ALONGSIDE
+        // pipeline textures, so leaving it encoded would have them compare a linear image
+        // against an encoded one. That is a worse error than the one this feature removes.
+        //
+        // It has no ping-pong partner, so the decoded result goes to the free half of the
+        // pair and is copied back. The copy goes through presentFbo and glCopyTexSubImage2D
+        // rather than glCopyImageSubData, which is NOT resolved in GlComputeApi - and this
+        // is the same FBO-and-copy route captureTex was filled by twenty lines above, so it
+        // needs no new entry point at all.
+        if (space == ColorSpace::Linear && needCapture && g_pipeline.captureTex != 0) {
+            if (ApplySrgbDecode(g_pipeline.captureTex, pair[1 - cur], curWidth, curHeight)) {
+                gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
+                gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                          pair[1 - cur], 0);
+                gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_pipeline.presentFbo);
+                gl.glReadBuffer(GL_COLOR_ATTACHMENT0);
+                gl.glBindTexture(GL_TEXTURE_2D, g_pipeline.captureTex);
+                gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, curWidth, curHeight);
+            }
+        }
+    }
+
     for (int i = 0; i < config.stageCount; ++i) {
         EffectKind stage = config.stages[i];
 
@@ -866,6 +906,30 @@ void ApplySelectedEffect(void* hdc) {
         // config.scale is deliberately NOT used for a real upscale: it would additionally
         // simulate a lower-res look on top of a resize that is already real.
         float upscaleRatio = doRealUpscale ? realUpscaleRatio : config.scale;
+
+        // The image is in whatever space the last stage left it in; this stage may want the
+        // other one. Only generated when they actually disagree, so a chain that is entirely
+        // Linear (the common case) pays for the bracket and nothing more.
+        if (config.srgbCorrect && ColorSpaceFor(stage) != space) {
+            bool converted = (space == ColorSpace::Display)
+                                 ? ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)
+                                 : ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight);
+            if (converted) {
+                cur = 1 - cur;
+                space = ColorSpaceFor(stage);
+                // src and dst were taken from the ping-pong a few lines above and the
+                // conversion has just advanced it, so both are stale. Left alone, this stage
+                // would read the pre-conversion texture - and when it is not a real upscale it
+                // would also WRITE the texture it is reading, a feedback loop that is obvious
+                // on screen and silent in a suite that never lists a display-space stage. A
+                // real upscale keeps its own destination (g_pipeline.tex[0]), which the
+                // ping-pong does not name, so only dst outside that case needs recomputing.
+                src = pair[cur];
+                if (!doRealUpscale) {
+                    dst = pair[1 - cur];
+                }
+            }
+        }
 
         bool wrote = false;
         switch (stage) {

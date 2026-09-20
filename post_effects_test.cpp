@@ -640,9 +640,25 @@ int main() {
     gl.glGenFramebuffers(1, &patternFbo);
     gl.glBindFramebuffer(GL_FRAMEBUFFER, patternFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, patternTex, 0);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    // The two halves of "put the known pattern exactly where ApplySelectedEffect() captures
+    // from, then read back exactly what a player would see". Named here rather than left inline
+    // because the scenarios further down need the same pair, and a second hand-written copy of
+    // the blit is how a later case quietly ends up feeding the pipeline a different input than
+    // the primary run did while still comparing its result against inputPixels.
+    auto BlitPatternToBackBuffer = [&]() {
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT,
+                             GL_NEAREST);
+    };
+    auto ReadBackBuffer = [&](std::vector<unsigned char>& out) {
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glReadBuffer(GL_BACK);
+        gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    };
+
+    BlitPatternToBackBuffer();
     unsigned int blitErr = gl.glGetError();
     ok = Check(blitErr == 0, "test pattern blitted onto the real back buffer with no GL error") && ok;
 
@@ -655,9 +671,7 @@ int main() {
     // Read back the real back buffer - post_effects.cpp always presents to it, so this is
     // what a player would actually see on screen.
     std::vector<unsigned char> outputPixels((size_t)width * height * 4);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outputPixels.data());
+    ReadBackBuffer(outputPixels);
     unsigned int readErr = gl.glGetError();
     ok = Check(readErr == 0, "readback of the final back buffer left no GL error") && ok;
 
@@ -1022,6 +1036,126 @@ int main() {
         mutableConfig.frameDumpKey = savedFrameDumpKey;
         ResetRenderTargetState();
         pGlViewport(0, 0, width, height);
+    }
+
+    // --- the sRGB bracket is an identity around a no-op chain ---
+    //
+    // The safety property: with srgbCorrect=1 and a chain that does nothing, decode-then-encode
+    // must give the image back. If this drifts, every frame drifts.
+    //
+    // `invert, invert` and NOT an empty chain, deliberately. ShouldSkipEffectChain returns early
+    // on an empty chain, so no conversion would run at all and the test would pass while proving
+    // nothing. Two inverts is a real pair of Linear stages with a known composite identity - and
+    // note inverting in linear space is NOT the same operation as inverting in gamma space, so
+    // this also confirms the stages really did see linear values.
+    //
+    // The trailing `gamma` (at 1/1, documented to reproduce its input exactly) is what CLOSES
+    // the bracket here, and it is a scaffold with a known removal date rather than part of the
+    // property being tested. This task opens the bracket at capture and converts at stage
+    // boundaries; the encode on present belongs to the present path, which is the next task's
+    // subject and does not exist yet. So today the only thing that can return the image to
+    // display space is a display-space stage, and `gamma` is the one that costs nothing else.
+    // When the present path encodes, delete this third stage and the two inverts stand alone -
+    // the assertion below does not change.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        EffectKind savedStage1 = mutableConfig.stages[1];
+        EffectKind savedStage2 = mutableConfig.stages[2];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+
+        mutableConfig.stageCount = 3;
+        mutableConfig.stages[0] = EffectKind::Invert;
+        mutableConfig.stages[1] = EffectKind::Invert;
+        mutableConfig.stages[2] = EffectKind::Gamma;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        // The shipped ini leaves fxIndicator=1, and the badge is painted straight onto the final
+        // texture AFTER the chain - it is not a stage and takes no part in the colour-space
+        // bracket. Left on, it overwrites the pattern's top-right checkerboard with its own
+        // pixels, which is a worst-case difference of 245 that has nothing whatever to do with
+        // sRGB. Off, so this assertion measures the round trip and only the round trip.
+        mutableConfig.fxIndicator = false;
+        ResetRenderTargetState();                 // no supersampling: isolate the bracket
+
+        BlitPatternToBackBuffer();                // the same known pattern the primary run uses
+        ApplySelectedEffect(hdc);
+        std::vector<unsigned char> out((size_t)width * height * 4);
+        ReadBackBuffer(out);
+
+        int worst = 0;
+        for (size_t i = 0; i < inputPixels.size(); ++i) {
+            int d = abs((int)inputPixels[i] - (int)out[i]);
+            worst = d > worst ? d : worst;
+        }
+        printf("srgb bracket identity: worst per-channel difference = %d\n", worst);
+        // +-1, not byte-exact, and that is honest rather than lax: the round trip passes through
+        // RGBA16F, whose ten-bit mantissa can land a value on the wrong side of an 8-bit
+        // rounding boundary. Claiming byte-exactness would claim something the format cannot
+        // deliver. A broken conversion is off by far more than one step.
+        ok = Check(worst <= 1,
+                   "srgb bracket: decode-then-encode returns the image around a no-op chain") && ok;
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.stages[1] = savedStage1;
+        mutableConfig.stages[2] = savedStage2;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
+        mutableConfig.fxIndicator = savedFxIndicator;
+    }
+
+    // --- a display-space stage gets handed display-referred values ---
+    //
+    // `gamma` at gamma=1, brightness=1 is documented to reproduce its input EXACTLY (gamma.h:
+    // the pow() is skipped outright at gamma=1). As a Display stage it forces an encode before
+    // it and leaves the image in display space, so the present path must then do nothing - the
+    // fourth row of the design's data-flow table. Net effect: still an identity, but reached
+    // through the mid-chain conversion rather than the bracket's own.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Gamma;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        mutableConfig.fxIndicator = false;   // same reason as the bracket case above
+        ResetRenderTargetState();
+
+        BlitPatternToBackBuffer();
+        ApplySelectedEffect(hdc);
+        std::vector<unsigned char> out((size_t)width * height * 4);
+        ReadBackBuffer(out);
+
+        int worst = 0;
+        for (size_t i = 0; i < inputPixels.size(); ++i) {
+            int d = abs((int)inputPixels[i] - (int)out[i]);
+            worst = d > worst ? d : worst;
+        }
+        printf("srgb mid-chain identity: worst per-channel difference = %d\n", worst);
+        ok = Check(worst <= 1,
+                   "srgb mid-chain: a Display stage is handed encoded values and the present "
+                   "path then correctly does nothing") && ok;
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
+        mutableConfig.fxIndicator = savedFxIndicator;
     }
 
     // --- The same end-to-end resolve, beside the empty-chain case above, but with a NON-EMPTY
