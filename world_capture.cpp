@@ -4,6 +4,7 @@
 #include "world_capture.h"
 #include "config.h"
 #include "gl_loader.h"
+#include "render_target.h"
 
 namespace {
 
@@ -130,8 +131,8 @@ void LatchWorldFrame() {
 
     EnsureTexture(gl, viewport[2], viewport[3]);
 
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+    gl.glReadBuffer(GetGameReadBuffer());
     gl.glBindTexture(GL_TEXTURE_2D, g_texture);
     gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, g_width, g_height);
 

@@ -33,6 +33,7 @@
 #include "config.h"
 #include "gl_loader.h"
 #include "post_effects.h"
+#include "render_target.h"
 
 namespace {
 
@@ -52,6 +53,7 @@ const unsigned int GL_COLOR_BUFFER_BIT   = 0x00004000;
 const unsigned int GL_RGBA               = 0x1908;
 const unsigned int GL_UNSIGNED_BYTE      = 0x1401;
 const unsigned int GL_BACK               = 0x0405;
+const unsigned int GL_SCISSOR_TEST       = 0x0C11;
 
 // A synthetic test pattern, generated on the CPU rather than loaded from an image file (this
 // project has no image-decoding dependency and adding one just for a test isn't worth it).
@@ -258,6 +260,152 @@ bool CheckWorldCaptureStageSet() {
     return allMatched;
 }
 
+// Pins which stages AnyUpscaleStageListed() treats as an upscale stage - see post_effects.h.
+// Same shape and same honesty as CheckDepthStageSet() above, except the predicate takes a whole
+// config rather than a single stage (a chain either has one of these listed or it doesn't), so
+// each case builds a minimal one-stage config to ask the question of. This proves the predicate
+// - and therefore the once-only log in ApplySelectedEffect() that supersampling makes an
+// upscale stage's reconstruction redundant - fires for exactly bilinear/nvscaler/fsr and no
+// other stage, including a stage that resizes without reconstructing (the implicit stretch
+// fallback isn't a listed stage at all, so it can't appear here either way).
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckAnyUpscaleStageListed() {
+    struct Expectation { EffectKind stage; bool isUpscale; const char* name; };
+    const Expectation kExpected[] = {
+        {EffectKind::Bilinear,            true,  "bilinear"},
+        {EffectKind::NVScaler,            true,  "nvscaler"},
+        {EffectKind::Fsr,                 true,  "fsr"},
+        // A sample of stages that resize without reconstructing, or don't resize at all.
+        {EffectKind::Bloom,               false, "bloom"},
+        {EffectKind::Taa,                 false, "taa"},
+        {EffectKind::None,                false, "none"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        AnaxConfig config;
+        config.stageCount = 1;
+        config.stages[0] = kExpected[i].stage;
+        bool actual = AnyUpscaleStageListed(config);
+        char what[160];
+        snprintf(what, sizeof(what), "AnyUpscaleStageListed({%s}) == %s",
+                 kExpected[i].name, kExpected[i].isUpscale ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].isUpscale, what) && allMatched;
+    }
+
+    AnaxConfig empty;
+    empty.stageCount = 0;
+    allMatched = Check(!AnyUpscaleStageListed(empty),
+                        "AnyUpscaleStageListed({}) == false") && allMatched;
+
+    return allMatched;
+}
+
+// Pins ShouldSkipEffectChain() (post_effects.h) against all eight combinations of its three
+// booleans - the truth table IS the specification here, so every row is written out rather than
+// sampled. This exists because the inline version of this decision regressed silently: deleting
+// the supersampling term left the suite 100% green, since nothing exercised
+// ApplySelectedEffect() with an empty effect= list AND supersampling armed (post_effects_test's
+// own integration run below reads the real shipped ini, which has neither). Extracting the
+// three inputs as plain booleans makes that combination reachable from a fast, no-context test.
+//
+// stageCount is represented as "zero" rather than an int, since the predicate only ever asks
+// whether it's zero - covering 0 and 1 is exactly as complete as covering 0 and 1000000.
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckShouldSkipEffectChain() {
+    struct Expectation {
+        bool stageCountZero;
+        bool hasRealUpscale;
+        bool supersampleActive;
+        bool skip;
+        const char* name;
+    };
+    const Expectation kExpected[] = {
+        // The two rows that matter most - see post_effects.h's comment on
+        // ShouldSkipEffectChain() for why the second one is the whole reason this predicate
+        // exists.
+        {true,  false, false, true,  "stageCount 0, no upscale, not supersampling (today's behaviour - must not change)"},
+        {true,  false, true,  false, "stageCount 0, no upscale, supersampling (the black-screen case)"},
+        // The remaining six: any one of a non-empty chain, a real upscale already running, or
+        // supersampling being active is independently enough to mean there IS something for
+        // the present blit to show, so nothing here should ever skip.
+        {true,  true,  false, false, "stageCount 0, real upscale, not supersampling"},
+        {true,  true,  true,  false, "stageCount 0, real upscale, supersampling"},
+        {false, false, false, false, "stageCount >0, no upscale, not supersampling"},
+        {false, false, true,  false, "stageCount >0, no upscale, supersampling"},
+        {false, true,  false, false, "stageCount >0, real upscale, not supersampling"},
+        {false, true,  true,  false, "stageCount >0, real upscale, supersampling"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        int stageCount = kExpected[i].stageCountZero ? 0 : 1;
+        bool actual = ShouldSkipEffectChain(stageCount, kExpected[i].hasRealUpscale,
+                                             kExpected[i].supersampleActive);
+        char what[192];
+        snprintf(what, sizeof(what), "ShouldSkipEffectChain(%s) == %s",
+                 kExpected[i].name, kExpected[i].skip ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].skip, what) && allMatched;
+    }
+    return allMatched;
+}
+
+// The same treatment for ShouldSkipAllWork() (post_effects.h), the EARLIER of ApplySelectedEffect's
+// two early returns - and the one that still had no supersampling term at all after
+// ShouldSkipEffectChain got one, so effect=none + frameDumpKey=0 + renderWidth/renderHeight was
+// still a black screen. Sixteen combinations of four booleans, all written out.
+//
+// Only the all-off row skips: a frame dump key, a window size override, a non-empty chain and an
+// armed render target are each independently a reason to go on.
+bool CheckShouldSkipAllWork() {
+    struct Expectation {
+        bool stageCountZero;
+        bool frameDumpKeyZero;
+        bool windowSizeOverrideActive;
+        bool supersampleActive;
+        bool skip;
+    };
+    const Expectation kExpected[] = {
+        {true,  true,  false, false, true},   // nothing configured at all - the only skip
+        {true,  true,  false, true,  false},  // the black-screen case this fix is about
+        {true,  true,  true,  false, false},
+        {true,  true,  true,  true,  false},
+        {true,  false, false, false, false},
+        {true,  false, false, true,  false},
+        {true,  false, true,  false, false},
+        {true,  false, true,  true,  false},
+        {false, true,  false, false, false},
+        {false, true,  false, true,  false},
+        {false, true,  true,  false, false},
+        {false, true,  true,  true,  false},
+        {false, false, false, false, false},
+        {false, false, false, true,  false},
+        {false, false, true,  false, false},
+        {false, false, true,  true,  false},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        int stageCount = kExpected[i].stageCountZero ? 0 : 1;
+        int frameDumpKey = kExpected[i].frameDumpKeyZero ? 0 : 0x7B;
+        bool actual = ShouldSkipAllWork(stageCount, frameDumpKey,
+                                        kExpected[i].windowSizeOverrideActive,
+                                        kExpected[i].supersampleActive);
+        char what[192];
+        snprintf(what, sizeof(what),
+                 "ShouldSkipAllWork(stageCount %d, frameDumpKey 0x%02X, windowOverride %s, "
+                 "supersampling %s) == %s",
+                 stageCount, frameDumpKey,
+                 kExpected[i].windowSizeOverrideActive ? "on" : "off",
+                 kExpected[i].supersampleActive ? "on" : "off",
+                 kExpected[i].skip ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].skip, what) && allMatched;
+    }
+    return allMatched;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -321,21 +469,30 @@ int main() {
         return 1;
     }
 
-    // glViewport/glClear* are GL 1.1 core, exported directly from opengl32.dll, so a plain
-    // GetProcAddress on the module resolves them - GlComputeApi only carries the 4.3-era entry
-    // points the effects themselves need.
+    // glViewport/glClear*/glEnable/glDisable/glScissor are all GL 1.1 core, exported directly
+    // from opengl32.dll, so a plain GetProcAddress on the module resolves them - GlComputeApi
+    // only carries the 4.3-era entry points the effects themselves need.
     typedef void (__stdcall *PFNGLVIEWPORTPROC)(int, int, int, int);
     typedef void (__stdcall *PFNGLCLEARCOLORPROC)(float, float, float, float);
     typedef void (__stdcall *PFNGLCLEARPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLENABLEPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLDISABLEPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLSCISSORPROC)(int, int, int, int);
     HMODULE glModule = GetModuleHandleA("opengl32.dll");
     PFNGLVIEWPORTPROC pGlViewport = (PFNGLVIEWPORTPROC)GetProcAddress(glModule, "glViewport");
     PFNGLCLEARCOLORPROC pGlClearColor = (PFNGLCLEARCOLORPROC)GetProcAddress(glModule, "glClearColor");
     PFNGLCLEARPROC pGlClear = (PFNGLCLEARPROC)GetProcAddress(glModule, "glClear");
+    PFNGLENABLEPROC pGlEnable = (PFNGLENABLEPROC)GetProcAddress(glModule, "glEnable");
+    PFNGLDISABLEPROC pGlDisable = (PFNGLDISABLEPROC)GetProcAddress(glModule, "glDisable");
+    PFNGLSCISSORPROC pGlScissor = (PFNGLSCISSORPROC)GetProcAddress(glModule, "glScissor");
     pGlViewport(0, 0, width, height);
 
     bool ok = CheckDepthStageSet();
     ok = CheckDepthStageSkipSet() && ok;
     ok = CheckWorldCaptureStageSet() && ok;
+    ok = CheckAnyUpscaleStageListed() && ok;
+    ok = CheckShouldSkipEffectChain() && ok;
+    ok = CheckShouldSkipAllWork() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
@@ -424,6 +581,425 @@ int main() {
     printf("Look at post_effects_test_input.ppm / post_effects_test_output.ppm to judge "
            "whether the current config actually looks right - that part is a human call, "
            "not something this test can assert.\n");
+
+    // --- An end-to-end scenario: the present blit is a REAL resolve when supersampling is
+    // armed, proven through the actual entry point rather than by driving glBlitFramebuffer
+    // directly. ---
+    //
+    // render_target_gpu_test.cpp's averaging case proves a shrinking GL_LINEAR blit averages
+    // rather than point-samples, but it drives glBlitFramebuffer itself - it says nothing about
+    // whether ApplySelectedEffect() (post_effects.cpp, the actual code wrapper.cpp calls from
+    // wglSwapBuffers) ever reaches that blit with the right filter and the right destination
+    // rectangle when supersampling is armed the way the wrapper's own hooks arm it. This test
+    // already builds a window, an HDC and a GL context, blits a known pattern onto the back
+    // buffer, calls ApplySelectedEffect(hdc), and reads framebuffer 0 back - that machinery is
+    // reused here rather than duplicated, right after the primary integration run above (whose
+    // own PPM dumps and assertions have already completed) so mutating the config here cannot
+    // disturb it, and before every scenario below so this block's own state is fully restored
+    // and cannot disturb THEM either.
+    //
+    // stageCount = 0 (an empty chain) is also the black-screen combination
+    // CheckShouldSkipEffectChain() above pins as a truth table ("stageCount 0, no upscale,
+    // supersampling") - reusing it here means one case confirms, end to end, that Task 4's fix
+    // actually reaches the screen, while also pinning the two properties that are this task's
+    // own subject:
+    //   - PRESENCE: something reaches the screen at all (the black-screen regression).
+    //   - DESTINATION RECTANGLE: the image fills the WHOLE window (dstWidth/dstHeight), not
+    //     just a curWidth/curHeight-sized corner of it.
+    //   - FILTER: the shrink is GL_LINEAR (a real resolve), not GL_NEAREST (a point sample).
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        int savedRenderWidth = mutableConfig.renderWidth;
+        int savedRenderHeight = mutableConfig.renderHeight;
+        int savedFrameDumpKey = mutableConfig.frameDumpKey;
+
+        mutableConfig.stageCount = 0;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+        // Explicitly zero, and this is the point of the case rather than an incidental tidy-up.
+        // The shipped ini leaves frameDumpKey at 0x7B, and inheriting that non-zero value was
+        // enough on its own to carry this test past ApplySelectedEffect's FIRST early return -
+        // so the return that had no supersampling term at all stayed green while shipping a
+        // black screen for exactly this configuration (effect=none, no frame-dump key, no
+        // window override, a render target armed). With it zeroed, the presence assertion below
+        // is what stands between that term and a regression.
+        mutableConfig.frameDumpKey = 0;
+
+        // The same arming sequence wrapper.cpp's hooks perform every frame - see
+        // render_target.h's header comment. NotifyGameViewport records the game's own
+        // (pre-scale) viewport; ArmSupersampleForFrame latches whether the offscreen target is
+        // actually usable this frame.
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed = Check(IsSupersampleActive(),
+                            "end-to-end resolve: supersampling armed for this frame "
+                            "(if this fails, nothing below proves anything)");
+        ok = armed && ok;
+
+        if (armed) {
+            // BindRenderTarget() routes subsequent drawing into the offscreen target; the
+            // glViewport call is what ApplySelectedEffect() reads back via GL_VIEWPORT to learn
+            // the "native" size - in production this is the wrapper's own glViewport hook,
+            // already scaled by ScaleGameRect before it ever reaches real GL.
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // Two vertical halves, black and white, exactly like render_target_gpu_test.cpp's
+            // averaging case - so a shrinking GL_LINEAR blit must bring the seam back grey. The
+            // split is renderWidth/2 MINUS ONE texel, not an exact renderWidth/2: a split sitting
+            // precisely on a multiple of the downsample ratio (2, here) lands exactly on the
+            // boundary between two destination pixels' non-overlapping source windows, so
+            // neither destination pixel ever samples both colours and the seam stays perfectly
+            // sharp even after a genuine GL_LINEAR shrink - confirmed empirically by scanning
+            // pixels around the seam with the aligned split before adding this offset. Shifting
+            // by one texel puts the split inside a single destination pixel's source window, so
+            // that pixel is guaranteed to see both colours regardless of the exact interpolation
+            // convention (nearest-pair average or half-texel-centred bilinear).
+            int splitX = mutableConfig.renderWidth / 2 - 1;
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlScissor(0, 0, splitX, mutableConfig.renderHeight);
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlScissor(splitX, 0, mutableConfig.renderWidth - splitX, mutableConfig.renderHeight);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlDisable(GL_SCISSOR_TEST);
+
+            // Framebuffer 0 (the real back buffer) starts at a colour neither tone can produce
+            // by averaging, nor is confused with black or white on its own - a mid-blue,
+            // distinct in every channel from black (0,0,0), white (255,255,255), and their
+            // average (~127,127,127). If ApplySelectedEffect() presents nothing this frame,
+            // this is what a readback below would still show.
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            // The frame's LAST viewport is deliberately not the full-frame one. Real engines end
+            // a frame on whatever sub-rectangle they drew last (a HUD element, a status bar, a
+            // pillarboxed view), and render_target.h only ever claimed that the FIRST viewport of
+            // a frame is the full-frame one. ApplySelectedEffect used to take the size of what
+            // the game drew from GL_VIEWPORT at swap, which quietly assumed the last one as well,
+            // so it would capture, size its pipeline for and present this quarter-sized rectangle
+            // as though it were the whole image. It takes that size from GetRenderTargetSize()
+            // instead - known rather than inferred - so all three assertions below hold with this
+            // sub-viewport in force exactly as they did without it.
+            pGlViewport(0, 0, mutableConfig.renderWidth / 4, mutableConfig.renderHeight / 4);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve: ApplySelectedEffect() left no GL error") && ok;
+
+            std::vector<unsigned char> resolvedPixels((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, resolvedPixels.data());
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve: readback of the real back buffer left no GL error") && ok;
+
+            auto sampleAt = [&](int x, int y, unsigned char out[4]) {
+                size_t i = ((size_t)y * width + x) * 4;
+                out[0] = resolvedPixels[i + 0];
+                out[1] = resolvedPixels[i + 1];
+                out[2] = resolvedPixels[i + 2];
+                out[3] = resolvedPixels[i + 3];
+            };
+
+            // PRESENCE: well inside the left (black) half. The black-screen regression would
+            // leave this at the mid-blue clear colour.
+            unsigned char leftPixel[4];
+            sampleAt(width / 4, height / 2, leftPixel);
+            bool presented = leftPixel[0] < 50 && leftPixel[1] < 50 && leftPixel[2] < 50;
+            printf("end-to-end resolve: presence pixel rgb = %d,%d,%d (expected black-ish)\n",
+                   leftPixel[0], leftPixel[1], leftPixel[2]);
+            ok = Check(presented,
+                       "end-to-end resolve: presence - something was presented, not the "
+                       "black-screen regression") && ok;
+
+            // DESTINATION RECTANGLE: a few pixels in from the far (high x, high y) corner,
+            // deep in the white half once the WHOLE window is correctly filled at the right
+            // scale. Deliberately checked as "specifically white", not "black or white": if the
+            // destination rectangle were curWidth/curHeight (the native/offscreen size, here
+            // bigger than the window) instead of dstWidth/dstHeight, glBlitFramebuffer's
+            // oversized destination rect gets implicitly clipped to the real (smaller)
+            // framebuffer, which does not just shrink the image into a corner and leave the
+            // rest at the clear colour - it changes the EFFECTIVE scale of the whole blit to
+            // curWidth/curWidth (i.e. 1:1), so the visible window ends up showing an unscaled
+            // crop of the SOURCE's own top-left corner. With this test's black-left/white-right
+            // source layout that crop is still almost entirely black at this coordinate -
+            // confirmed empirically by running this exact mutation - so a loose "black or white"
+            // check would have passed for the wrong reason. Requiring white specifically catches
+            // it: only the correctly-scaled destination rectangle can put white this deep into
+            // the far corner.
+            unsigned char farPixel[4];
+            sampleAt(width - 5, height - 5, farPixel);
+            bool farIsWhite = farPixel[0] > 200 && farPixel[1] > 200 && farPixel[2] > 200;
+            printf("end-to-end resolve: far-corner pixel rgb = %d,%d,%d (expected white, not "
+                   "the clear colour or a wrongly-scaled crop)\n", farPixel[0], farPixel[1], farPixel[2]);
+            ok = Check(farIsWhite,
+                       "end-to-end resolve: destination rectangle - the image fills the whole "
+                       "window, not just a corner of it") && ok;
+
+            // FILTER: straddling the seam. GL_NEAREST can only ever return one tone or the
+            // other; GL_LINEAR must bring back something in between - same 60..195 band as
+            // render_target_gpu_test.cpp's averaging case, for the same reason (drivers differ
+            // in exactly how many source texels a shrinking GL_LINEAR blit weighs). The seam in
+            // DESTINATION space lands at splitX / 2 (the same one-texel-off-multiple split
+            // above, scaled by the 2:1 ratio) - verified empirically by scanning pixels around
+            // width/2 with the aligned split first: destination pixel width/2 itself is one
+            // pixel short of the actual straddling pixel here (splitX/2 == width/2 - 1), because
+            // splitX is renderWidth/2 - 1, not renderWidth/2.
+            int seamX = splitX / 2;
+            unsigned char seamPixel[4];
+            sampleAt(seamX, height / 2, seamPixel);
+            bool seamIsIntermediate = seamPixel[0] > 60 && seamPixel[0] < 195;
+            printf("end-to-end resolve: seam pixel rgb = %d,%d,%d (expected an intermediate "
+                   "grey)\n", seamPixel[0], seamPixel[1], seamPixel[2]);
+            ok = Check(seamIsIntermediate,
+                       "end-to-end resolve: filter - the shrink averaged the seam rather than "
+                       "point-sampling one side of it") && ok;
+
+            // FALLBACK DESTINATION: the same frame again with a null HDC, which is the one way
+            // to make GetWindowClientSize() fail from here (WindowFromDC(nullptr) is NULL) -
+            // the real-world equivalent being a window that has gone away between the game's
+            // draw and this swap. hdc is the only thing ApplySelectedEffect uses it for, so
+            // nothing else about the frame changes.
+            //
+            // The fallback used to be nativeWidth/nativeHeight, which on a supersampled frame is
+            // the RENDER TARGET's size - larger than the window - so the present blit became a
+            // 1:1 copy of an oversized image and the window showed an unscaled crop of its
+            // top-left corner. That is the same cropped-corner failure the destination-rectangle
+            // assertion above describes, arrived at from the other direction. The game's own
+            // full-frame viewport is the right stand-in, and it is what this asserts: the far
+            // corner is still white.
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(nullptr);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (no client size): ApplySelectedEffect() left no GL "
+                       "error") && ok;
+
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, resolvedPixels.data());
+
+            unsigned char fallbackFarPixel[4];
+            sampleAt(width - 5, height - 5, fallbackFarPixel);
+            bool fallbackFarIsWhite = fallbackFarPixel[0] > 200 && fallbackFarPixel[1] > 200 &&
+                                       fallbackFarPixel[2] > 200;
+            printf("end-to-end resolve (no client size): far-corner pixel rgb = %d,%d,%d "
+                   "(expected white)\n", fallbackFarPixel[0], fallbackFarPixel[1],
+                   fallbackFarPixel[2]);
+            ok = Check(fallbackFarIsWhite,
+                       "end-to-end resolve (no client size): an unavailable window size falls "
+                       "back to the game's own viewport, not to the supersampled size") && ok;
+        }
+
+        // Restore what this block changed so every scenario below runs exactly as it did
+        // before this case existed.
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.renderWidth = savedRenderWidth;
+        mutableConfig.renderHeight = savedRenderHeight;
+        mutableConfig.frameDumpKey = savedFrameDumpKey;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
+
+    // --- The same end-to-end resolve, beside the empty-chain case above, but with a NON-EMPTY
+    // effect chain - the configuration a real user actually runs (a full effect= list AND a
+    // render size). ---
+    //
+    // The empty-chain case above found a real bug in the capture/pair-selection code
+    // (g_pipeline.hasNativePair vs hasRealUpscale - see post_effects.cpp) that both the
+    // stageCount==0 and stageCount>0 paths share. Proving the fix only against stageCount==0
+    // would leave the actually-shipped configuration - a real chain running while supersampling
+    // is armed - unverified, so this case exercises the same present-resolve path with one
+    // stage actually listed.
+    //
+    // Stage choice: `gamma`, with gamma=1.0 and brightness=0.5. gamma.h documents that gamma=1
+    // skips pow() outright ("gamma=1 with brightness=1 reproduces the input EXACTLY - the pow()
+    // is skipped outright"), so at gamma=1 the whole per-pixel transform is a single multiply,
+    // c = max(color*brightness, 0) - no transcendental function, nothing to reason about beyond
+    // arithmetic. That makes it the cheapest stage in the pipeline to predict exactly, which
+    // matters here: this case DERIVES its expected pixel values from that formula rather than
+    // hardcoding whatever a prior run happened to print - a fixed expected value copied from
+    // observed output would pin this driver's behaviour instead of the production code's.
+    //   - Black is an exact fixed point of the formula for any brightness >= 0 (0 * x is 0), so
+    //     it stays exactly 0 regardless of the stage - the presence check below is unaffected.
+    //   - White (1.0) becomes exactly `brightness` = 0.5, i.e. 127.5/255 - NOT 255 any more.
+    //     brightness is deliberately NOT left at 1.0 for this reason: if the wrong texture were
+    //     presented (the one BEFORE the chain ran, rather than the one it actually last wrote -
+    //     see post_effects.cpp's `cur` ping-pong index), the far corner would still read close
+    //     to 255, not the derived ~127.5, and the destination-rectangle assertion below would
+    //     catch that mismatch. A brightness of 1.0 could not have told the two cases apart.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount2 = mutableConfig.stageCount;
+        int savedRenderWidth2 = mutableConfig.renderWidth;
+        int savedRenderHeight2 = mutableConfig.renderHeight;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+
+        const float kBrightness = 0.5f;
+        const float kGamma = 1.0f;  // skips pow() per gamma.h - a pure linear scale.
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Gamma;
+        mutableConfig.gamma = kGamma;
+        mutableConfig.brightness = kBrightness;
+        // The FX badge draws, unconditionally, on the final texture's own corner whenever
+        // stageCount > 0 - the same corner this case samples for its destination-rectangle
+        // check (see the gamma-wiring scenario below for the same reasoning). Off for the same
+        // reason: leaving it on would supply a pixel difference of its own and confound the
+        // assertion this case is actually trying to make.
+        mutableConfig.fxIndicator = false;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed2 = Check(IsSupersampleActive(),
+                             "end-to-end resolve (gamma chain): supersampling armed for this "
+                             "frame (if this fails, nothing below proves anything)");
+        ok = armed2 && ok;
+
+        if (armed2) {
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // Same one-texel-off-multiple split as the empty-chain case above, and for the same
+            // reason: a split exactly on the 2:1 boundary lands on the edge between two
+            // destination pixels' non-overlapping source windows, and neither one would ever
+            // see both tones.
+            int splitX2 = mutableConfig.renderWidth / 2 - 1;
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlScissor(0, 0, splitX2, mutableConfig.renderHeight);
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlScissor(splitX2, 0, mutableConfig.renderWidth - splitX2,
+                       mutableConfig.renderHeight);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlDisable(GL_SCISSOR_TEST);
+
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (gamma chain): ApplySelectedEffect() left no GL "
+                       "error") && ok;
+
+            std::vector<unsigned char> resolvedPixels2((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE,
+                             resolvedPixels2.data());
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (gamma chain): readback of the real back buffer "
+                       "left no GL error") && ok;
+
+            auto sampleAt2 = [&](int x, int y, unsigned char out[4]) {
+                size_t i = ((size_t)y * width + x) * 4;
+                out[0] = resolvedPixels2[i + 0];
+                out[1] = resolvedPixels2[i + 1];
+                out[2] = resolvedPixels2[i + 2];
+                out[3] = resolvedPixels2[i + 3];
+            };
+
+            // Derived expected channel values - see the block comment above for the formula
+            // each one comes from.
+            const float expectedBlackChannel = 0.0f;
+            const float expectedWhiteChannel = kBrightness * 255.0f;  // 127.5
+
+            // PRESENCE: well inside the left (black) half. Black is a fixed point of the gamma
+            // stage's formula, so the same tight bound as the empty-chain case still applies
+            // unchanged.
+            unsigned char leftPixel[4];
+            sampleAt2(width / 4, height / 2, leftPixel);
+            bool presented2 = leftPixel[0] < 50 && leftPixel[1] < 50 && leftPixel[2] < 50;
+            printf("end-to-end resolve (gamma chain): presence pixel rgb = %d,%d,%d (expected "
+                   "black-ish)\n", leftPixel[0], leftPixel[1], leftPixel[2]);
+            ok = Check(presented2,
+                       "end-to-end resolve (gamma chain): presence - something was presented, "
+                       "not the black-screen regression") && ok;
+
+            // DESTINATION RECTANGLE: a few pixels in from the far (high x, high y) corner, deep
+            // in the (gamma-transformed) white half. Banded around the DERIVED
+            // expectedWhiteChannel (~127.5) rather than a hardcoded 255, with the same +/-45
+            // margin the empty-chain case effectively used around ITS derived value (255) -
+            // wide enough for blit/8-bit-rounding slop, narrow enough to fail both if the
+            // destination rectangle is wrong (which crops to an almost-all-black region, per
+            // the empty-chain case's investigation - comfortably below this band) and if the
+            // WRONG, still-255 pre-gamma texture were presented instead of the chain's actual
+            // last-written one (comfortably above this band).
+            unsigned char farPixel[4];
+            sampleAt2(width - 5, height - 5, farPixel);
+            bool farMatchesTransformedWhite =
+                farPixel[0] > expectedWhiteChannel - 45.0f && farPixel[0] < expectedWhiteChannel + 45.0f &&
+                farPixel[1] > expectedWhiteChannel - 45.0f && farPixel[1] < expectedWhiteChannel + 45.0f &&
+                farPixel[2] > expectedWhiteChannel - 45.0f && farPixel[2] < expectedWhiteChannel + 45.0f;
+            printf("end-to-end resolve (gamma chain): far-corner pixel rgb = %d,%d,%d (expected "
+                   "~%.1f - the gamma-transformed white, not 255 or the clear colour)\n",
+                   farPixel[0], farPixel[1], farPixel[2], expectedWhiteChannel);
+            ok = Check(farMatchesTransformedWhite,
+                       "end-to-end resolve (gamma chain): destination rectangle - the chain's "
+                       "actual output fills the whole window, and it is the chain's last-"
+                       "written texture that was presented") && ok;
+
+            // FILTER: straddling the seam. The present blit mixes the ALREADY gamma-transformed
+            // pixel values (gamma runs before the present blit, at native/offscreen
+            // resolution), so the expected band is the SAME 60/255..195/255 fraction of the way
+            // between the two tones the empty-chain case already justified, rescaled to this
+            // stage's own output range [expectedBlackChannel, expectedWhiteChannel] instead of
+            // [0, 255] - not a fresh tolerance, the same one, applied to the transformed range.
+            //
+            // Checked on ALL THREE channels, not just channel 0: this range is narrower than
+            // the empty-chain case's (0..127.5 rather than 0..255), and the clear colour's own
+            // R and G channels (40) land inside it by coincidence - found empirically by running
+            // the ShouldSkipEffectChain mutation below against a single-channel version of this
+            // check, which passed for the wrong reason (the pixel was still the untouched clear
+            // colour, R=G=40, B=180 - not a real seam blend). The clear colour is not achromatic
+            // like every legitimate value in this test (black, transformed white, and their
+            // blends all have R==G==B), so requiring all three channels in-band is what actually
+            // rules it out.
+            int seamX2 = splitX2 / 2;
+            unsigned char seamPixel[4];
+            sampleAt2(seamX2, height / 2, seamPixel);
+            float seamRange = expectedWhiteChannel - expectedBlackChannel;
+            float seamBandLo = expectedBlackChannel + seamRange * (60.0f / 255.0f);
+            float seamBandHi = expectedBlackChannel + seamRange * (195.0f / 255.0f);
+            bool seamIsIntermediate2 = seamPixel[0] > seamBandLo && seamPixel[0] < seamBandHi &&
+                                       seamPixel[1] > seamBandLo && seamPixel[1] < seamBandHi &&
+                                       seamPixel[2] > seamBandLo && seamPixel[2] < seamBandHi;
+            printf("end-to-end resolve (gamma chain): seam pixel rgb = %d,%d,%d (expected "
+                   "between %.1f and %.1f)\n", seamPixel[0], seamPixel[1], seamPixel[2],
+                   seamBandLo, seamBandHi);
+            ok = Check(seamIsIntermediate2,
+                       "end-to-end resolve (gamma chain): filter - the shrink averaged the "
+                       "seam rather than point-sampling one side of it") && ok;
+        }
+
+        // Restore what this block changed so every scenario below runs exactly as it did
+        // before this case existed.
+        mutableConfig.stageCount = savedStageCount2;
+        mutableConfig.renderWidth = savedRenderWidth2;
+        mutableConfig.renderHeight = savedRenderHeight2;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.fxIndicator = savedFxIndicator;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
 
     // --- A second, config-independent scenario: the `gamma` stage is actually WIRED UP. ---
     //

@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -103,6 +103,10 @@ add_executable(projection_capture_test projection_capture_test.cpp projection_ca
 # candidates, and the world-pass-only gate that keeps HUD artwork out - with no GL context.
 # See texture_mipmap_test.cpp.
 add_executable(texture_mipmap_test texture_mipmap_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
+
+# Pure CPU: the viewport scaling rule, the reference latch and the arming decision from
+# render_target.h, with no GL context - see render_target_test.cpp.
+add_executable(render_target_test render_target_test.cpp render_target.cpp config.cpp debug_log.cpp gl_loader.cpp)
 
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
@@ -235,13 +239,14 @@ target_link_libraries(ssr_test opengl32 gdi32 user32)
 # into the next one - see world_capture_test.cpp. Links config.cpp and debug_log.cpp because
 # the cameraLogInterval diagnostic reads the config, same as modelview_capture_test.
 add_executable(world_capture_test world_capture_test.cpp world_capture.cpp gl_loader.cpp
-    config.cpp debug_log.cpp)
+    config.cpp debug_log.cpp render_target.cpp)
 target_link_libraries(world_capture_test opengl32 gdi32 user32)
 
 # Checks the pure reprojection matrix on the CPU and the blur stage against a real GL context -
 # see motion_blur_test.cpp.
 add_executable(motion_blur_test motion_blur_test.cpp motion_blur.cpp gl_loader.cpp
-    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp)
+    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp
+    render_target.cpp)
 target_link_libraries(motion_blur_test opengl32 gdi32 user32)
 
 # Creates a real GL context, drives the matrix-call sequence a Quake II-family engine makes
@@ -317,6 +322,22 @@ add_custom_command(TARGET texture_mipmap_gpu_test POST_BUILD
         $<TARGET_FILE_DIR:texture_mipmap_gpu_test>/opengl32_enhancer.ini
 )
 
+# Creates a real GL context and checks EnsureRenderTarget() actually creates a complete
+# offscreen FBO at the configured size, that BindRenderTarget()/GetGameFramebuffer()/
+# GetGameReadBuffer() route drawing into it instead of the real back buffer, and that a size
+# the driver refuses degrades to today's rendering - see render_target_gpu_test.cpp. Its own
+# output directory and fixture ini for the same reason texture_mipmap_gpu_test has one.
+add_executable(render_target_gpu_test render_target_gpu_test.cpp render_target.cpp config.cpp debug_log.cpp gl_loader.cpp)
+target_link_libraries(render_target_gpu_test opengl32 gdi32 user32)
+set_target_properties(render_target_gpu_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/render_target_gpu_test_dir
+)
+add_custom_command(TARGET render_target_gpu_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/render_target_test.ini
+        $<TARGET_FILE_DIR:render_target_gpu_test>/opengl32_enhancer.ini
+)
+
 add_executable(texture_filter_test texture_filter_test.cpp texture_filter.cpp config.cpp gl_loader.cpp)
 target_link_libraries(texture_filter_test opengl32 gdi32 user32)
 # texture_filter_test resolves opengl32_enhancer.ini next to its own .exe, same as
@@ -348,7 +369,7 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp window_override.cpp)
+    local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -375,7 +396,7 @@ add_executable(config_editor WIN32
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
-    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
+    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
@@ -445,7 +466,8 @@ foreach(test_target
     debug_log_test
     taa_jitter_test
     projection_capture_test
-    texture_mipmap_test)
+    texture_mipmap_test
+    render_target_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()
@@ -480,6 +502,7 @@ foreach(test_target
     fx_indicator_test
     texture_filter_test
     texture_mipmap_gpu_test
+    render_target_gpu_test
     post_effects_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)

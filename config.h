@@ -190,6 +190,20 @@ struct AnaxConfig {
     int windowWidth = 0;
     int windowHeight = 0;
 
+    // Renders the game into an offscreen framebuffer of this size and downsamples it to the
+    // window on present - see render_target.h. Both default to 0, meaning off; the override
+    // only applies when BOTH are positive, the same both-or-nothing rule windowWidth/
+    // windowHeight uses, since a render size is a single (width, height) pair and honoring
+    // just one would mean guessing the other.
+    int renderWidth = 0;
+    int renderHeight = 0;
+
+    // RGBA16F instead of RGBA8 for that framebuffer's colour attachment, which makes the
+    // game's OWN fixed-function blending accumulate at 16-bit float. Off by default because
+    // it genuinely changes how the game's blending accumulates, and supersampling on its own
+    // should not change anything except sample count.
+    bool renderFloatBuffer = false;
+
     // Draws a small "FX" badge in a corner of the frame whenever the effect= pipeline actually
     // runs, so you can tell "the pipeline ran but nothing looked different" apart from "the
     // proxy isn't loaded/configured at all" without checking the log - see fx_indicator.h.

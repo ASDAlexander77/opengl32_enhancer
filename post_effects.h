@@ -49,3 +49,27 @@ bool StageNeedsDepth(EffectKind stage);
 // Asking this about a stage StageNeedsDepth() returns false for is meaningless and answers
 // false; the chain only consults it inside the `isDepthStage && !atNativeRes` branch.
 bool StageIsSkippedWhenDepthUnavailable(EffectKind stage);
+
+// Whether the chain lists any stage that reconstructs a smaller source up to a larger
+// destination (bilinear/nvscaler/fsr). Supersampling renders above native and downsamples on
+// present instead, so once it is active these stages have nothing left to reconstruct - see the
+// call site in ApplySelectedEffect(), which uses this only to log that once, not to change the
+// chain. Same-file reasoning as StageNeedsDepth: one consumer, post_effects.cpp.
+bool AnyUpscaleStageListed(const AnaxConfig& config);
+
+// Whether ApplySelectedEffect can return without doing anything. Extracted as a predicate
+// rather than left inline because the supersampling term is the line that stands between a
+// working frame and a black screen: with a render target armed, this function's present blit
+// is the ONLY thing that moves the offscreen image onto the display, so returning early
+// there shows the player nothing at all. Inline, that term was pinned by no test - the suite
+// stayed green with it deleted.
+bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersampleActive);
+
+// Whether ApplySelectedEffect can return before it touches GL at all - the earlier of the two
+// early returns, over config alone plus the supersampling latch. Extracted for the same reason
+// as ShouldSkipEffectChain, and after the same bug: the supersampling term was missing here
+// entirely, so effect=none with no frame-dump key and no window override was a black screen
+// whenever a render target was armed. A predicate is a thing a truth table can pin; an inline
+// condition, as this one showed twice, is not.
+bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverrideActive,
+                       bool supersampleActive);

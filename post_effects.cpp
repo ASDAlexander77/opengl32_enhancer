@@ -1,5 +1,6 @@
-// Owns the shared post-effect pipeline: two RGBA16F ping-pong textures. Captures the real
-// back buffer into them exactly once per frame, chains every stage the config listed - in the
+// Owns the shared post-effect pipeline: two RGBA16F ping-pong textures. Captures whatever
+// framebuffer the game rendered into - the real back buffer, or the offscreen supersampling
+// target when one is armed (see render_target.h) - into them exactly once per frame, chains every stage the config listed - in the
 // order it listed them - by alternating which texture is "source" and which is "destination"
 // (each stage's ApplyX reads one and writes the other, returning whether it actually wrote -
 // see e.g. lut_grading.h's header comment for why a stage can legitimately no-op), and blits
@@ -17,6 +18,7 @@
 
 #include "post_effects.h"
 #include "config.h"
+#include "render_target.h"
 #include "debug_log.h"
 #include "pixel_invert.h"
 #include "bilinear_upscale.h"
@@ -108,8 +110,8 @@ struct PipelineTextures {
     unsigned int tex[2] = {0, 0};
     unsigned int presentFbo = 0;   // reused, re-attached to whichever tex[] is final each frame
 
-    // EXPERIMENTAL (see depth_vignette.h). The default framebuffer's depth attachment, blitted
-    // here once per frame, but only when a depth-consuming stage is actually listed - see
+    // EXPERIMENTAL (see depth_vignette.h). The depth attachment of whatever framebuffer the
+    // game rendered into, blitted here once per frame, but only when a depth-consuming stage is actually listed - see
     // ApplySelectedEffect(). depthFbo exists purely as a blit target for depthTex; nothing ever
     // reads from it as a framebuffer otherwise. ALWAYS sized at the game's own native render
     // resolution (independent of width/height above) - that's the only resolution a depth buffer
@@ -268,16 +270,20 @@ bool ConsumeFrameDumpRequest(int frameDumpKey) {
     return pressed;
 }
 
-// Reads the game's finished frame straight off the default framebuffer - color and depth both -
-// and writes it out for the config editor. Deliberately reads the DEFAULT framebuffer rather
-// than the pipeline's captured textures: this must be the unprocessed frame the game drew, and
-// reading depth from framebuffer 0 also means a dump needs no depth texture and therefore works
-// regardless of whether any depth-consuming stage is listed.
+// Reads the game's finished frame straight off whatever framebuffer the game rendered into -
+// color and depth both - and writes it out for the config editor. Deliberately reads THAT
+// framebuffer rather than the pipeline's captured textures: this must be the unprocessed frame
+// the game drew, and reading depth from it also means a dump needs no depth texture and
+// therefore works regardless of whether any depth-consuming stage is listed.
+//
+// GetGameFramebuffer() rather than a literal 0, because the game does not always render into
+// the default framebuffer any more - see render_target.h. It returns 0 whenever supersampling
+// is not armed, so the unsupersampled case is byte-for-byte what it always was.
 void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) {
     int savedReadFbo = 0;
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+    gl.glReadBuffer(GetGameReadBuffer());
 
     size_t texelCount = (size_t)width * (size_t)height;
     unsigned char* color = (unsigned char*)malloc(texelCount * 4);
@@ -390,6 +396,44 @@ bool StageIsSkippedWhenDepthUnavailable(EffectKind stage) {
     return StageNeedsDepth(stage) && stage != EffectKind::Taa;
 }
 
+// See post_effects.h. Named stages are exactly the ones with an upscale mode (a `scale` that
+// maps a smaller source across a larger destination); everything else either doesn't resize at
+// all or resizes without reconstructing (e.g. the implicit stretch this file falls back to when
+// hasRealUpscale is true and no such stage ran).
+bool AnyUpscaleStageListed(const AnaxConfig& config) {
+    for (int i = 0; i < config.stageCount; ++i) {
+        switch (config.stages[i]) {
+            case EffectKind::Bilinear:
+            case EffectKind::NVScaler:
+            case EffectKind::Fsr:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
+// See post_effects.h. The only case that must stay non-skipping is the one that regressed
+// before this predicate existed: stageCount 0, no real upscale, supersampling active - the
+// chain has nothing to run, but the present blit further down is still the only thing that
+// puts the offscreen render target on screen, so skipping there means black.
+bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersampleActive) {
+    return stageCount == 0 && !hasRealUpscale && !supersampleActive;
+}
+
+// See post_effects.h. Same reasoning as ShouldSkipEffectChain's supersampling term, one return
+// earlier: with a render target armed, this function's present blit is the only thing that puts
+// the offscreen image on the screen, so returning here shows the player nothing at all. That
+// made effect=none + frameDumpKey=0 + renderWidth/renderHeight a black screen, and the
+// end-to-end test could not see it because it inherited the shipped ini's frameDumpKey=0x7B and
+// so never reached this return with all three of the other terms false.
+bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverrideActive,
+                       bool supersampleActive) {
+    return stageCount == 0 && frameDumpKey == 0 && !windowSizeOverrideActive &&
+           !supersampleActive;
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -405,8 +449,13 @@ void ApplySelectedEffect(void* hdc) {
     // in the corner of a bigger window. Reaching the loader on a GPU that can't support the
     // effects is no longer a per-frame log: it resolves at most once per context (see
     // gl_loader.cpp's GetGlComputeApi).
+    // Supersampling being armed also counts as something to do, for exactly the reason
+    // ShouldSkipEffectChain() carries further down - the present blit below is the ONLY thing
+    // that moves the offscreen render target onto the display. See ShouldSkipAllWork() in
+    // post_effects.h.
     bool windowSizeOverrideActive = config.windowWidth > 0 && config.windowHeight > 0;
-    if (config.stageCount == 0 && config.frameDumpKey == 0 && !windowSizeOverrideActive) {
+    if (ShouldSkipAllWork(config.stageCount, config.frameDumpKey, windowSizeOverrideActive,
+                          IsSupersampleActive())) {
         return;
     }
 
@@ -443,6 +492,28 @@ void ApplySelectedEffect(void* hdc) {
         return;
     }
 
+    // With supersampling armed, what the game drew into is the offscreen render target, and its
+    // size is known exactly rather than inferred. Taking the SIZE from GL_VIEWPORT instead would
+    // assume the frame's LAST viewport is the full-frame one - a second empirical assumption on
+    // top of render_target.h's documented first-viewport one, and one nothing checks: a game
+    // that leaves a sub-viewport set at swap would have its frame captured, sized and presented
+    // as if that sub-viewport were the whole image.
+    //
+    // This fixes the size for every consumer of it at once: the frame dump, the colour and depth
+    // captures, the pipeline texture sizes, hasRealUpscale's comparison against the window, and
+    // the present blit's source rectangle via curWidth/curHeight.
+    //
+    // It does NOT remove the assumption from this function entirely, and two readers of the live
+    // viewport deliberately remain. viewportX/viewportY below are still the LAST viewport's
+    // origin, so a game whose final pass targets an offset sub-viewport still fails
+    // hasRealUpscale's origin test and loses reconstruction for that frame. And the degenerate
+    // check just above still rejects the frame on the last viewport's size, so a game that ends
+    // its frame on a zero-sized viewport is skipped even though the render target is fine. Both
+    // are narrow and both self-heal on the next frame; neither is fixed here.
+    if (IsSupersampleActive()) {
+        GetRenderTargetSize(nativeWidth, nativeHeight);
+    }
+
     // Before the pipeline runs, so the dump is the game's own unprocessed frame - which is what
     // the editor needs in order to apply stages to it itself. Always at the native resolution:
     // a dump is meant to capture exactly what the game drew, independent of any window resize.
@@ -457,12 +528,25 @@ void ApplySelectedEffect(void* hdc) {
     // already rendered at full size (see fsr.h's header comment). Falls back to the native size
     // (no mismatch, no behavior change from before this feature existed) if the window's size
     // can't be determined.
-    int dstWidth = nativeWidth;
-    int dstHeight = nativeHeight;
+    //
+    // The fallback is NOT nativeWidth/nativeHeight when supersampling is armed: those are then
+    // the render target's size, which is deliberately LARGER than the window, so a failed query
+    // would make the present blit a 1:1 copy of an oversized image into a smaller window - the
+    // cropped-corner failure that blit's own comment warns about. The game's own full-frame
+    // viewport is the right stand-in there, because that is what the window would be showing if
+    // this feature were off. GetReferenceViewport leaves its arguments alone when no reference
+    // has been latched yet, as does GetWindowClientSize when it fails.
+    int fallbackWidth = nativeWidth;
+    int fallbackHeight = nativeHeight;
+    if (IsSupersampleActive()) {
+        GetReferenceViewport(fallbackWidth, fallbackHeight);
+    }
+    int dstWidth = fallbackWidth;
+    int dstHeight = fallbackHeight;
     GetWindowClientSize(hdc, dstWidth, dstHeight);
     if (dstWidth <= 0 || dstHeight <= 0) {
-        dstWidth = nativeWidth;
-        dstHeight = nativeHeight;
+        dstWidth = fallbackWidth;
+        dstHeight = fallbackHeight;
     }
 
     // Deliberately strict about what counts as "the game is rendering smaller than its window":
@@ -482,6 +566,31 @@ void ApplySelectedEffect(void* hdc) {
     // through the chain and blitted back exactly where it came from.
     bool hasRealUpscale = viewportX == 0 && viewportY == 0 &&
                            dstWidth > nativeWidth && dstHeight > nativeHeight;
+
+    // Supersampling usually supersedes an upscale stage still listed in effect=: it already
+    // renders above the window and downsamples on present, so that stage's source and
+    // destination are the same size by the time it would run and it falls back to its same-size
+    // behaviour. USUALLY, not always - renderWidth can be set above the game's own resolution
+    // but still below the window's (a 640x480 game, renderWidth=960, a 1920-wide window), and
+    // then the target really is smaller than the window and the stage really does reconstruct.
+    // hasRealUpscale is precisely that distinction, so it decides which of these two is true
+    // rather than the message asserting the first unconditionally. Purely informational either
+    // way; nothing about the chain changes here.
+    if (IsSupersampleActive()) {
+        static bool warnedUpscalerSuperseded = false;
+        if (!warnedUpscalerSuperseded && AnyUpscaleStageListed(config)) {
+            if (hasRealUpscale) {
+                printf("[opengl32_enh_cpp] post_effects: supersampling is active at %dx%d, but "
+                       "the window is %dx%d - the upscale stage in effect= still reconstructs "
+                       "the difference\n", nativeWidth, nativeHeight, dstWidth, dstHeight);
+            } else {
+                printf("[opengl32_enh_cpp] post_effects: supersampling is active, so the upscale "
+                       "stage in effect= has nothing left to reconstruct and falls back to its "
+                       "same-size behaviour\n");
+            }
+            warnedUpscalerSuperseded = true;
+        }
+    }
 
     // The exact ratio that maps the real (physically smaller) native-resolution source across a
     // destination-sized output - see fsr.h/bilinear_upscale.cpp/nis_effect.cpp: their `scale`
@@ -505,7 +614,9 @@ void ApplySelectedEffect(void* hdc) {
         }
     }
 
-    if (config.stageCount == 0 && !hasRealUpscale) {
+    // See ShouldSkipEffectChain() in post_effects.h for why supersampling being active is part
+    // of this decision.
+    if (ShouldSkipEffectChain(config.stageCount, hasRealUpscale, IsSupersampleActive())) {
         return;
     }
 
@@ -543,19 +654,30 @@ void ApplySelectedEffect(void* hdc) {
         gl.glActiveTexture((unsigned int)savedActiveTexture);
     };
 
-    // The pair of ping-pong textures actually in use right now: the native-resolution pair while
-    // hasRealUpscale is true (nothing has reconstructed up to the window's size yet), otherwise
-    // directly the destination pair - which IS the native-resolution pair, size-for-size, when
-    // there's no real upscale in play at all.
-    unsigned int* pair = hasRealUpscale ? g_pipeline.nativeTex : g_pipeline.tex;
+    // The pair of ping-pong textures actually in use right now: the native-resolution pair
+    // whenever native and destination sizes actually differ (g_pipeline.hasNativePair, set by
+    // EnsurePipelineTextures above) - covering BOTH directions that can produce a mismatch, a
+    // real upscale (dst bigger than native; nothing has reconstructed up to the window's size
+    // yet) and supersampling (native bigger than dst; nothing has downsampled to the window's
+    // size yet, which is what Task 5's present blit alone does) - otherwise directly the
+    // destination pair, which IS the native-resolution pair, size-for-size, when there's no
+    // mismatch at all. Deliberately NOT keyed on hasRealUpscale alone: that condition is false
+    // throughout a supersampled frame (dst is smaller than native, not bigger), so capturing
+    // nativeWidth x nativeHeight pixels into g_pipeline.tex - sized at the SMALLER dst
+    // resolution - overflowed the destination texture (GL_INVALID_VALUE from
+    // glCopyTexSubImage2D below) and skipped the frame with nothing presented, silently
+    // reintroducing the black screen Task 4's ShouldSkipEffectChain fix was meant to prevent.
+    unsigned int* pair = g_pipeline.hasNativePair ? g_pipeline.nativeTex : g_pipeline.tex;
 
-    // Force the read framebuffer to the default (live back buffer) before capture, same
+    // Force the read framebuffer to the one the game rendered into before capture, same
     // reasoning as every individual effect used to: whatever the host app had bound as its
-    // read framebuffer at swap time would otherwise still be bound here. Always captures at the
-    // NATIVE resolution - that's the real size of what the game actually drew into the back
-    // buffer, regardless of how much bigger the window/back buffer itself is.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
+    // read framebuffer at swap time would otherwise still be bound here. That is the live back
+    // buffer normally, and the offscreen supersampling target when one is armed - see
+    // render_target.h, and note GetGameReadBuffer() exists because glReadBuffer(GL_BACK) is
+    // invalid against a framebuffer object. Always captures at the NATIVE resolution - the real
+    // size of what the game actually drew, regardless of how much bigger the window is.
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+    gl.glReadBuffer(GetGameReadBuffer());
     gl.glBindTexture(GL_TEXTURE_2D, pair[0]);
     gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
 
@@ -572,8 +694,10 @@ void ApplySelectedEffect(void* hdc) {
         return;
     }
 
-    // Blit the default framebuffer's depth attachment into g_pipeline.depthTex, same
-    // read-framebuffer-0 reasoning as the color capture above. Only attempted when a stage that
+    // Blit the depth attachment of whatever the game rendered into onto g_pipeline.depthTex,
+    // same read-framebuffer reasoning as the color capture above. No glReadBuffer call here, and
+    // that is not an omission: the read-buffer selector is a colour concept and a depth blit
+    // does not consult it. Only attempted when a stage that
     // consumes depth is actually listed - everyone else pays nothing for this. A blit error
     // (e.g. this GL context's pixel format has no depth buffer at all) is logged once and leaves
     // depthCaptured false, which makes the depth-consuming stages below no-op for this frame
@@ -582,7 +706,7 @@ void ApplySelectedEffect(void* hdc) {
     bool depthCaptured = false;
     if (needDepth) {
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
         gl.glBlitFramebuffer(0, 0, nativeWidth, nativeHeight, 0, 0, nativeWidth, nativeHeight,
                               GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         unsigned int depthErr = gl.glGetError();
@@ -998,10 +1122,28 @@ void ApplySelectedEffect(void* hdc) {
     // whichever resolution it ended up at - curWidth/curHeight is dstWidth/dstHeight once a real
     // upscale (explicit or the implicit stretch above) has run, or nativeWidth/nativeHeight
     // (== dstWidth/dstHeight when there's no real upscale in play) if it never did.
+    //
+    // The source rectangle is curWidth/curHeight and not GetRenderTargetSize() even on a
+    // supersampled frame, and that is not the GL_VIEWPORT assumption it looks like:
+    // nativeWidth/nativeHeight IS the render target's size on such a frame, set from
+    // GetRenderTargetSize() at the top of this function, and curWidth/curHeight tracks the image
+    // from there. Reading the target's size again here would be wrong in the one case where the
+    // two legitimately differ - supersampling armed AND the target still smaller than the
+    // window, where an upscale stage has moved the image to dstWidth/dstHeight.
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pair[cur], 0);
     gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, curWidth, curHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    // With supersampling armed the finished image is larger than the window, and THIS BLIT IS
+    // THE RESOLVE - the linear shrink is what turns the extra samples into antialiasing. Without
+    // it the blit is the 1:1 copy it has always been.
+    // dstWidth/dstHeight is the window's client size, computed near the top of this same
+    // function - NOT the game's own viewport, which is the size the image would have been
+    // WITHOUT this feature. Blitting to that would put the finished frame in a corner.
+    int presentWidth = IsSupersampleActive() ? dstWidth : curWidth;
+    int presentHeight = IsSupersampleActive() ? dstHeight : curHeight;
+    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, presentWidth, presentHeight,
+                         GL_COLOR_BUFFER_BIT,
+                         IsSupersampleActive() ? GL_LINEAR : GL_NEAREST);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {

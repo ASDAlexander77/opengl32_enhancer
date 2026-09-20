@@ -550,6 +550,63 @@ stretch, no reconstruction quality) - list an upscale stage for a real one.
 `ssao`/`depthvignette` only see the game's own native-resolution depth
 buffer, so list them BEFORE the upscale stage if you use both.
 
+**Supersampling (the opposite direction)** - the game renders BIGGER than the
+window and this proxy resolves it down on present, which is true antialiasing
+rather than reconstruction:
+
+```ini
+renderWidth=1280
+renderHeight=960
+```
+
+Set these ABOVE the resolution the game itself renders at (its own video mode),
+not above your monitor; a value below the game's own viewport is refused,
+because rendering smaller is a different feature wearing this one's name. Both
+must be set - either alone is ignored, the same both-or-nothing rule
+`windowWidth`/`windowHeight` uses. `renderFloatBuffer=1` additionally makes that
+offscreen buffer RGBA16F, so the game's own blending accumulates at 16-bit float.
+
+Supersampling supersedes the upscalers: with it active, `fsr`/`nvscaler`/
+`bilinear` have nothing left to reconstruct and fall back to their same-size
+behaviour, which the log says once so it does not look like a malfunction. The
+cost is real - 2x on each axis means every stage in `effect=` does four times
+the work, and the game takes noticeably longer to load because its loading
+screen renders frames too.
+
+Two limitations are accepted rather than fixed, and both are real:
+
+**Pixel-unit GL state is not scaled.** "The game believes nothing has changed"
+holds for the viewport and the scissor rectangle and does not hold for anything
+measured in pixels. `glPointSize` and `glLineWidth` are forwarded exactly as the
+game sets them, so at 2x an id Tech 2 `R_DrawParticles` draws particles at half
+their intended size relative to the frame around them, and the same applies to
+wireframe and debug line widths. The engine's own screenshot command is affected
+for the same reason - it reads back the number of pixels it believes the frame
+is, and so captures a corner of a frame that is now larger than that. Use the
+`frameDumpKey` dump instead, which is sized from the real render target.
+
+**Depth runs at lower precision.** The offscreen buffer's depth attachment is
+`DEPTH_COMPONENT24`, while the pixel format the game itself chose is typically
+32-bit depth, so depth testing is less precise with this on than with it off and
+a scene already close to z-fighting can start doing it. It has to stay 24:
+`glBlitFramebuffer` requires matching depth formats on both sides, and the
+depth texture the depth-consuming stages read is 24. The trade is more colour
+samples for less depth precision; flickering along coplanar surfaces that
+appears only with this on is this, and turning it off is the fix.
+
+**Status: runs cleanly in Anachronox, not validated by eye.** A 1280x960 render
+over a 640x480 game was run with the full twelve-stage chain: the target
+allocates, the world pass runs, sixteen auto-mipmap chains generate, and there
+are no GL errors in steady state. Exactly one frame is dropped, when the game
+creates its second GL context and the capture briefly runs against the dead
+context's framebuffer - the fail-safe working as designed, and invisible at a
+context switch. What has NOT been checked is whether the resulting image
+actually looks right: no screenshot comparison was made and no human has
+confirmed it. The resolve is covered by GPU assertions - a two-tone seam is
+asserted to come back averaged rather than point-sampled, and the presented
+frame is asserted to fill the window rather than a corner - but neither stands
+in for looking at a real scene.
+
 **Clean up noisy/grainy source, then add some punch:**
 
 ```ini

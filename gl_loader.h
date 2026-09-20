@@ -39,6 +39,7 @@ typedef void (__stdcall *PFNGLDELETEFRAMEBUFFERSPROC)(int n, const unsigned int*
 typedef void (__stdcall *PFNGLBINDFRAMEBUFFERPROC)(unsigned int target, unsigned int framebuffer);
 typedef void (__stdcall *PFNGLFRAMEBUFFERTEXTURE2DPROC)(unsigned int target, unsigned int attachment,
     unsigned int textarget, unsigned int texture, int level);
+typedef unsigned int (__stdcall *PFNGLCHECKFRAMEBUFFERSTATUSPROC)(unsigned int target);
 typedef void (__stdcall *PFNGLBLITFRAMEBUFFERPROC)(int srcX0, int srcY0, int srcX1, int srcY1,
     int dstX0, int dstY0, int dstX1, int dstY1, unsigned int mask, unsigned int filter);
 typedef void (__stdcall *PFNGLGENBUFFERSPROC)(int n, unsigned int* buffers);
@@ -90,6 +91,7 @@ struct GlComputeApi {
     PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers = nullptr;
     PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer = nullptr;
     PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D = nullptr;
+    PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus = nullptr;
     PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer = nullptr;
     PFNGLGENBUFFERSPROC glGenBuffers = nullptr;
     PFNGLDELETEBUFFERSPROC glDeleteBuffers = nullptr;

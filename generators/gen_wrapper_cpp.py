@@ -217,6 +217,7 @@ def emit_cpp(funcs):
     lines.append('#include "world_capture.h"')
     lines.append('#include "taa_jitter.h"')
     lines.append('#include "window_override.h"')
+    lines.append('#include "render_target.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -288,6 +289,12 @@ def emit_cpp(funcs):
             # the consumer of this frame's world-only capture - invalidating on entry would
             # destroy it before anything could read it.
             lines.append("    InvalidateWorldFrame();")
+            # See render_target.h. The order is the whole invariant: the real SwapBuffers has
+            # already happened by the time the generated passthrough runs, so arming and
+            # binding here means the decision covers the frame that is about to be drawn, and
+            # the viewport hook and the capture path read the same latched answer all frame.
+            lines.append("    NotifyFrameBoundary();")
+            lines.append("    ArmSupersampleForFrame(EnsureRenderTarget());")
         if name == "wglCreateContext":
             # See window_override.h: resizes the game's window to config.h's
             # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
@@ -345,6 +352,18 @@ def emit_cpp(funcs):
         if name == "glTexImage2D":
             lines.append("    if (%s == 0x0DE1) NotifyBoundTextureLevelUploaded(%s);"
                          % (args[0][0], args[1][0]))
+        # See render_target.h: the game's viewport is the reference this module scales
+        # everything against, so it is recorded BEFORE being scaled, and then the scaled
+        # values are what reach the driver. glScissor only scales - a scissor rectangle is
+        # never the frame's full-frame viewport and must not be latched as one.
+        if name == "glViewport":
+            lines.append("    NotifyGameViewport(%s, %s, %s, %s);"
+                         % (args[0][0], args[1][0], args[2][0], args[3][0]))
+            lines.append("    ScaleGameRect(%s, %s, %s, %s);"
+                         % (args[0][0], args[1][0], args[2][0], args[3][0]))
+        if name == "glScissor":
+            lines.append("    ScaleGameRect(%s, %s, %s, %s);"
+                         % (args[0][0], args[1][0], args[2][0], args[3][0]))
         # The draw path. glBegin covers immediate mode, which is what an id Tech 2-era engine
         # actually uses; the two array entry points are here so a modern caller is covered too.
         if name in ("glBegin", "glDrawArrays", "glDrawElements"):
@@ -363,6 +382,13 @@ def emit_cpp(funcs):
         elif name == "glTexParameterf":
             # Float-parameter twin of the above - see texture_filter.h.
             lines.append(f"    ApplyTextureFilterOverrideF({cache_var}, {params_call});")
+        elif name == "wglSwapBuffers":
+            # See render_target.h: BindRenderTarget() must run after the real SwapBuffers
+            # returns, not before it, so this can't fall through to the generic passthrough
+            # below - it needs the real call's result held long enough to bind afterward.
+            lines.append(f"    BOOL __swapResult = {cache_var}({params_call});")
+            lines.append("    BindRenderTarget();")
+            lines.append("    return __swapResult;")
         elif ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:
