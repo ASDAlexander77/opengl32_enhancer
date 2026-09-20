@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp srgb_convert.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -193,6 +193,13 @@ target_link_libraries(dither_test opengl32 gdi32 user32)
 # values with black and white both left pinned - see gamma_test.cpp.
 add_executable(gamma_test gamma_test.cpp gamma.cpp gl_loader.cpp)
 target_link_libraries(gamma_test opengl32 gdi32 user32)
+
+# Creates a real GL context and checks the two sRGB conversion passes against the EXACT
+# piecewise transfer function - including the linear segment below the 0.04045 knee, which
+# is where the pow(2.2) approximation people reach for is most wrong - and that encode is
+# decode's inverse across both segments. See srgb_convert_test.cpp.
+add_executable(srgb_convert_test srgb_convert_test.cpp srgb_convert.cpp gl_loader.cpp)
+target_link_libraries(srgb_convert_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyVignette()'s GPU pipeline
 # at intensity=0 (must reproduce the input exactly everywhere, corners included) and at a strong
@@ -369,7 +376,7 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp)
+    local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp srgb_convert.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -397,6 +404,7 @@ add_executable(config_editor WIN32
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
     smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp
+    srgb_convert.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
@@ -503,7 +511,8 @@ foreach(test_target
     texture_filter_test
     texture_mipmap_gpu_test
     render_target_gpu_test
-    post_effects_test)
+    post_effects_test
+    srgb_convert_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
     set_tests_properties(${test_target} PROPERTIES LABELS gpu)
