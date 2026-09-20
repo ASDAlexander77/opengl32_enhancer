@@ -1258,7 +1258,24 @@ void ApplySelectedEffect(void* hdc) {
     // steps is 0 whenever the source is already within 2x, which includes every frame with
     // supersampling off - so this whole block is skipped and the present stays the single blit
     // it has always been.
+    // The resolve's halvings are averages, and averages are the whole reason this feature
+    // exists - so the resolve must see light. A chain ending in a display-space stage is
+    // decoded once more first.
+    //
+    // Conditional on there BEING halvings, and that is not an optimisation for its own sake:
+    // with no resolve nothing is averaged, so the space no longer matters and a chain ending
+    // display-referred is already in the space the 8-bit write wants. Forcing a decode there
+    // would just be an encode's inverse, two passes that cancel.
+    //
+    // Without this, the SHIPPED effect= line - which ends '... dither, gamma', both
+    // display-space stages - would have gone straight back into the bug this feature fixes.
     int steps = ResolveHalvingSteps(curWidth, curHeight, presentWidth, presentHeight);
+    if (config.srgbCorrect && steps > 0 && space == ColorSpace::Display) {
+        if (ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Linear;
+        }
+    }
     if (steps > 0) {
         if (g_pipeline.resolveFbo == 0) {
             gl.glGenFramebuffers(1, &g_pipeline.resolveFbo);
@@ -1277,6 +1294,16 @@ void ApplySelectedEffect(void* hdc) {
             cur = 1 - cur;
             curWidth = halfWidth;
             curHeight = halfHeight;
+        }
+    }
+
+    // The bracket closes here. After the resolve, so the halvings above averaged light -
+    // encoding first would have fixed the chain while leaving the largest single instance of
+    // the bug (the downsample) in place.
+    if (config.srgbCorrect && space == ColorSpace::Linear) {
+        if (ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Display;
         }
     }
 

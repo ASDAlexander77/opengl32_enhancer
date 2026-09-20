@@ -1049,14 +1049,11 @@ int main() {
     // note inverting in linear space is NOT the same operation as inverting in gamma space, so
     // this also confirms the stages really did see linear values.
     //
-    // The trailing `gamma` (at 1/1, documented to reproduce its input exactly) is what CLOSES
-    // the bracket here, and it is a scaffold with a known removal date rather than part of the
-    // property being tested. This task opens the bracket at capture and converts at stage
-    // boundaries; the encode on present belongs to the present path, which is the next task's
-    // subject and does not exist yet. So today the only thing that can return the image to
-    // display space is a display-space stage, and `gamma` is the one that costs nothing else.
-    // When the present path encodes, delete this third stage and the two inverts stand alone -
-    // the assertion below does not change.
+    // Both stages are Linear, so nothing inside the chain returns the image to display space -
+    // the ONLY thing that can is the encode on present. That makes this the case that tests the
+    // bracket itself rather than a mid-chain conversion, and it is why the chain is exactly two
+    // stages long. (While the present path did not yet encode, this case carried a third stage,
+    // `gamma` at 1/1, purely to close the bracket by hand; the present encode replaced it.)
     {
         AnaxConfig& mutableConfig = GetMutableAnaxConfig();
         int savedStageCount = mutableConfig.stageCount;
@@ -1064,14 +1061,12 @@ int main() {
         bool savedFxIndicator = mutableConfig.fxIndicator;
         EffectKind savedStage0 = mutableConfig.stages[0];
         EffectKind savedStage1 = mutableConfig.stages[1];
-        EffectKind savedStage2 = mutableConfig.stages[2];
         float savedGamma = mutableConfig.gamma;
         float savedBrightness = mutableConfig.brightness;
 
-        mutableConfig.stageCount = 3;
+        mutableConfig.stageCount = 2;
         mutableConfig.stages[0] = EffectKind::Invert;
         mutableConfig.stages[1] = EffectKind::Invert;
-        mutableConfig.stages[2] = EffectKind::Gamma;
         mutableConfig.gamma = 1.0f;
         mutableConfig.brightness = 1.0f;
         mutableConfig.srgbCorrect = true;
@@ -1104,7 +1099,6 @@ int main() {
         mutableConfig.stageCount = savedStageCount;
         mutableConfig.stages[0] = savedStage0;
         mutableConfig.stages[1] = savedStage1;
-        mutableConfig.stages[2] = savedStage2;
         mutableConfig.gamma = savedGamma;
         mutableConfig.brightness = savedBrightness;
         mutableConfig.srgbCorrect = savedSrgb;
@@ -1156,6 +1150,109 @@ int main() {
         mutableConfig.brightness = savedBrightness;
         mutableConfig.srgbCorrect = savedSrgb;
         mutableConfig.fxIndicator = savedFxIndicator;
+    }
+
+    // --- the resolve averages LINEAR light, not encoded values ---
+    //
+    // The whole ordering decision in one number. Black against white, resolved 2:1:
+    //   averaging encoded values -> 128
+    //   averaging light          -> decode to 0 and 1, average to 0.5, encode -> 188
+    // A 60-point gap, far outside any rounding argument.
+    //
+    // Run twice: once with a chain ending in a Linear stage, once ending in a Display stage.
+    // The second is the shipped effect= line's shape (it ends '... dither, gamma') and is the
+    // only one that catches a missing decode-before-resolve.
+    //
+    // fxIndicator is deliberately NOT forced off here, unlike the two identity cases above, and
+    // that is a checked decision rather than an oversight: the badge is a 45x33 plate 8 texels
+    // from the top-right corner of the 512x512 pre-resolve image, so after the 2:1 halving it
+    // occupies rows 235-252 of the 256-row result. The row sampled below is row 128. The two
+    // cannot meet, and these cases measure a mean rather than comparing against inputPixels.
+    struct ResolveCase { EffectKind lastStage; const char* label; };
+    const ResolveCase resolveCases[] = {
+        {EffectKind::Invert,  "chain ending Linear"},
+        {EffectKind::Gamma,   "chain ending Display"},
+    };
+
+    for (const ResolveCase& rc : resolveCases) {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        EffectKind savedStage1 = mutableConfig.stages[1];
+        int savedRenderWidth = mutableConfig.renderWidth;
+        int savedRenderHeight = mutableConfig.renderHeight;
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+
+        // Two stages, both no-ops, so the only thing shaping the result is the resolve.
+        // invert+invert composes to identity; gamma at 1/1 is documented to be exact.
+        mutableConfig.stageCount = 2;
+        mutableConfig.stages[0] = EffectKind::Invert;
+        mutableConfig.stages[1] = rc.lastStage == EffectKind::Invert ? EffectKind::Invert
+                                                                     : EffectKind::Gamma;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        if (Check(IsSupersampleActive(), "linear resolve: supersampling armed")) {
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // One-pixel-wide alternating black and white columns in the render target. At 2:1
+            // every destination pixel covers exactly one black and one white texel.
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            for (int x = 1; x < mutableConfig.renderWidth; x += 2) {
+                pGlScissor(x, 0, 1, mutableConfig.renderHeight);
+                pGlClear(GL_COLOR_BUFFER_BIT);
+            }
+            pGlDisable(GL_SCISSOR_TEST);
+
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+
+            std::vector<unsigned char> out((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+
+            long long total = 0;
+            int counted = 0;
+            for (int x = 4; x < width - 4; ++x) {
+                total += out[((size_t)(height / 2) * width + x) * 4];
+                ++counted;
+            }
+            int mean = (int)(total / counted);
+            char what[200];
+            snprintf(what, sizeof(what),
+                     "linear resolve (%s): black against white resolves to ~188 (light), "
+                     "not ~128 (encoded values)", rc.label);
+            printf("linear resolve (%s): middle row mean = %d\n", rc.label, mean);
+            ok = Check(mean >= 170 && mean <= 205, what) && ok;
+        }
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.stages[1] = savedStage1;
+        mutableConfig.renderWidth = savedRenderWidth;
+        mutableConfig.renderHeight = savedRenderHeight;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
     }
 
     // --- The same end-to-end resolve, beside the empty-chain case above, but with a NON-EMPTY
