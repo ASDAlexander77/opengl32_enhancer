@@ -352,6 +352,60 @@ bool CheckShouldSkipEffectChain() {
     return allMatched;
 }
 
+// The same treatment for ShouldSkipAllWork() (post_effects.h), the EARLIER of ApplySelectedEffect's
+// two early returns - and the one that still had no supersampling term at all after
+// ShouldSkipEffectChain got one, so effect=none + frameDumpKey=0 + renderWidth/renderHeight was
+// still a black screen. Sixteen combinations of four booleans, all written out.
+//
+// Only the all-off row skips: a frame dump key, a window size override, a non-empty chain and an
+// armed render target are each independently a reason to go on.
+bool CheckShouldSkipAllWork() {
+    struct Expectation {
+        bool stageCountZero;
+        bool frameDumpKeyZero;
+        bool windowSizeOverrideActive;
+        bool supersampleActive;
+        bool skip;
+    };
+    const Expectation kExpected[] = {
+        {true,  true,  false, false, true},   // nothing configured at all - the only skip
+        {true,  true,  false, true,  false},  // the black-screen case this fix is about
+        {true,  true,  true,  false, false},
+        {true,  true,  true,  true,  false},
+        {true,  false, false, false, false},
+        {true,  false, false, true,  false},
+        {true,  false, true,  false, false},
+        {true,  false, true,  true,  false},
+        {false, true,  false, false, false},
+        {false, true,  false, true,  false},
+        {false, true,  true,  false, false},
+        {false, true,  true,  true,  false},
+        {false, false, false, false, false},
+        {false, false, false, true,  false},
+        {false, false, true,  false, false},
+        {false, false, true,  true,  false},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        int stageCount = kExpected[i].stageCountZero ? 0 : 1;
+        int frameDumpKey = kExpected[i].frameDumpKeyZero ? 0 : 0x7B;
+        bool actual = ShouldSkipAllWork(stageCount, frameDumpKey,
+                                        kExpected[i].windowSizeOverrideActive,
+                                        kExpected[i].supersampleActive);
+        char what[192];
+        snprintf(what, sizeof(what),
+                 "ShouldSkipAllWork(stageCount %d, frameDumpKey 0x%02X, windowOverride %s, "
+                 "supersampling %s) == %s",
+                 stageCount, frameDumpKey,
+                 kExpected[i].windowSizeOverrideActive ? "on" : "off",
+                 kExpected[i].supersampleActive ? "on" : "off",
+                 kExpected[i].skip ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].skip, what) && allMatched;
+    }
+    return allMatched;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -438,6 +492,7 @@ int main() {
     ok = CheckWorldCaptureStageSet() && ok;
     ok = CheckAnyUpscaleStageListed() && ok;
     ok = CheckShouldSkipEffectChain() && ok;
+    ok = CheckShouldSkipAllWork() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
@@ -557,10 +612,19 @@ int main() {
         int savedStageCount = mutableConfig.stageCount;
         int savedRenderWidth = mutableConfig.renderWidth;
         int savedRenderHeight = mutableConfig.renderHeight;
+        int savedFrameDumpKey = mutableConfig.frameDumpKey;
 
         mutableConfig.stageCount = 0;
         mutableConfig.renderWidth = width * 2;
         mutableConfig.renderHeight = height * 2;
+        // Explicitly zero, and this is the point of the case rather than an incidental tidy-up.
+        // The shipped ini leaves frameDumpKey at 0x7B, and inheriting that non-zero value was
+        // enough on its own to carry this test past ApplySelectedEffect's FIRST early return -
+        // so the return that had no supersampling term at all stayed green while shipping a
+        // black screen for exactly this configuration (effect=none, no frame-dump key, no
+        // window override, a render target armed). With it zeroed, the presence assertion below
+        // is what stands between that term and a regression.
+        mutableConfig.frameDumpKey = 0;
 
         // The same arming sequence wrapper.cpp's hooks perform every frame - see
         // render_target.h's header comment. NotifyGameViewport records the game's own
@@ -612,6 +676,17 @@ int main() {
             gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
             pGlClear(GL_COLOR_BUFFER_BIT);
+
+            // The frame's LAST viewport is deliberately not the full-frame one. Real engines end
+            // a frame on whatever sub-rectangle they drew last (a HUD element, a status bar, a
+            // pillarboxed view), and render_target.h only ever claimed that the FIRST viewport of
+            // a frame is the full-frame one. ApplySelectedEffect used to take the size of what
+            // the game drew from GL_VIEWPORT at swap, which quietly assumed the last one as well,
+            // so it would capture, size its pipeline for and present this quarter-sized rectangle
+            // as though it were the whole image. It takes that size from GetRenderTargetSize()
+            // instead - known rather than inferred - so all three assertions below hold with this
+            // sub-viewport in force exactly as they did without it.
+            pGlViewport(0, 0, mutableConfig.renderWidth / 4, mutableConfig.renderHeight / 4);
 
             ApplySelectedEffect(hdc);
             ok = Check(gl.glGetError() == 0,
@@ -685,6 +760,43 @@ int main() {
             ok = Check(seamIsIntermediate,
                        "end-to-end resolve: filter - the shrink averaged the seam rather than "
                        "point-sampling one side of it") && ok;
+
+            // FALLBACK DESTINATION: the same frame again with a null HDC, which is the one way
+            // to make GetWindowClientSize() fail from here (WindowFromDC(nullptr) is NULL) -
+            // the real-world equivalent being a window that has gone away between the game's
+            // draw and this swap. hdc is the only thing ApplySelectedEffect uses it for, so
+            // nothing else about the frame changes.
+            //
+            // The fallback used to be nativeWidth/nativeHeight, which on a supersampled frame is
+            // the RENDER TARGET's size - larger than the window - so the present blit became a
+            // 1:1 copy of an oversized image and the window showed an unscaled crop of its
+            // top-left corner. That is the same cropped-corner failure the destination-rectangle
+            // assertion above describes, arrived at from the other direction. The game's own
+            // full-frame viewport is the right stand-in, and it is what this asserts: the far
+            // corner is still white.
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(nullptr);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (no client size): ApplySelectedEffect() left no GL "
+                       "error") && ok;
+
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, resolvedPixels.data());
+
+            unsigned char fallbackFarPixel[4];
+            sampleAt(width - 5, height - 5, fallbackFarPixel);
+            bool fallbackFarIsWhite = fallbackFarPixel[0] > 200 && fallbackFarPixel[1] > 200 &&
+                                       fallbackFarPixel[2] > 200;
+            printf("end-to-end resolve (no client size): far-corner pixel rgb = %d,%d,%d "
+                   "(expected white)\n", fallbackFarPixel[0], fallbackFarPixel[1],
+                   fallbackFarPixel[2]);
+            ok = Check(fallbackFarIsWhite,
+                       "end-to-end resolve (no client size): an unavailable window size falls "
+                       "back to the game's own viewport, not to the supersampled size") && ok;
         }
 
         // Restore what this block changed so every scenario below runs exactly as it did
@@ -692,6 +804,7 @@ int main() {
         mutableConfig.stageCount = savedStageCount;
         mutableConfig.renderWidth = savedRenderWidth;
         mutableConfig.renderHeight = savedRenderHeight;
+        mutableConfig.frameDumpKey = savedFrameDumpKey;
         ResetRenderTargetState();
         pGlViewport(0, 0, width, height);
     }

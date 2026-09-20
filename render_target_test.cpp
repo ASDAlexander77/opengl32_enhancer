@@ -105,15 +105,59 @@ bool TakesTheFirstViewportOfTheFrameAsReference() {
                  "a later viewport in the same frame does not become the reference");
 }
 
+// The ORDER here is the whole test. wrapper.cpp's wglSwapBuffers hook calls
+// NotifyFrameBoundary() and ArmSupersampleForFrame() together, and the frame's first
+// glViewport - and therefore NotifyGameViewport() - only arrives afterwards, inside the frame
+// that was just armed. An earlier version of this test called NotifyGameViewport first, which
+// is the one order production never produces, and it is why it could not see that the mode-
+// change frame was armed against the old reference and would have scaled against the new one.
 bool RelatchesAfterAVideoModeChange() {
     ArmWithReference(3200, 2400, 640, 480);
+
+    // The mode-change frame: armed against 640x480, then told the game is now 1600x1200. The
+    // latch is revoked rather than honoured against a reference it was never validated with.
     NotifyFrameBoundary();
-    NotifyGameViewport(0, 0, 1600, 1200);        // the game changed mode
     ArmSupersampleForFrame(true);
+    NotifyGameViewport(0, 0, 1600, 1200);        // the game changed mode
+    int mx = 0, my = 0, mw = 1600, mh = 1200;
+    ScaleGameRect(mx, my, mw, mh);
+    bool revoked = Check(!IsSupersampleActive() && mw == 1600 && mh == 1200,
+                         "the mode-change frame itself disarms rather than scaling by a "
+                         "reference it was not armed against");
+
+    // The NEXT frame arms against the new reference in the ordinary way, and its first viewport
+    // matches the snapshot, so the latch stands.
+    NotifyFrameBoundary();
+    ArmSupersampleForFrame(true);
+    NotifyGameViewport(0, 0, 1600, 1200);
     int x = 0, y = 0, w = 1600, h = 1200;
     ScaleGameRect(x, y, w, h);
     return Check(w == 3200 && h == 2400,
-                 "a new frame's first viewport re-latches the reference");
+                 "the frame after a mode change re-latches against the new reference") && revoked;
+}
+
+// The reason revocation exists rather than being a tidy-up. A mode change to a size ABOVE the
+// configured target, scaled by the stale 640x480 reference, would take a 4000x3000 viewport to
+// 20000x15000; scaled by the new reference it would take it DOWN to 3200x2400, which is
+// rendering below native - the one thing this feature refuses outright (see
+// RefusesATargetNarrowerThanTheGameViewport). Neither is allowed to happen: the frame disarms.
+bool DisarmsWhenTheModeChangesAboveTheConfiguredTarget() {
+    ArmWithReference(3200, 2400, 640, 480);
+    NotifyFrameBoundary();
+    ArmSupersampleForFrame(true);
+    NotifyGameViewport(0, 0, 4000, 3000);        // a mode change past the configured target
+    int x = 0, y = 0, w = 4000, h = 3000;
+    ScaleGameRect(x, y, w, h);
+    bool disarmed = Check(!IsSupersampleActive() && w == 4000 && h == 3000,
+                          "a mode change above the configured target disarms rather than "
+                          "scaling by a stale reference");
+
+    // And the frame after it refuses to arm at all, because 3200x2400 is now below the game's
+    // own resolution.
+    NotifyFrameBoundary();
+    ArmSupersampleForFrame(true);
+    return Check(!IsSupersampleActive(),
+                 "and the frame after it refuses to arm against the larger new mode") && disarmed;
 }
 
 // Rendering SMALLER than the game asked for is a different feature wearing this one's name.
@@ -183,6 +227,7 @@ int main() {
     DoesNotArmWhenTheTargetIsNotReady();
     TakesTheFirstViewportOfTheFrameAsReference();
     RelatchesAfterAVideoModeChange();
+    DisarmsWhenTheModeChangesAboveTheConfiguredTarget();
     RefusesATargetNarrowerThanTheGameViewport();
     RefusesATargetShorterThanTheGameViewport();
     RefusesWhenOnlyOneDimensionIsSet();

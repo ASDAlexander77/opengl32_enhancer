@@ -422,6 +422,18 @@ bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersample
     return stageCount == 0 && !hasRealUpscale && !supersampleActive;
 }
 
+// See post_effects.h. Same reasoning as ShouldSkipEffectChain's supersampling term, one return
+// earlier: with a render target armed, this function's present blit is the only thing that puts
+// the offscreen image on the screen, so returning here shows the player nothing at all. That
+// made effect=none + frameDumpKey=0 + renderWidth/renderHeight a black screen, and the
+// end-to-end test could not see it because it inherited the shipped ini's frameDumpKey=0x7B and
+// so never reached this return with all three of the other terms false.
+bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverrideActive,
+                       bool supersampleActive) {
+    return stageCount == 0 && frameDumpKey == 0 && !windowSizeOverrideActive &&
+           !supersampleActive;
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -437,8 +449,13 @@ void ApplySelectedEffect(void* hdc) {
     // in the corner of a bigger window. Reaching the loader on a GPU that can't support the
     // effects is no longer a per-frame log: it resolves at most once per context (see
     // gl_loader.cpp's GetGlComputeApi).
+    // Supersampling being armed also counts as something to do, for exactly the reason
+    // ShouldSkipEffectChain() carries further down - the present blit below is the ONLY thing
+    // that moves the offscreen render target onto the display. See ShouldSkipAllWork() in
+    // post_effects.h.
     bool windowSizeOverrideActive = config.windowWidth > 0 && config.windowHeight > 0;
-    if (config.stageCount == 0 && config.frameDumpKey == 0 && !windowSizeOverrideActive) {
+    if (ShouldSkipAllWork(config.stageCount, config.frameDumpKey, windowSizeOverrideActive,
+                          IsSupersampleActive())) {
         return;
     }
 
@@ -475,6 +492,18 @@ void ApplySelectedEffect(void* hdc) {
         return;
     }
 
+    // With supersampling armed, what the game drew into is the offscreen render target, and its
+    // size is known exactly rather than inferred. Taking it from GL_VIEWPORT instead would
+    // assume the frame's LAST viewport is the full-frame one - a second empirical assumption on
+    // top of render_target.h's documented first-viewport one, and one nothing checks: a game
+    // that leaves a sub-viewport set at swap would have its frame captured, sized and presented
+    // as if that sub-viewport were the whole image. Everything downstream - the frame dump, the
+    // colour and depth captures, the pipeline texture sizes and the present blit's source
+    // rectangle - is sized from these two numbers, so setting them here fixes all of it at once.
+    if (IsSupersampleActive()) {
+        GetRenderTargetSize(nativeWidth, nativeHeight);
+    }
+
     // Before the pipeline runs, so the dump is the game's own unprocessed frame - which is what
     // the editor needs in order to apply stages to it itself. Always at the native resolution:
     // a dump is meant to capture exactly what the game drew, independent of any window resize.
@@ -489,12 +518,25 @@ void ApplySelectedEffect(void* hdc) {
     // already rendered at full size (see fsr.h's header comment). Falls back to the native size
     // (no mismatch, no behavior change from before this feature existed) if the window's size
     // can't be determined.
-    int dstWidth = nativeWidth;
-    int dstHeight = nativeHeight;
+    //
+    // The fallback is NOT nativeWidth/nativeHeight when supersampling is armed: those are then
+    // the render target's size, which is deliberately LARGER than the window, so a failed query
+    // would make the present blit a 1:1 copy of an oversized image into a smaller window - the
+    // cropped-corner failure that blit's own comment warns about. The game's own full-frame
+    // viewport is the right stand-in there, because that is what the window would be showing if
+    // this feature were off. GetReferenceViewport leaves its arguments alone when no reference
+    // has been latched yet, as does GetWindowClientSize when it fails.
+    int fallbackWidth = nativeWidth;
+    int fallbackHeight = nativeHeight;
+    if (IsSupersampleActive()) {
+        GetReferenceViewport(fallbackWidth, fallbackHeight);
+    }
+    int dstWidth = fallbackWidth;
+    int dstHeight = fallbackHeight;
     GetWindowClientSize(hdc, dstWidth, dstHeight);
     if (dstWidth <= 0 || dstHeight <= 0) {
-        dstWidth = nativeWidth;
-        dstHeight = nativeHeight;
+        dstWidth = fallbackWidth;
+        dstHeight = fallbackHeight;
     }
 
     // Deliberately strict about what counts as "the game is rendering smaller than its window":
@@ -515,16 +557,27 @@ void ApplySelectedEffect(void* hdc) {
     bool hasRealUpscale = viewportX == 0 && viewportY == 0 &&
                            dstWidth > nativeWidth && dstHeight > nativeHeight;
 
-    // Supersampling already renders above native and downsamples on present (Task 5), so an
-    // upscale stage still listed in effect= has nothing left to reconstruct: its source and
-    // destination are the same size by the time it would run, and it falls back to its
-    // same-size behaviour rather than doing anything harmful - this is purely informational.
+    // Supersampling usually supersedes an upscale stage still listed in effect=: it already
+    // renders above the window and downsamples on present, so that stage's source and
+    // destination are the same size by the time it would run and it falls back to its same-size
+    // behaviour. USUALLY, not always - renderWidth can be set above the game's own resolution
+    // but still below the window's (a 640x480 game, renderWidth=960, a 1920-wide window), and
+    // then the target really is smaller than the window and the stage really does reconstruct.
+    // hasRealUpscale is precisely that distinction, so it decides which of these two is true
+    // rather than the message asserting the first unconditionally. Purely informational either
+    // way; nothing about the chain changes here.
     if (IsSupersampleActive()) {
         static bool warnedUpscalerSuperseded = false;
         if (!warnedUpscalerSuperseded && AnyUpscaleStageListed(config)) {
-            printf("[opengl32_enh_cpp] post_effects: supersampling is active, so the upscale "
-                   "stage in effect= has nothing left to reconstruct and falls back to its "
-                   "same-size behaviour\n");
+            if (hasRealUpscale) {
+                printf("[opengl32_enh_cpp] post_effects: supersampling is active at %dx%d, but "
+                       "the window is %dx%d - the upscale stage in effect= still reconstructs "
+                       "the difference\n", nativeWidth, nativeHeight, dstWidth, dstHeight);
+            } else {
+                printf("[opengl32_enh_cpp] post_effects: supersampling is active, so the upscale "
+                       "stage in effect= has nothing left to reconstruct and falls back to its "
+                       "same-size behaviour\n");
+            }
             warnedUpscalerSuperseded = true;
         }
     }
@@ -1059,6 +1112,14 @@ void ApplySelectedEffect(void* hdc) {
     // whichever resolution it ended up at - curWidth/curHeight is dstWidth/dstHeight once a real
     // upscale (explicit or the implicit stretch above) has run, or nativeWidth/nativeHeight
     // (== dstWidth/dstHeight when there's no real upscale in play) if it never did.
+    //
+    // The source rectangle is curWidth/curHeight and not GetRenderTargetSize() even on a
+    // supersampled frame, and that is not the GL_VIEWPORT assumption it looks like:
+    // nativeWidth/nativeHeight IS the render target's size on such a frame, set from
+    // GetRenderTargetSize() at the top of this function, and curWidth/curHeight tracks the image
+    // from there. Reading the target's size again here would be wrong in the one case where the
+    // two legitimately differ - supersampling armed AND the target still smaller than the
+    // window, where an upscale stage has moved the image to dstWidth/dstHeight.
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pair[cur], 0);
     gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);

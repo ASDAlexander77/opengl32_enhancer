@@ -573,6 +573,27 @@ cost is real - 2x on each axis means every stage in `effect=` does four times
 the work, and the game takes noticeably longer to load because its loading
 screen renders frames too.
 
+Two limitations are accepted rather than fixed, and both are real:
+
+**Pixel-unit GL state is not scaled.** "The game believes nothing has changed"
+holds for the viewport and the scissor rectangle and does not hold for anything
+measured in pixels. `glPointSize` and `glLineWidth` are forwarded exactly as the
+game sets them, so at 2x an id Tech 2 `R_DrawParticles` draws particles at half
+their intended size relative to the frame around them, and the same applies to
+wireframe and debug line widths. The engine's own screenshot command is affected
+for the same reason - it reads back the number of pixels it believes the frame
+is, and so captures a corner of a frame that is now larger than that. Use the
+`frameDumpKey` dump instead, which is sized from the real render target.
+
+**Depth runs at lower precision.** The offscreen buffer's depth attachment is
+`DEPTH_COMPONENT24`, while the pixel format the game itself chose is typically
+32-bit depth, so depth testing is less precise with this on than with it off and
+a scene already close to z-fighting can start doing it. It has to stay 24:
+`glBlitFramebuffer` requires matching depth formats on both sides, and the
+depth texture the depth-consuming stages read is 24. The trade is more colour
+samples for less depth precision; flickering along coplanar surfaces that
+appears only with this on is this, and turning it off is the fix.
+
 **Status: runs cleanly in Anachronox, not validated by eye.** A 1280x960 render
 over a 640x480 game was run with the full twelve-stage chain: the target
 allocates, the world pass runs, sixteen auto-mipmap chains generate, and there

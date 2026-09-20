@@ -22,6 +22,19 @@ bool g_expectFirstViewport = false;
 // so the viewport hook and the capture path cannot disagree within a frame.
 bool g_armed = false;
 
+// The reference ArmSupersampleForFrame validated this frame's latch against, snapshotted at the
+// moment of that decision. ScaleGameRect divides by this and never by g_refWidth/g_refHeight:
+// the live reference is rewritten by the frame's first viewport, which happens AFTER the latch
+// is taken, so on a mode-change frame the two disagree. See render_target.h's amendment.
+int g_armedRefWidth = 0;
+int g_armedRefHeight = 0;
+
+// Defined with the rest of the GL-touching state further down; declared here because
+// NotifyGameViewport revokes the latch and the binding has to go with it, and because
+// ResetRenderTargetState has to drop the record of it.
+void ReleaseRenderTargetBinding();
+void ForgetRenderTargetBinding();
+
 // One edge, scaled. Both edges of a rectangle go through this, and the size is their difference,
 // so adjacent rectangles abut exactly however fractional the factor is.
 int ScaleEdge(int edge, int numerator, int denominator) {
@@ -50,6 +63,22 @@ void NotifyGameViewport(int x, int y, int width, int height) {
         return;
     }
     g_expectFirstViewport = false;
+
+    // Revocation - see render_target.h's amendment to the invariant. This frame's latch was
+    // decided before this viewport existed, against the PREVIOUS frame's reference. If the game
+    // has changed mode since, that reference no longer describes what it is drawing, and the
+    // choice is between scaling by a reference we never validated (which for a mode change to a
+    // size above the configured target renders BELOW native - the one thing this feature
+    // refuses) and not scaling at all. We do not scale at all: disarm, and put the game back on
+    // framebuffer 0 for the rest of this frame, because the viewport and the binding have to
+    // move together or the player sees a corner of the frame blown up.
+    if (g_armed && (width != g_armedRefWidth || height != g_armedRefHeight)) {
+        g_armed = false;
+        g_armedRefWidth = 0;
+        g_armedRefHeight = 0;
+        ReleaseRenderTargetBinding();
+    }
+
     if (width <= 0 || height <= 0) {
         return;
     }
@@ -66,6 +95,10 @@ void ArmSupersampleForFrame(bool targetReady) {
     g_armed = targetReady &&
               g_haveRef &&
               config.renderWidth >= g_refWidth && config.renderHeight >= g_refHeight;
+    // The reference that decision was made from, frozen for the rest of the frame. Zeroed when
+    // not armed so a stale snapshot can never be divided by.
+    g_armedRefWidth = g_armed ? g_refWidth : 0;
+    g_armedRefHeight = g_armed ? g_refHeight : 0;
 }
 
 bool IsSupersampleActive() {
@@ -77,10 +110,12 @@ void ScaleGameRect(int& x, int& y, int& width, int& height) {
         return;
     }
     const AnaxConfig& config = GetAnaxConfig();
-    int left = ScaleEdge(x, config.renderWidth, g_refWidth);
-    int right = ScaleEdge(x + width, config.renderWidth, g_refWidth);
-    int bottom = ScaleEdge(y, config.renderHeight, g_refHeight);
-    int top = ScaleEdge(y + height, config.renderHeight, g_refHeight);
+    // g_armedRef*, not g_ref*: the denominator has to be the reference this frame's arming
+    // decision was validated against, not whatever the live reference has since become.
+    int left = ScaleEdge(x, config.renderWidth, g_armedRefWidth);
+    int right = ScaleEdge(x + width, config.renderWidth, g_armedRefWidth);
+    int bottom = ScaleEdge(y, config.renderHeight, g_armedRefHeight);
+    int top = ScaleEdge(y + height, config.renderHeight, g_armedRefHeight);
     x = left;
     width = right - left;
     y = bottom;
@@ -93,6 +128,11 @@ void ResetRenderTargetState() {
     g_haveRef = false;
     g_expectFirstViewport = false;
     g_armed = false;
+    g_armedRefWidth = 0;
+    g_armedRefHeight = 0;
+    // Forgotten, not acted on - see render_target.h. This is a test hook and must not issue GL
+    // calls; a test that cares about the binding sets it explicitly after calling this.
+    ForgetRenderTargetBinding();
 }
 
 namespace {
@@ -129,6 +169,11 @@ int g_failedHeight = 0;
 bool g_failedFloat = false;
 bool g_haveFailed = false;
 
+// Whether THIS module currently has the offscreen framebuffer bound. The whole point is that
+// the off path stays a true no-op: a proxy that has never armed must not issue a
+// glBindFramebuffer at all, because the binding it would overwrite is the game's own.
+bool g_targetBound = false;
+
 void DestroyRenderTarget(const GlComputeApi& gl) {
     if (g_fbo != 0) {
         gl.glDeleteFramebuffers(1, &g_fbo);
@@ -141,6 +186,23 @@ void DestroyRenderTarget(const GlComputeApi& gl) {
     }
     g_fbo = g_colorTex = g_depthTex = 0;
     g_targetWidth = g_targetHeight = 0;
+}
+
+// The armed -> unarmed transition, in one place, because two callers need it: BindRenderTarget
+// on a frame that is no longer armed, and NotifyGameViewport when it revokes the latch
+// mid-frame. Exactly one glBindFramebuffer(0) per transition, and none at all if we never bound
+// anything.
+void ReleaseRenderTargetBinding() {
+    if (!g_targetBound) {
+        return;
+    }
+    g_targetBound = false;
+    GetGlComputeApi().glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// Drops the record without touching GL - only ResetRenderTargetState, the test hook, wants this.
+void ForgetRenderTargetBinding() {
+    g_targetBound = false;
 }
 
 }  // namespace
@@ -268,8 +330,14 @@ bool EnsureRenderTarget() {
 
 void BindRenderTarget() {
     if (!IsSupersampleActive() || g_fbo == 0) {
+        // Not armed. If we bound the target on an earlier frame it is STILL bound - nothing
+        // else takes it down, and post_effects.cpp's state restore puts back whatever it found
+        // at entry, which is our framebuffer - so the game would keep rendering into a buffer
+        // nothing presents while every capture site read framebuffer 0.
+        ReleaseRenderTargetBinding();
         return;
     }
+    g_targetBound = true;
     GetGlComputeApi().glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
 }
 

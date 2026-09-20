@@ -185,6 +185,60 @@ int main() {
               "BindRenderTarget leaves the binding alone when the frame is not armed");
     }
 
+    // --- disarming after having been armed puts framebuffer 0 back ---
+    // Nothing else takes the target down: post_effects.cpp saves the framebuffer bound when it
+    // is entered and restores it on the way out, which on a supersampled frame is OUR
+    // framebuffer. So once armed, a later unarmed frame that only skipped the bind would leave
+    // the game drawing into the offscreen target forever while every capture site read
+    // framebuffer 0 - a black window, and the failure direction this feature promises never to
+    // take.
+    {
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        BindRenderTarget();
+
+        int boundWhileArmed = -1;
+        gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundWhileArmed);
+        Check(boundWhileArmed != 0 && (unsigned int)boundWhileArmed == GetGameFramebuffer(),
+              "an armed frame binds the offscreen target");
+
+        // The next frame is not armed - the target failed to rebuild, the config changed, a
+        // mode change revoked the latch. Same call, opposite duty.
+        ArmSupersampleForFrame(false);
+        BindRenderTarget();
+
+        int boundAfterDisarm = -1;
+        gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundAfterDisarm);
+        Check(boundAfterDisarm == 0,
+              "disarming after having been armed puts framebuffer 0 back");
+    }
+
+    // --- and the never-armed path is still a true no-op ---
+    // The obvious fix for the case above - an unconditional glBindFramebuffer(0) whenever not
+    // armed - would break the promise that this feature switched off changes nothing: the
+    // binding it overwrote would be the game's own. So the restore must fire exactly on the
+    // armed->unarmed transition, not on every unarmed frame.
+    {
+        ResetRenderTargetState();
+
+        unsigned int scratchFbo = 0;
+        gl.glGenFramebuffers(1, &scratchFbo);
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, scratchFbo);
+
+        BindRenderTarget();                      // never armed, never bound: must do nothing
+
+        int boundAfter = -1;
+        gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundAfter);
+        Check((unsigned int)boundAfter == scratchFbo,
+              "BindRenderTarget leaves a framebuffer the game bound alone when this module has "
+              "never armed");
+
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        gl.glDeleteFramebuffers(1, &scratchFbo);
+    }
+
     // --- a size the driver cannot allocate degrades to today's rendering ---
     {
         ResetRenderTargetState();

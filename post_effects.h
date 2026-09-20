@@ -64,3 +64,12 @@ bool AnyUpscaleStageListed(const AnaxConfig& config);
 // there shows the player nothing at all. Inline, that term was pinned by no test - the suite
 // stayed green with it deleted.
 bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersampleActive);
+
+// Whether ApplySelectedEffect can return before it touches GL at all - the earlier of the two
+// early returns, over config alone plus the supersampling latch. Extracted for the same reason
+// as ShouldSkipEffectChain, and after the same bug: the supersampling term was missing here
+// entirely, so effect=none with no frame-dump key and no window override was a black screen
+// whenever a render target was armed. A predicate is a thing a truth table can pin; an inline
+// condition, as this one showed twice, is not.
+bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverrideActive,
+                       bool supersampleActive);
