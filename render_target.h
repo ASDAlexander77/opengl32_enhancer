@@ -88,6 +88,22 @@ void ResetRenderTargetState();
 // size exceeds what the driver allows, or when the framebuffer is not complete - and a false
 // return is what keeps ArmSupersampleForFrame from arming, so a failure here degrades to exactly
 // today's rendering rather than to a broken image.
+//
+// KNOWN LIMITATION - no stencil. The target carries colour and depth only, and never asks the
+// game's own pixel format what it wanted. A game that requested cStencilBits and uses stencil
+// gets a framebuffer without one, so every stencil test passes: a stencil-shadow pass loses its
+// mask and its darkening quad covers the whole frame, and a stencil-masked mirror or portal
+// draws over everything. There is no partial failure and nothing logs it - the frame is simply
+// wrong while the feature is on.
+//
+// Not fixed here because fixing it properly is wider than this attachment. Switching to a
+// packed GL_DEPTH24_STENCIL8 makes this framebuffer's depth format disagree with the
+// GL_DEPTH_COMPONENT24 texture post_effects.cpp blits the game's depth INTO, and a depth blit
+// between mismatched formats is GL_INVALID_OPERATION - so the depth-consuming half of the post
+// chain would have to move to the packed format in the same change. That is a real regression
+// risk across every depth stage, traded against a fault no available testbed can reproduce:
+// Anachronox requests stencil=0 (see the Tier 3 spike in docs/enhancement-opportunities.md),
+// which is why this shipped unnoticed and why it is documented rather than guessed at.
 bool EnsureRenderTarget();
 
 // Binds the offscreen framebuffer so the game's subsequent drawing lands in it. Called from the
@@ -113,6 +129,12 @@ unsigned int GetGameReadBuffer();
 // The offscreen framebuffer's size, for the present blit's source rectangle.
 void GetRenderTargetSize(int& width, int& height);
 
-// The game's own full-frame viewport, as latched by NotifyGameViewport. Used for the aspect
-// check below; leaves its arguments alone when no reference has been seen yet.
+// The game's own full-frame viewport, as latched by NotifyGameViewport. Leaves its arguments
+// alone when no reference has been seen yet, so a caller passes its own fallback in and gets it
+// back untouched.
+//
+// post_effects.cpp is the consumer: it is the size the present blit targets when the real
+// window's client size cannot be obtained, which on a supersampled frame must NOT be the render
+// target's own (larger) size. The aspect-ratio warning that used to be the other consumer now
+// reads the reference directly, from the arming path - see ReportSupersampleVerdict.
 void GetReferenceViewport(int& width, int& height);

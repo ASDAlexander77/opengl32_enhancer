@@ -573,6 +573,18 @@ cost is real - 2x on each axis means every stage in `effect=` does four times
 the work, and the game takes noticeably longer to load because its loading
 screen renders frames too.
 
+The downsample on present is a true box average at any ratio, not just at 2x:
+it halves the image exactly as many times as it can before the final blit, and
+each exact halving averages a full 2x2 of source pixels. Ratios above 2x are
+therefore worth what they cost. (Before this was fixed the resolve was a single
+bilinear tap, which reads 4 source pixels no matter how many were rendered - at
+4x that is 4 of every 16, so most of the extra fill rate bought nothing.)
+
+Two limitations worth knowing before turning it on: depth runs at 24-bit
+precision rather than the game's usual 32, and there is **no stencil
+attachment** - in a game that uses stencil, shadow and mirror masks will be
+wrong while this is on. `opengl32_enhancer.ini` has the details of both.
+
 Two limitations are accepted rather than fixed, and both are real:
 
 **Pixel-unit GL state is not scaled.** "The game believes nothing has changed"
@@ -597,15 +609,19 @@ appears only with this on is this, and turning it off is the fix.
 **Status: runs cleanly in Anachronox, not validated by eye.** A 1280x960 render
 over a 640x480 game was run with the full twelve-stage chain: the target
 allocates, the world pass runs, sixteen auto-mipmap chains generate, and there
-are no GL errors in steady state. Exactly one frame is dropped, when the game
-creates its second GL context and the capture briefly runs against the dead
-context's framebuffer - the fail-safe working as designed, and invisible at a
-context switch. What has NOT been checked is whether the resulting image
-actually looks right: no screenshot comparison was made and no human has
-confirmed it. The resolve is covered by GPU assertions - a two-tone seam is
-asserted to come back averaged rather than point-sampled, and the presented
-frame is asserted to fill the window rather than a corner - but neither stands
-in for looking at a real scene.
+are no GL errors in steady state. One frame goes wrong when the game creates
+its second GL context, and that frame has since been fixed: the latch taken in
+the old context no longer survives into the new one, so the frame after a
+context change renders unscaled into the new context's back buffer instead of
+scaling its viewports against a framebuffer that no longer exists. What that
+run saw as "a dropped frame" was the resulting `GL_INVALID_OPERATION`.
+
+What has NOT been checked is whether the resulting image actually looks right:
+no screenshot comparison was made and no human has confirmed it. The resolve is
+covered by GPU assertions - at 4x, a periodic pattern is asserted to come back
+carrying the average of the whole 4x4 box rather than the two pixels a single
+bilinear tap reads, and the presented frame is asserted to fill the window
+rather than a corner - but neither stands in for looking at a real scene.
 
 **Clean up noisy/grainy source, then add some punch:**
 

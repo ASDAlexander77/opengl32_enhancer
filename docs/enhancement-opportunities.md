@@ -302,12 +302,10 @@ including `fsr`):
 - No GL errors in steady state, and none of the failure modes the design feared.
 - The upscaler-superseded notice fires, confirming `fsr` and supersampling
   coexist without either silently breaking.
-- Exactly **one** frame is skipped, at the moment the game creates its second GL
+- Exactly **one** frame goes wrong, at the moment the game creates its second GL
   context: the capture runs once against a framebuffer belonging to the dead
-  context, returns `GL_INVALID_OPERATION`, and the frame is dropped. The next
-  frame rebuilds and the rest of the run is clean. That is the fail-safe
-  behaving correctly, not a defect, and a single dropped frame at a context
-  switch is invisible.
+  context and returns `GL_INVALID_OPERATION`. This was read at the time as the
+  fail-safe behaving correctly. It was not — see the correction below.
 - It is noticeably slower to reach gameplay, which is expected: at 2x on each
   axis every stage in the chain does four times the work, and the loading screen
   renders frames too.
@@ -315,6 +313,56 @@ including `fsr`):
 **What it did NOT establish: that the image looks right.** No screenshot
 comparison was made and no human confirmed the result by eye. The feature is
 verified to run without error, not verified to look correct.
+
+### Corrections found by review, fixed 2026-09-20
+
+A review of the merged branch found five defects. Three are worth carrying
+forward, because each is a case of a test that looked like it covered something
+and did not.
+
+**The resolve was a single bilinear tap, correct only at exactly 2x.** A
+shrinking `GL_LINEAR` `glBlitFramebuffer` reads four source pixels regardless of
+how many were rendered. At 2x that is the whole box and the frame resolves
+correctly; at 4x it is 4 of 16 and at 5x, 4 of 25 — so above 2x the image still
+aliased while costing the full fill rate. Every test in the suite used a 2x
+ratio, which is the one ratio at which the bug is invisible, and the GPU test
+named "the downsample averages rather than point-samples" used a two-tone seam
+at the centre — the exact place where a tap and a box agree. The fix halves
+exactly as many times as it can before the final blit (each exact halving *is* a
+2x2 box), and the new test paints every fourth column white at 4x, where a box
+average returns 64 and a single tap returns 0. Measured before the fix: 0.
+After: 64, flat across the row.
+
+**The supersample latch outlived the GL context that took it.** The latch is a
+statement about a framebuffer name, and names are per-context. On a
+`vid_restart` the frame *after* the change was still armed, so its viewports
+were scaled up while the binding — belonging to the dead context — had not
+travelled, leaving the game drawing a blown-up corner into the new context's
+framebuffer 0. The in-game run above saw this as "one dropped frame" and the
+`GL_INVALID_OPERATION` it logged; that reading was wrong. The latch now expires
+with the context generation, which is the same rule every other cached
+GL-derived value in this DLL already follows.
+
+**Two diagnostics could never fire.** The aspect-ratio warning and the
+below-native refusal both lived in `EnsureRenderTarget`, which runs immediately
+after `NotifyFrameBoundary` on the first frame — before any viewport has been
+recorded — and returns at its fast path on every frame after. Neither had the
+game's size available at the only moment it executed. They have moved to the
+arming path, which is the one place that holds both numbers. The refusal in
+particular was a promise the ini and README both made and the code kept
+silently: a `renderWidth` below the game's own viewport allocated a target,
+announced "supersampling into 320x240", then declined to arm forever without
+saying why.
+
+**Not fixed: no stencil attachment.** The target carries colour and depth only
+and never consults the game's pixel format, so in a game that uses stencil every
+test passes — shadow masks and stencil-masked mirrors draw over everything.
+Fixing it means moving the whole depth-consuming half of the post chain to a
+packed `DEPTH24_STENCIL8`, because a depth blit between mismatched formats is
+`GL_INVALID_OPERATION`. That is a real regression risk across every depth stage
+traded against a fault no available testbed can reproduce — Anachronox requests
+`stencil=0`, which is why this shipped unnoticed. Documented in `render_target.h`
+and the ini rather than guessed at.
 
 ### DPI virtualisation comes first, though
 

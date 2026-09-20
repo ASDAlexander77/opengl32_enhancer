@@ -109,6 +109,13 @@ struct PipelineTextures {
     int height = 0;
     unsigned int tex[2] = {0, 0};
     unsigned int presentFbo = 0;   // reused, re-attached to whichever tex[] is final each frame
+    // The present resolve's draw framebuffer. presentFbo alone cannot serve, because a halving
+    // step is a blit BETWEEN two of these textures and that needs a read attachment and a draw
+    // attachment live at the same time. Only allocated when a resolve first needs it, so a
+    // build that never supersamples never creates it. Shares presentFbo's lifetime otherwise -
+    // neither is deleted on a size change, since an FBO is just a container for whatever is
+    // attached to it this frame.
+    unsigned int resolveFbo = 0;
 
     // EXPERIMENTAL (see depth_vignette.h). The depth attachment of whatever framebuffer the
     // game rendered into, blitted here once per frame, but only when a depth-consuming stage is actually listed - see
@@ -432,6 +439,28 @@ bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverride
                        bool supersampleActive) {
     return stageCount == 0 && frameDumpKey == 0 && !windowSizeOverrideActive &&
            !supersampleActive;
+}
+
+// See post_effects.h.
+int ResolveHalvingSteps(int srcWidth, int srcHeight, int dstWidth, int dstHeight) {
+    if (srcWidth <= 0 || srcHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return 0;
+    }
+    int steps = 0;
+    int w = srcWidth;
+    int h = srcHeight;
+    // Both axes halve together or neither does: the resolve must not change the aspect ratio
+    // partway through, and the final blit is the only step allowed to stretch.
+    //
+    // The bound is a belt-and-braces stop, not a rule: each iteration halves, so 16 would
+    // already take any representable size below any positive destination. It exists so that a
+    // future change which makes the loop body stop shrinking cannot hang the game's swap.
+    while (w / 2 >= dstWidth && h / 2 >= dstHeight && steps < 16) {
+        w /= 2;
+        h /= 2;
+        ++steps;
+    }
+    return steps;
 }
 
 void ApplySelectedEffect(void* hdc) {
@@ -1130,6 +1159,50 @@ void ApplySelectedEffect(void* hdc) {
     // from there. Reading the target's size again here would be wrong in the one case where the
     // two legitimately differ - supersampling armed AND the target still smaller than the
     // window, where an upscale stage has moved the image to dstWidth/dstHeight.
+    int presentWidth = IsSupersampleActive() ? dstWidth : curWidth;
+    int presentHeight = IsSupersampleActive() ? dstHeight : curHeight;
+
+    // THE RESOLVE, part one: bring the image to within 2x of the window by exact halvings.
+    //
+    // A single shrinking GL_LINEAR blit is ONE bilinear tap - a 2x2 box at best, and only where
+    // the destination pixel's centre happens to fall. At exactly 2x that is the whole answer;
+    // at 4x it reads 4 of every 16 source texels and at 5x, 4 of every 25, so the samples
+    // supersampling just paid 16x or 25x the fill rate to produce are thrown away and the image
+    // aliases anyway. Each halving here is itself a GL_LINEAR blit, but an EXACT 2:1 one, which
+    // is a true 2x2 box average - so N of them average a 2^N x 2^N box and the final blit below
+    // covers the remainder. See ResolveHalvingSteps in post_effects.h.
+    //
+    // Ping-pongs within `pair`, writing into the top-left sub-rectangle of the other texture:
+    // both members of a pair are the same size, and a blit's rectangles are explicit, so the
+    // shrinking image simply occupies less of an unchanged allocation each step. That is why
+    // this needs no textures of its own - only the second framebuffer, because a blit between
+    // two of them needs a read attachment and a draw attachment at once.
+    //
+    // steps is 0 whenever the source is already within 2x, which includes every frame with
+    // supersampling off - so this whole block is skipped and the present stays the single blit
+    // it has always been.
+    int steps = ResolveHalvingSteps(curWidth, curHeight, presentWidth, presentHeight);
+    if (steps > 0) {
+        if (g_pipeline.resolveFbo == 0) {
+            gl.glGenFramebuffers(1, &g_pipeline.resolveFbo);
+        }
+        for (int step = 0; step < steps; ++step) {
+            int halfWidth = curWidth / 2;
+            int halfHeight = curHeight / 2;
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, g_pipeline.presentFbo);
+            gl.glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                      pair[cur], 0);
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.resolveFbo);
+            gl.glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                      pair[1 - cur], 0);
+            gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, halfWidth, halfHeight,
+                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            cur = 1 - cur;
+            curWidth = halfWidth;
+            curHeight = halfHeight;
+        }
+    }
+
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_pipeline.presentFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pair[cur], 0);
     gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1139,11 +1212,18 @@ void ApplySelectedEffect(void* hdc) {
     // dstWidth/dstHeight is the window's client size, computed near the top of this same
     // function - NOT the game's own viewport, which is the size the image would have been
     // WITHOUT this feature. Blitting to that would put the finished frame in a corner.
-    int presentWidth = IsSupersampleActive() ? dstWidth : curWidth;
-    int presentHeight = IsSupersampleActive() ? dstHeight : curHeight;
+    // THE RESOLVE, part two: the remainder, which after the halvings above is always under 2x.
+    //
+    // The filter is chosen by comparing the rectangles rather than by asking whether
+    // supersampling is armed. Those two questions used to have the same answer and no longer
+    // do: an exact 2x, 4x or 8x ratio now arrives here already resolved to the window's size,
+    // and an interpolating filter on a 1:1 blit is at best a no-op and at worst a driver's
+    // rounding. Everything that is still shrinking - the non-power-of-two remainders - gets
+    // GL_LINEAR, exactly as before. With supersampling off this is 1:1 and therefore GL_NEAREST,
+    // which is the filter that path has always used.
+    bool exactSize = (curWidth == presentWidth && curHeight == presentHeight);
     gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, presentWidth, presentHeight,
-                         GL_COLOR_BUFFER_BIT,
-                         IsSupersampleActive() ? GL_LINEAR : GL_NEAREST);
+                         GL_COLOR_BUFFER_BIT, exactSize ? GL_NEAREST : GL_LINEAR);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {

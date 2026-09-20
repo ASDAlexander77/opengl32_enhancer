@@ -335,6 +335,55 @@ int main() {
         gl.glDeleteTextures(1, &dstTex);
     }
 
+    // --- a latch taken in one context does not survive into the next ---
+    // The frame AFTER a context change is the problem, not the frame that changes it. The latch
+    // is taken at frame N's swap, in the old context; the game then destroys that context and
+    // makes a new one, and frame N+1 draws under a latch that was validated against a context
+    // whose framebuffer names mean nothing any more. BindRenderTarget bound the old context's
+    // FBO - a binding that did not travel - so frame N+1 renders into the NEW context's
+    // framebuffer 0, at native size, while every glViewport it issues is still scaled up. That
+    // is the corner-blow-up render_target.h says the design refuses, and the size-mismatch
+    // revocation cannot catch it: the mode has not changed, only the context.
+    //
+    // Deleting the generation term from ArmedInCurrentContext() leaves every other test in this
+    // file green, because they all run in a single context.
+    {
+        ResetRenderTargetState();
+        GetMutableAnaxConfig().renderWidth = 1280;
+        GetMutableAnaxConfig().renderHeight = 960;
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        BindRenderTarget();
+        Check(IsSupersampleActive(), "the frame before the context change is armed");
+
+        // Frame N's swap: the boundary is announced and the latch for frame N+1 is taken, all
+        // still in the old context.
+        NotifyFrameBoundary();
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        Check(IsSupersampleActive(), "and frame N+1's latch is taken in the old context");
+
+        // The game destroys its context and makes another - a vid_restart, exactly what
+        // gl_context_change_test.cpp drives.
+        HGLRC second = wglCreateContext(hdc);
+        if (Check(second != nullptr && wglMakeCurrent(hdc, second),
+                  "a second GL context was created and made current")) {
+            // Frame N+1's first viewport, in the new context, at the SAME size as before - so
+            // nothing about the mode changed and only the context did.
+            NotifyGameViewport(0, 0, 640, 480);
+            Check(!IsSupersampleActive(),
+                  "the latch does not survive the context change");
+
+            int x = 0, y = 0, w = 640, h = 480;
+            ScaleGameRect(x, y, w, h);
+            Check(x == 0 && y == 0 && w == 640 && h == 480,
+                  "so the first frame in the new context is NOT scaled against a dead target");
+
+            wglMakeCurrent(hdc, hglrc);
+            wglDeleteContext(second);
+        }
+    }
+
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(hglrc);
     ReleaseDC(hwnd, hdc);

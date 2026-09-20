@@ -29,6 +29,12 @@ bool g_armed = false;
 int g_armedRefWidth = 0;
 int g_armedRefHeight = 0;
 
+// The GL context generation the latch was taken under. A latch is a statement about a
+// framebuffer name, and framebuffer names are per-context, so the latch has to expire with the
+// context exactly like every other cached GL-derived value in this DLL - see
+// GetGlContextGeneration() in gl_loader.h.
+unsigned int g_armedGeneration = 0;
+
 // Defined with the rest of the GL-touching state further down; declared here because
 // NotifyGameViewport revokes the latch and the binding has to go with it, and because
 // ResetRenderTargetState has to drop the record of it.
@@ -50,6 +56,37 @@ int ScaleEdge(int edge, int numerator, int denominator) {
     return (int)lround(scaled);
 }
 
+// Whether this frame's latch still belongs to the context that is current now, revoking it if
+// it does not. The mid-frame revocation in NotifyGameViewport covers a MODE change; this covers
+// a CONTEXT change, which the size comparison cannot see because the mode is identical either
+// side of it.
+//
+// Both halves of the latch go at once, for the same reason the mode-change path takes them
+// together: the viewport and the binding have to move as one or the player sees a corner of the
+// frame blown up. Here the binding is already gone - it named a framebuffer in a context that
+// no longer exists - so ReleaseRenderTargetBinding's job is only to drop the record and put a
+// defined binding under the new context, which is why it is called rather than assumed.
+//
+// GetGlComputeApi() is the call that DETECTS the switch: it is the one chokepoint in this DLL
+// that asks wglGetCurrentContext and bumps the generation. Asking only GetGlContextGeneration()
+// here would read a counter that nothing had yet had occasion to advance, and the check would
+// pass on exactly the frame it exists to catch. The early-out on !g_armed keeps that call off
+// the path entirely whenever the feature is off, which is every frame in the default config.
+bool ArmedInCurrentContext() {
+    if (!g_armed) {
+        return false;
+    }
+    (void)GetGlComputeApi();
+    if (g_armedGeneration == GetGlContextGeneration()) {
+        return true;
+    }
+    g_armed = false;
+    g_armedRefWidth = 0;
+    g_armedRefHeight = 0;
+    ReleaseRenderTargetBinding();
+    return false;
+}
+
 }  // namespace
 
 void NotifyFrameBoundary() {
@@ -59,6 +96,9 @@ void NotifyFrameBoundary() {
 void NotifyGameViewport(int x, int y, int width, int height) {
     (void)x;
     (void)y;
+    // Before the g_expectFirstViewport gate, not after it: a context change revokes the latch
+    // whether or not this happens to be the viewport the frame takes its reference from.
+    ArmedInCurrentContext();
     if (!g_expectFirstViewport) {
         return;
     }
@@ -87,6 +127,66 @@ void NotifyGameViewport(int x, int y, int width, int height) {
     g_haveRef = true;
 }
 
+namespace {
+
+// The once-per-configuration verdict line: what the arming decision actually was, and why.
+//
+// It lives here and not in EnsureRenderTarget because this is the only place that holds both
+// numbers at once - the configured size and the game's own viewport. EnsureRenderTarget runs
+// immediately after NotifyFrameBoundary on the first frame, before any viewport has been
+// recorded, and returns at its fast path on every frame after that, so a message there about
+// the game's size is either uninformed or never printed. Both of the lines below started out in
+// that function and neither could ever say anything true.
+//
+// Keyed on the three numbers rather than a plain `static bool warned`, so a genuine mode change
+// re-reports (the verdict really has changed) while a steady state stays silent.
+void ReportSupersampleVerdict(bool armed, int refWidth, int refHeight) {
+    const AnaxConfig& config = GetAnaxConfig();
+    static int lastRefWidth = -1;
+    static int lastRefHeight = -1;
+    static int lastConfigWidth = -1;
+    static int lastConfigHeight = -1;
+    if (refWidth == lastRefWidth && refHeight == lastRefHeight &&
+        config.renderWidth == lastConfigWidth && config.renderHeight == lastConfigHeight) {
+        return;
+    }
+    lastRefWidth = refWidth;
+    lastRefHeight = refHeight;
+    lastConfigWidth = config.renderWidth;
+    lastConfigHeight = config.renderHeight;
+
+    if (!armed) {
+        // The refusal the ini and the README both promise. Until this line existed the promise
+        // was kept silently: a renderWidth below the game's own viewport allocated a target,
+        // announced it as "supersampling into 320x240", and then declined to arm on every
+        // frame for the rest of the run without ever saying so.
+        printf("[opengl32_enh_cpp] render_target: %dx%d is not above the game's own %dx%d - "
+               "supersampling off, since rendering below native is not what this does\n",
+               config.renderWidth, config.renderHeight, refWidth, refHeight);
+        return;
+    }
+
+    // The line a user greps for to confirm the feature actually engaged. EnsureRenderTarget's
+    // "allocated" line cannot say this: allocating a target and using it are different events,
+    // and the whole point of the refusal above is that the first can happen without the second.
+    printf("[opengl32_enh_cpp] render_target: supersampling the game's %dx%d into %dx%d\n",
+           refWidth, refHeight, config.renderWidth, config.renderHeight);
+
+    // Armed, but say so when the shape is wrong: the present resolve maps the whole target onto
+    // the whole window, so a target that does not share the game's aspect ratio is stretched on
+    // one axis. Warned rather than refused, the same treatment post_effects.cpp gives the
+    // upscale case.
+    double targetAspect = (double)config.renderWidth / (double)config.renderHeight;
+    double gameAspect = (double)refWidth / (double)refHeight;
+    if (targetAspect - gameAspect > 0.01 || gameAspect - targetAspect > 0.01) {
+        printf("[opengl32_enh_cpp] render_target: %dx%d and the game's own %dx%d don't share "
+               "an aspect ratio - the presented image will be stretched\n",
+               config.renderWidth, config.renderHeight, refWidth, refHeight);
+    }
+}
+
+}  // namespace
+
 void ArmSupersampleForFrame(bool targetReady) {
     const AnaxConfig& config = GetAnaxConfig();
     // No `renderWidth > 0` check: g_haveRef implies the reference is positive, so the >=
@@ -99,14 +199,25 @@ void ArmSupersampleForFrame(bool targetReady) {
     // not armed so a stale snapshot can never be divided by.
     g_armedRefWidth = g_armed ? g_refWidth : 0;
     g_armedRefHeight = g_armed ? g_refHeight : 0;
+    // Snapshotted unconditionally: EnsureRenderTarget has already run by the time the swap hook
+    // calls this (it supplies targetReady), so the generation read here is the one the target
+    // was built or rebuilt under, which is precisely what the latch is a statement about.
+    g_armedGeneration = GetGlContextGeneration();
+
+    // Only once both numbers are real. A frame that did not arm because the target failed to
+    // allocate, or because no viewport has been recorded yet, is not a verdict about the
+    // configured SIZE - and those two paths already log for themselves.
+    if (targetReady && g_haveRef && config.renderWidth > 0 && config.renderHeight > 0) {
+        ReportSupersampleVerdict(g_armed, g_refWidth, g_refHeight);
+    }
 }
 
 bool IsSupersampleActive() {
-    return g_armed;
+    return ArmedInCurrentContext();
 }
 
 void ScaleGameRect(int& x, int& y, int& width, int& height) {
-    if (!g_armed) {
+    if (!ArmedInCurrentContext()) {
         return;
     }
     const AnaxConfig& config = GetAnaxConfig();
@@ -130,6 +241,7 @@ void ResetRenderTargetState() {
     g_armed = false;
     g_armedRefWidth = 0;
     g_armedRefHeight = 0;
+    g_armedGeneration = 0;
     // Forgotten, not acted on - see render_target.h. This is a test hook and must not issue GL
     // calls; a test that cares about the binding sets it explicitly after calling this.
     ForgetRenderTargetBinding();
@@ -320,23 +432,16 @@ bool EnsureRenderTarget() {
     g_targetHeight = config.renderHeight;
     g_targetFloat = config.renderFloatBuffer;
 
-    // Runs, but says so: a render target whose aspect ratio differs from the game's own means
-    // the present blit stretches the image on one axis. Warned rather than refused, and once
-    // rather than per frame - the same treatment post_effects.cpp gives the upscale case.
-    int refWidth = 0, refHeight = 0;
-    GetReferenceViewport(refWidth, refHeight);
-    if (refWidth > 0 && refHeight > 0) {
-        double targetAspect = (double)g_targetWidth / (double)g_targetHeight;
-        double gameAspect = (double)refWidth / (double)refHeight;
-        static bool warnedAspect = false;
-        if (!warnedAspect && (targetAspect - gameAspect > 0.01 || gameAspect - targetAspect > 0.01)) {
-            printf("[opengl32_enh_cpp] render_target: %dx%d and the game's own %dx%d don't share "
-                   "an aspect ratio - the presented image will be stretched\n",
-                   g_targetWidth, g_targetHeight, refWidth, refHeight);
-            warnedAspect = true;
-        }
-    }
-    printf("[opengl32_enh_cpp] render_target: supersampling into %dx%d (%s)\n",
+    // "Allocated", not "supersampling into". This function knows what it built; it does NOT
+    // know whether that target will ever be used, because the comparison that decides it -
+    // against the game's own viewport - belongs to ArmSupersampleForFrame and cannot be made
+    // here. The first call reaches this line BEFORE any viewport has been recorded (the swap
+    // hook calls NotifyFrameBoundary immediately before it, so g_haveRef is still false), and
+    // every later frame returns at the fast path above without reaching it at all. Anything
+    // written here about the game's size is therefore either uninformed or unreachable; the
+    // verdict is logged from the arming path instead, which is the one that actually has both
+    // numbers.
+    printf("[opengl32_enh_cpp] render_target: allocated a %dx%d (%s) render target\n",
            g_targetWidth, g_targetHeight, g_targetFloat ? "RGBA16F" : "RGBA8");
     gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
     return true;

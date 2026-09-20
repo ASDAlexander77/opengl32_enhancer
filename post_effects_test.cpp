@@ -406,6 +406,45 @@ bool CheckShouldSkipAllWork() {
     return allMatched;
 }
 
+// The present resolve's step rule - see ResolveHalvingSteps in post_effects.h. A table, because
+// the thing that went wrong here was not a mis-typed comparison but a missing case: the shipped
+// resolve had exactly one step for every ratio, which is correct at 2x and nowhere else, and
+// the only GPU coverage it had used a 2x ratio and so could not tell.
+bool CheckResolveHalvingSteps() {
+    struct Row {
+        int srcWidth, srcHeight, dstWidth, dstHeight, expected;
+        const char* why;
+    };
+    const Row rows[] = {
+        {640, 480, 640, 480, 0, "1:1 - supersampling off, the present blit is unchanged"},
+        {1280, 960, 640, 480, 1, "2x resolves in one exact halving"},
+        {1920, 1440, 640, 480, 1, "3x halves once, then the final blit covers the rest"},
+        {2560, 1920, 640, 480, 2, "4x resolves in two exact halvings"},
+        {3200, 2400, 640, 480, 2, "5x halves twice, then the final blit covers the rest"},
+        {5120, 3840, 640, 480, 3, "8x resolves in three exact halvings"},
+        // The axes are not independent: halving a source already within 2x on ONE axis would
+        // shrink the other past the destination and change the aspect ratio, which the final
+        // blit would then have to stretch back.
+        {2560, 480, 640, 480, 0, "an axis already at 1:1 stops the other halving past it"},
+        {1280, 240, 640, 480, 0, "and that holds when the source is SMALLER on that axis"},
+        // Degenerate inputs reach this from a frame whose viewport has collapsed - a minimised
+        // window, an engine mid-mode-change. Zero steps means the present blit behaves exactly
+        // as it did before this rule existed, which is the safe direction.
+        {1280, 960, 0, 0, 0, "a zero destination asks for no halvings rather than looping"},
+        {0, 0, 640, 480, 0, "and so does a zero source"},
+    };
+
+    bool ok = true;
+    for (const Row& row : rows) {
+        int actual = ResolveHalvingSteps(row.srcWidth, row.srcHeight, row.dstWidth, row.dstHeight);
+        char what[256];
+        snprintf(what, sizeof(what), "resolve steps %dx%d -> %dx%d == %d (%s)",
+                 row.srcWidth, row.srcHeight, row.dstWidth, row.dstHeight, row.expected, row.why);
+        ok = Check(actual == row.expected, what) && ok;
+    }
+    return ok;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -493,6 +532,7 @@ int main() {
     ok = CheckAnyUpscaleStageListed() && ok;
     ok = CheckShouldSkipEffectChain() && ok;
     ok = CheckShouldSkipAllWork() && ok;
+    ok = CheckResolveHalvingSteps() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
@@ -801,6 +841,118 @@ int main() {
 
         // Restore what this block changed so every scenario below runs exactly as it did
         // before this case existed.
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.renderWidth = savedRenderWidth;
+        mutableConfig.renderHeight = savedRenderHeight;
+        mutableConfig.frameDumpKey = savedFrameDumpKey;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
+
+    // --- The resolve at a ratio ABOVE 2x, where a single bilinear tap is not enough. ---
+    //
+    // Every other resolve case in this suite - here and in render_target_gpu_test.cpp - uses a
+    // 2x ratio, and 2x is the one ratio at which the old single-blit resolve was correct. That
+    // is why none of them could see the bug: a shrinking GL_LINEAR blit is ONE bilinear tap, so
+    // at 2x it weighs all four source texels of each destination pixel and at 4x it weighs four
+    // of sixteen. renderWidth/renderHeight are free-form numbers, so ratios above 2x are just
+    // what anyone typing a big value gets.
+    //
+    // The pattern is chosen so the two behaviours cannot agree. At 4x, destination pixel i
+    // covers source columns [4i, 4i+4), and the bilinear tap for it sits at source coordinate
+    // 4i+2 - exactly on the boundary between texels 4i+1 and 4i+2, so it returns the average of
+    // those TWO and ignores the other fourteen texels in the box. Painting every fourth column
+    // white (x % 4 == 3) therefore splits the answers cleanly:
+    //
+    //   a true 4x4 box average -> 1 white column in 4 -> ~64
+    //   a single bilinear tap   -> texels 4i+1 and 4i+2, both black -> ~0
+    //
+    // A seam-straddling pattern like the 2x case above cannot do this job: the seam is where a
+    // tap and a box happen to agree, which is exactly why that case passes either way.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        int savedRenderWidth = mutableConfig.renderWidth;
+        int savedRenderHeight = mutableConfig.renderHeight;
+        int savedFrameDumpKey = mutableConfig.frameDumpKey;
+
+        mutableConfig.stageCount = 0;
+        mutableConfig.renderWidth = width * 4;
+        mutableConfig.renderHeight = height * 4;
+        mutableConfig.frameDumpKey = 0;
+
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed4x = Check(IsSupersampleActive(),
+                             "4x resolve: supersampling armed at a 4x ratio "
+                             "(if this fails, nothing below proves anything)");
+        ok = armed4x && ok;
+
+        if (armed4x) {
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            for (int x = 3; x < mutableConfig.renderWidth; x += 4) {
+                pGlScissor(x, 0, 1, mutableConfig.renderHeight);
+                pGlClear(GL_COLOR_BUFFER_BIT);
+            }
+            pGlDisable(GL_SCISSOR_TEST);
+
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0,
+                       "4x resolve: ApplySelectedEffect() left no GL error") && ok;
+
+            std::vector<unsigned char> pixels4x((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels4x.data());
+
+            // Sampled across the middle row rather than at one pixel: a box average of this
+            // pattern is the same everywhere, so the interesting failure is not one wrong pixel
+            // but a whole row that came back at the wrong level. The edge columns are skipped
+            // because a blit's filtering at the very edge of the source has nothing outside to
+            // weigh and drivers clamp differently there.
+            int lowest = 255, highest = 0;
+            long long total = 0;
+            int counted = 0;
+            for (int x = 4; x < width - 4; ++x) {
+                int value = pixels4x[((size_t)(height / 2) * width + x) * 4];
+                lowest = value < lowest ? value : lowest;
+                highest = value > highest ? value : highest;
+                total += value;
+                ++counted;
+            }
+            int mean = (int)(total / counted);
+            printf("4x resolve: middle row red channel min=%d mean=%d max=%d "
+                   "(a 4x4 box average of this pattern is 64; a single bilinear tap is 0)\n",
+                   lowest, mean, highest);
+
+            // The band is wide on purpose. 64 is what an exact box gives, but the last step of
+            // the resolve is still a real GL blit and drivers round differently; what no
+            // single-tap implementation can produce is anything near a quarter-white average.
+            ok = Check(mean >= 40 && mean <= 90,
+                       "4x resolve: the resolved image carries the quarter-white average of "
+                       "the whole 4x4 box, not the two texels a single bilinear tap reads") && ok;
+
+            // Uniformity is the other half of the claim, and it is what separates "averaged
+            // something" from "averaged the right box": this pattern has the same content under
+            // every destination pixel, so a correct resolve is flat. A partial box - or a tap
+            // that drifts across the pattern's phase - comes back striped.
+            ok = Check(highest - lowest <= 24,
+                       "4x resolve: and it is flat across the row, as a correct box average of "
+                       "a uniformly periodic pattern must be") && ok;
+        }
+
         mutableConfig.stageCount = savedStageCount;
         mutableConfig.renderWidth = savedRenderWidth;
         mutableConfig.renderHeight = savedRenderHeight;

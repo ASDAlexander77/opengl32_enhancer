@@ -73,3 +73,22 @@ bool ShouldSkipEffectChain(int stageCount, bool hasRealUpscale, bool supersample
 // condition, as this one showed twice, is not.
 bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverrideActive,
                        bool supersampleActive);
+
+// How many exact halvings the present resolve should run before its final blit, shrinking
+// srcWidth x srcHeight towards dstWidth x dstHeight.
+//
+// The resolve used to be a single GL_LINEAR glBlitFramebuffer, and that is one bilinear tap -
+// at most a 2x2 box, wherever the destination pixel's centre happens to land. At exactly 2x it
+// is the right answer and the whole frame resolves correctly; above 2x it throws away most of
+// the samples supersampling just paid four, nine or twenty-five times the fill rate to produce,
+// and the image still aliases. renderWidth/renderHeight are free-form, so ratios above 2x are
+// not an exotic configuration - they are what anyone typing a big number gets.
+//
+// A GL_LINEAR blit that halves a dimension exactly IS a 2x2 box average, so N of them average a
+// 2^N x 2^N box, and the final blit covers whatever non-power-of-two remainder is left. Both
+// axes halve together so the aspect ratio never changes partway through.
+//
+// Returns 0 whenever the source is already within 2x of the destination, which includes every
+// frame with supersampling off - so the unsupersampled present is bit-for-bit the blit it has
+// always been.
+int ResolveHalvingSteps(int srcWidth, int srcHeight, int dstWidth, int dstHeight);
