@@ -158,6 +158,21 @@ bool DoesNotArmBeforeAnyViewportIsSeen() {
                  "arming needs a reference viewport, not just a configured size");
 }
 
+// A transient degenerate viewport - a window minimise/restore, or any engine codepath that
+// zeroes a dimension for a frame - must not become the reference. If it did, arming would
+// succeed (renderWidth >= 0 is true for any configured value) while ScaleEdge's own
+// denominator guard silently returned every edge unscaled: armed, but not scaling, which is
+// the split-brain state this module exists to prevent.
+bool IgnoresADegenerateFirstViewport() {
+    ResetRenderTargetState();
+    Configure(3200, 2400);
+    NotifyFrameBoundary();
+    NotifyGameViewport(0, 0, 0, 480);
+    ArmSupersampleForFrame(true);
+    return Check(!IsSupersampleActive(),
+                 "a degenerate first viewport does not become the reference");
+}
+
 }  // namespace
 
 int main() {
@@ -172,6 +187,7 @@ int main() {
     RefusesATargetShorterThanTheGameViewport();
     RefusesWhenOnlyOneDimensionIsSet();
     DoesNotArmBeforeAnyViewportIsSeen();
+    IgnoresADegenerateFirstViewport();
 
     printf("%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;

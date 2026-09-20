@@ -23,6 +23,11 @@ bool g_armed = false;
 // One edge, scaled. Both edges of a rectangle go through this, and the size is their difference,
 // so adjacent rectangles abut exactly however fractional the factor is.
 int ScaleEdge(int edge, int numerator, int denominator) {
+    // Unreachable today: ScaleGameRect only calls this while armed, and arming implies a
+    // positive reference. Kept anyway, unlike the equally unreachable guard removed from
+    // ArmSupersampleForFrame, because that one decided a boolean and this one stands in front
+    // of a division - the cost of being wrong here is a NaN propagating through lround into a
+    // viewport rectangle, which is not a failure mode worth trading for one fewer branch.
     if (denominator <= 0) {
         return edge;
     }
