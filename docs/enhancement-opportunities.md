@@ -274,21 +274,47 @@ change available, and by far the riskiest: it means reproducing fixed-function
 semantics faithfully enough that nothing regresses. Listed for completeness;
 not recommended until Tier 2 exists, since it needs the same matrix capture.
 
-## A caveat on supersampling (DSR)
+## Supersampling (DSR) — shipped 2026-09-20
 
 Rendering above native and downsampling on present is the single biggest raw
 image-quality win available to a wrapper, and it is **not** reachable through
-`windowWidth`/`windowHeight`.
+`windowWidth`/`windowHeight`: that setting makes the *window* bigger, which
+makes the game's own image get stretched, not resampled.
 
-The game only renders larger if it believes its drawable is larger, and the
-window-size override cannot help twice over: Windows clamps any decorated window
-to roughly desktop size via `SM_CXMAXTRACK`/`SM_CYMAXTRACK` (see
-`window_override_test.cpp`, which was changed on 2026-09-18 precisely because it
-had assumed otherwise). Real DSR requires intercepting the size the game
-*queries* — `GetClientRect` and `glViewport` — not the window itself. The
-existing NIS spec reaches the same conclusion from the other direction: "Real
-reduced-resolution rendering is future work once the wrapper can intercept the
-app's actual render-target setup."
+It ships as `renderWidth`/`renderHeight` (both 0 = off), with `renderFloatBuffer`
+for an RGBA16F colour attachment. See `render_target.h` and
+`docs/superpowers/specs/2026-09-20-supersampling-design.md`.
+
+**One thing this document got wrong, corrected here.** It said real DSR requires
+intercepting the size the game *queries* — naming `GetClientRect` and
+`glViewport`. `GetClientRect` is a `user32` export a proxy `opengl32.dll` cannot
+reach, and it does not matter: id Tech 2-family engines take their resolution
+from their own mode table and hand it to `glViewport`, never asking the window.
+`glViewport` alone was the lever, and the whole feature stayed inside the
+`opengl32` surface.
+
+**What the in-game run established** (Anachronox, `baltown`, game at 640x480,
+`renderWidth`/`renderHeight` 1280x960, the full twelve-stage `effect=` chain
+including `fsr`):
+
+- The target allocates and the log says so.
+- The world pass runs: `glFrustum` entered, sixteen auto-mipmap chains generated.
+- No GL errors in steady state, and none of the failure modes the design feared.
+- The upscaler-superseded notice fires, confirming `fsr` and supersampling
+  coexist without either silently breaking.
+- Exactly **one** frame is skipped, at the moment the game creates its second GL
+  context: the capture runs once against a framebuffer belonging to the dead
+  context, returns `GL_INVALID_OPERATION`, and the frame is dropped. The next
+  frame rebuilds and the rest of the run is clean. That is the fail-safe
+  behaving correctly, not a defect, and a single dropped frame at a context
+  switch is invisible.
+- It is noticeably slower to reach gameplay, which is expected: at 2x on each
+  axis every stage in the chain does four times the work, and the loading screen
+  renders frames too.
+
+**What it did NOT establish: that the image looks right.** No screenshot
+comparison was made and no human confirmed the result by eye. The feature is
+verified to run without error, not verified to look correct.
 
 ### DPI virtualisation comes first, though
 
