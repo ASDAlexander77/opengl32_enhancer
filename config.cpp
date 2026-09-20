@@ -559,6 +559,12 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.windowWidth = ParseClampedInt(value, 0, 16384, config.windowWidth, "windowWidth");
         } else if (strcmp(key, "windowHeight") == 0) {
             config.windowHeight = ParseClampedInt(value, 0, 16384, config.windowHeight, "windowHeight");
+        } else if (strcmp(key, "renderWidth") == 0) {
+            config.renderWidth = ParseClampedInt(value, 0, 16384, config.renderWidth, "renderWidth");
+        } else if (strcmp(key, "renderHeight") == 0) {
+            config.renderHeight = ParseClampedInt(value, 0, 16384, config.renderHeight, "renderHeight");
+        } else if (strcmp(key, "renderFloatBuffer") == 0) {
+            config.renderFloatBuffer = ParseBool(value, config.renderFloatBuffer, "renderFloatBuffer");
         } else if (strcmp(key, "frameDumpKey") == 0) {
             // A Windows virtual-key code, so the sensible way to write it in an ini is hex
             // (0x7B = F12). strtol with base 0 accepts both that and plain decimal.

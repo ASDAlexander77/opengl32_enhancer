@@ -104,6 +104,10 @@ add_executable(projection_capture_test projection_capture_test.cpp projection_ca
 # See texture_mipmap_test.cpp.
 add_executable(texture_mipmap_test texture_mipmap_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
 
+# Pure CPU: the viewport scaling rule, the reference latch and the arming decision from
+# render_target.h, with no GL context - see render_target_test.cpp.
+add_executable(render_target_test render_target_test.cpp render_target.cpp config.cpp debug_log.cpp gl_loader.cpp)
+
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
 add_executable(depth_view_test depth_view_test.cpp depth_view.cpp frame_dump.cpp)
@@ -445,7 +449,8 @@ foreach(test_target
     debug_log_test
     taa_jitter_test
     projection_capture_test
-    texture_mipmap_test)
+    texture_mipmap_test
+    render_target_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()
