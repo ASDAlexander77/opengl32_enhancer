@@ -33,6 +33,7 @@
 #include "config.h"
 #include "gl_loader.h"
 #include "post_effects.h"
+#include "render_target.h"
 
 namespace {
 
@@ -52,6 +53,7 @@ const unsigned int GL_COLOR_BUFFER_BIT   = 0x00004000;
 const unsigned int GL_RGBA               = 0x1908;
 const unsigned int GL_UNSIGNED_BYTE      = 0x1401;
 const unsigned int GL_BACK               = 0x0405;
+const unsigned int GL_SCISSOR_TEST       = 0x0C11;
 
 // A synthetic test pattern, generated on the CPU rather than loaded from an image file (this
 // project has no image-decoding dependency and adding one just for a test isn't worth it).
@@ -413,16 +415,22 @@ int main() {
         return 1;
     }
 
-    // glViewport/glClear* are GL 1.1 core, exported directly from opengl32.dll, so a plain
-    // GetProcAddress on the module resolves them - GlComputeApi only carries the 4.3-era entry
-    // points the effects themselves need.
+    // glViewport/glClear*/glEnable/glDisable/glScissor are all GL 1.1 core, exported directly
+    // from opengl32.dll, so a plain GetProcAddress on the module resolves them - GlComputeApi
+    // only carries the 4.3-era entry points the effects themselves need.
     typedef void (__stdcall *PFNGLVIEWPORTPROC)(int, int, int, int);
     typedef void (__stdcall *PFNGLCLEARCOLORPROC)(float, float, float, float);
     typedef void (__stdcall *PFNGLCLEARPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLENABLEPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLDISABLEPROC)(unsigned int);
+    typedef void (__stdcall *PFNGLSCISSORPROC)(int, int, int, int);
     HMODULE glModule = GetModuleHandleA("opengl32.dll");
     PFNGLVIEWPORTPROC pGlViewport = (PFNGLVIEWPORTPROC)GetProcAddress(glModule, "glViewport");
     PFNGLCLEARCOLORPROC pGlClearColor = (PFNGLCLEARCOLORPROC)GetProcAddress(glModule, "glClearColor");
     PFNGLCLEARPROC pGlClear = (PFNGLCLEARPROC)GetProcAddress(glModule, "glClear");
+    PFNGLENABLEPROC pGlEnable = (PFNGLENABLEPROC)GetProcAddress(glModule, "glEnable");
+    PFNGLDISABLEPROC pGlDisable = (PFNGLDISABLEPROC)GetProcAddress(glModule, "glDisable");
+    PFNGLSCISSORPROC pGlScissor = (PFNGLSCISSORPROC)GetProcAddress(glModule, "glScissor");
     pGlViewport(0, 0, width, height);
 
     bool ok = CheckDepthStageSet();
@@ -518,6 +526,175 @@ int main() {
     printf("Look at post_effects_test_input.ppm / post_effects_test_output.ppm to judge "
            "whether the current config actually looks right - that part is a human call, "
            "not something this test can assert.\n");
+
+    // --- An end-to-end scenario: the present blit is a REAL resolve when supersampling is
+    // armed, proven through the actual entry point rather than by driving glBlitFramebuffer
+    // directly. ---
+    //
+    // render_target_gpu_test.cpp's averaging case proves a shrinking GL_LINEAR blit averages
+    // rather than point-samples, but it drives glBlitFramebuffer itself - it says nothing about
+    // whether ApplySelectedEffect() (post_effects.cpp, the actual code wrapper.cpp calls from
+    // wglSwapBuffers) ever reaches that blit with the right filter and the right destination
+    // rectangle when supersampling is armed the way the wrapper's own hooks arm it. This test
+    // already builds a window, an HDC and a GL context, blits a known pattern onto the back
+    // buffer, calls ApplySelectedEffect(hdc), and reads framebuffer 0 back - that machinery is
+    // reused here rather than duplicated, right after the primary integration run above (whose
+    // own PPM dumps and assertions have already completed) so mutating the config here cannot
+    // disturb it, and before every scenario below so this block's own state is fully restored
+    // and cannot disturb THEM either.
+    //
+    // stageCount = 0 (an empty chain) is also the black-screen combination
+    // CheckShouldSkipEffectChain() above pins as a truth table ("stageCount 0, no upscale,
+    // supersampling") - reusing it here means one case confirms, end to end, that Task 4's fix
+    // actually reaches the screen, while also pinning the two properties that are this task's
+    // own subject:
+    //   - PRESENCE: something reaches the screen at all (the black-screen regression).
+    //   - DESTINATION RECTANGLE: the image fills the WHOLE window (dstWidth/dstHeight), not
+    //     just a curWidth/curHeight-sized corner of it.
+    //   - FILTER: the shrink is GL_LINEAR (a real resolve), not GL_NEAREST (a point sample).
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        int savedRenderWidth = mutableConfig.renderWidth;
+        int savedRenderHeight = mutableConfig.renderHeight;
+
+        mutableConfig.stageCount = 0;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+
+        // The same arming sequence wrapper.cpp's hooks perform every frame - see
+        // render_target.h's header comment. NotifyGameViewport records the game's own
+        // (pre-scale) viewport; ArmSupersampleForFrame latches whether the offscreen target is
+        // actually usable this frame.
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed = Check(IsSupersampleActive(),
+                            "end-to-end resolve: supersampling armed for this frame "
+                            "(if this fails, nothing below proves anything)");
+        ok = armed && ok;
+
+        if (armed) {
+            // BindRenderTarget() routes subsequent drawing into the offscreen target; the
+            // glViewport call is what ApplySelectedEffect() reads back via GL_VIEWPORT to learn
+            // the "native" size - in production this is the wrapper's own glViewport hook,
+            // already scaled by ScaleGameRect before it ever reaches real GL.
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // Two vertical halves, black and white, exactly like render_target_gpu_test.cpp's
+            // averaging case - so a shrinking GL_LINEAR blit must bring the seam back grey. The
+            // split is renderWidth/2 MINUS ONE texel, not an exact renderWidth/2: a split sitting
+            // precisely on a multiple of the downsample ratio (2, here) lands exactly on the
+            // boundary between two destination pixels' non-overlapping source windows, so
+            // neither destination pixel ever samples both colours and the seam stays perfectly
+            // sharp even after a genuine GL_LINEAR shrink - confirmed empirically by scanning
+            // pixels around the seam with the aligned split before adding this offset. Shifting
+            // by one texel puts the split inside a single destination pixel's source window, so
+            // that pixel is guaranteed to see both colours regardless of the exact interpolation
+            // convention (nearest-pair average or half-texel-centred bilinear).
+            int splitX = mutableConfig.renderWidth / 2 - 1;
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlScissor(0, 0, splitX, mutableConfig.renderHeight);
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlScissor(splitX, 0, mutableConfig.renderWidth - splitX, mutableConfig.renderHeight);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlDisable(GL_SCISSOR_TEST);
+
+            // Framebuffer 0 (the real back buffer) starts at a colour neither tone can produce
+            // by averaging, nor is confused with black or white on its own - a mid-blue,
+            // distinct in every channel from black (0,0,0), white (255,255,255), and their
+            // average (~127,127,127). If ApplySelectedEffect() presents nothing this frame,
+            // this is what a readback below would still show.
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve: ApplySelectedEffect() left no GL error") && ok;
+
+            std::vector<unsigned char> resolvedPixels((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, resolvedPixels.data());
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve: readback of the real back buffer left no GL error") && ok;
+
+            auto sampleAt = [&](int x, int y, unsigned char out[4]) {
+                size_t i = ((size_t)y * width + x) * 4;
+                out[0] = resolvedPixels[i + 0];
+                out[1] = resolvedPixels[i + 1];
+                out[2] = resolvedPixels[i + 2];
+                out[3] = resolvedPixels[i + 3];
+            };
+
+            // PRESENCE: well inside the left (black) half. The black-screen regression would
+            // leave this at the mid-blue clear colour.
+            unsigned char leftPixel[4];
+            sampleAt(width / 4, height / 2, leftPixel);
+            bool presented = leftPixel[0] < 50 && leftPixel[1] < 50 && leftPixel[2] < 50;
+            printf("end-to-end resolve: presence pixel rgb = %d,%d,%d (expected black-ish)\n",
+                   leftPixel[0], leftPixel[1], leftPixel[2]);
+            ok = Check(presented,
+                       "end-to-end resolve: presence - something was presented, not the "
+                       "black-screen regression") && ok;
+
+            // DESTINATION RECTANGLE: a few pixels in from the far (high x, high y) corner,
+            // deep in the white half once the WHOLE window is correctly filled at the right
+            // scale. Deliberately checked as "specifically white", not "black or white": if the
+            // destination rectangle were curWidth/curHeight (the native/offscreen size, here
+            // bigger than the window) instead of dstWidth/dstHeight, glBlitFramebuffer's
+            // oversized destination rect gets implicitly clipped to the real (smaller)
+            // framebuffer, which does not just shrink the image into a corner and leave the
+            // rest at the clear colour - it changes the EFFECTIVE scale of the whole blit to
+            // curWidth/curWidth (i.e. 1:1), so the visible window ends up showing an unscaled
+            // crop of the SOURCE's own top-left corner. With this test's black-left/white-right
+            // source layout that crop is still almost entirely black at this coordinate -
+            // confirmed empirically by running this exact mutation - so a loose "black or white"
+            // check would have passed for the wrong reason. Requiring white specifically catches
+            // it: only the correctly-scaled destination rectangle can put white this deep into
+            // the far corner.
+            unsigned char farPixel[4];
+            sampleAt(width - 5, height - 5, farPixel);
+            bool farIsWhite = farPixel[0] > 200 && farPixel[1] > 200 && farPixel[2] > 200;
+            printf("end-to-end resolve: far-corner pixel rgb = %d,%d,%d (expected white, not "
+                   "the clear colour or a wrongly-scaled crop)\n", farPixel[0], farPixel[1], farPixel[2]);
+            ok = Check(farIsWhite,
+                       "end-to-end resolve: destination rectangle - the image fills the whole "
+                       "window, not just a corner of it") && ok;
+
+            // FILTER: straddling the seam. GL_NEAREST can only ever return one tone or the
+            // other; GL_LINEAR must bring back something in between - same 60..195 band as
+            // render_target_gpu_test.cpp's averaging case, for the same reason (drivers differ
+            // in exactly how many source texels a shrinking GL_LINEAR blit weighs). The seam in
+            // DESTINATION space lands at splitX / 2 (the same one-texel-off-multiple split
+            // above, scaled by the 2:1 ratio) - verified empirically by scanning pixels around
+            // width/2 with the aligned split first: destination pixel width/2 itself is one
+            // pixel short of the actual straddling pixel here (splitX/2 == width/2 - 1), because
+            // splitX is renderWidth/2 - 1, not renderWidth/2.
+            int seamX = splitX / 2;
+            unsigned char seamPixel[4];
+            sampleAt(seamX, height / 2, seamPixel);
+            bool seamIsIntermediate = seamPixel[0] > 60 && seamPixel[0] < 195;
+            printf("end-to-end resolve: seam pixel rgb = %d,%d,%d (expected an intermediate "
+                   "grey)\n", seamPixel[0], seamPixel[1], seamPixel[2]);
+            ok = Check(seamIsIntermediate,
+                       "end-to-end resolve: filter - the shrink averaged the seam rather than "
+                       "point-sampling one side of it") && ok;
+        }
+
+        // Restore what this block changed so every scenario below runs exactly as it did
+        // before this case existed.
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.renderWidth = savedRenderWidth;
+        mutableConfig.renderHeight = savedRenderHeight;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
 
     // --- A second, config-independent scenario: the `gamma` stage is actually WIRED UP. ---
     //

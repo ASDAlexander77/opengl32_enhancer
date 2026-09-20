@@ -591,11 +591,20 @@ void ApplySelectedEffect(void* hdc) {
         gl.glActiveTexture((unsigned int)savedActiveTexture);
     };
 
-    // The pair of ping-pong textures actually in use right now: the native-resolution pair while
-    // hasRealUpscale is true (nothing has reconstructed up to the window's size yet), otherwise
-    // directly the destination pair - which IS the native-resolution pair, size-for-size, when
-    // there's no real upscale in play at all.
-    unsigned int* pair = hasRealUpscale ? g_pipeline.nativeTex : g_pipeline.tex;
+    // The pair of ping-pong textures actually in use right now: the native-resolution pair
+    // whenever native and destination sizes actually differ (g_pipeline.hasNativePair, set by
+    // EnsurePipelineTextures above) - covering BOTH directions that can produce a mismatch, a
+    // real upscale (dst bigger than native; nothing has reconstructed up to the window's size
+    // yet) and supersampling (native bigger than dst; nothing has downsampled to the window's
+    // size yet, which is what Task 5's present blit alone does) - otherwise directly the
+    // destination pair, which IS the native-resolution pair, size-for-size, when there's no
+    // mismatch at all. Deliberately NOT keyed on hasRealUpscale alone: that condition is false
+    // throughout a supersampled frame (dst is smaller than native, not bigger), so capturing
+    // nativeWidth x nativeHeight pixels into g_pipeline.tex - sized at the SMALLER dst
+    // resolution - overflowed the destination texture (GL_INVALID_VALUE from
+    // glCopyTexSubImage2D below) and skipped the frame with nothing presented, silently
+    // reintroducing the black screen Task 4's ShouldSkipEffectChain fix was meant to prevent.
+    unsigned int* pair = g_pipeline.hasNativePair ? g_pipeline.nativeTex : g_pipeline.tex;
 
     // Force the read framebuffer to the one the game rendered into before capture, same
     // reasoning as every individual effect used to: whatever the host app had bound as its
