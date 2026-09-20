@@ -20,6 +20,7 @@
 #include "world_capture.h"
 #include "taa_jitter.h"
 #include "window_override.h"
+#include "render_target.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -4160,6 +4161,7 @@ extern "C" __declspec(dllexport) void __stdcall glScissor(GLint x, GLint y, GLsi
             printf("[opengl32_enh_cpp]   glScissor: resolved OK\n");
         }
     }
+    ScaleGameRect(x, y, width, height);
     __proc_glScissor(x, y, width, height);
 }
 
@@ -5507,6 +5509,8 @@ extern "C" __declspec(dllexport) void __stdcall glViewport(GLint x, GLint y, GLs
             printf("[opengl32_enh_cpp]   glViewport: resolved OK\n");
         }
     }
+    NotifyGameViewport(x, y, width, height);
+    ScaleGameRect(x, y, width, height);
     __proc_glViewport(x, y, width, height);
 }
 
@@ -5898,7 +5902,11 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     AdvanceProjectionHistory();
     AdvanceTaaJitter();
     InvalidateWorldFrame();
-    return __proc_wglSwapBuffers(p0);
+    NotifyFrameBoundary();
+    ArmSupersampleForFrame(EnsureRenderTarget());
+    BOOL __swapResult = __proc_wglSwapBuffers(p0);
+    BindRenderTarget();
+    return __swapResult;
 }
 
 typedef void* (__stdcall *__pfn_wglGetDefaultProcAddress)(void*);
