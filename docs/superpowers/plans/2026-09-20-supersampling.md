@@ -38,7 +38,7 @@ It also **drops the spec's `GetPresentSize()`**. That function was a mistake in 
 | `render_target_test.cpp` (new) | CPU-only: scaling, latch, arming. No GL context |
 | `render_target_gpu_test.cpp` (new) | Real context: FBO lifecycle, failure modes, the downsample average |
 | `render_target_test.ini` (new) | Fixture config for the GPU test |
-| `config.h` / `.cpp`, `config_writer.cpp` | The three new keys |
+| `config.h` / `.cpp` | The three new keys. Deliberately NOT `config_writer.cpp` — see Task 1 |
 | `gl_loader.h` / `.cpp` | `glCheckFramebufferStatus` |
 | `generators/gen_wrapper_cpp.py` | `glViewport`, `glScissor`, post-swap bind |
 | `post_effects.cpp` | Three capture reads, the empty-chain early return, the present downsample |
@@ -51,7 +51,7 @@ It also **drops the spec's `GetPresentSize()`**. That function was a mistake in 
 
 **Files:**
 - Create: `render_target.h`, `render_target.cpp`, `render_target_test.cpp`
-- Modify: `config.h` (after `int windowHeight = 0;`), `config.cpp` (beside the `windowHeight` parser arm), `config_writer.cpp` (key list and formatter), `CMakeLists.txt`, `opengl32_enhancer.ini`
+- Modify: `config.h` (after `int windowHeight = 0;`), `config.cpp` (beside the `windowHeight` parser arm), `CMakeLists.txt`, `opengl32_enhancer.ini`
 - Test: `render_target_test.cpp`
 
 **Interfaces:**
@@ -91,15 +91,15 @@ In `config.cpp`, beside the `windowHeight` arm:
 
 If `ParseClampedInt` does not exist under that name, use whatever `windowWidth` uses in the same file and keep the 0..16384 bounds.
 
-In `config_writer.cpp`, add `"renderWidth"`, `"renderHeight"`, `"renderFloatBuffer"` to the key list beside `"windowWidth"`, and beside its formatter:
+**Do NOT add these to `config_writer.cpp`.** An earlier draft of this plan said to; that was
+wrong. `windowWidth` is deliberately absent from the writer's managed-key list, and
+`config_writer_test.cpp` states the reason: keys the standalone config editor cannot meaningfully
+show are left unmanaged and copied through untouched. The editor works on a captured frame dump,
+not a live window, so a supersampling control there would visibly do nothing. `renderWidth`,
+`renderHeight` and `renderFloatBuffer` are unmanaged keys for exactly the same reason.
 
-```cpp
-    if (strcmp(key, "renderWidth") == 0)                 { out = FormatInt(config.renderWidth); return true; }
-    if (strcmp(key, "renderHeight") == 0)                { out = FormatInt(config.renderHeight); return true; }
-    if (strcmp(key, "renderFloatBuffer") == 0)           { out = config.renderFloatBuffer ? "1" : "0"; return true; }
-```
-
-Match the existing integer formatter's real name (`windowWidth`'s line shows it).
+`ParseClampedInt` and `GetMutableAnaxConfig()` both exist under those names — verified, no
+substitution needed.
 
 - [ ] **Step 2: Write the header**
 
@@ -488,7 +488,7 @@ renderFloatBuffer=0
 - [ ] **Step 9: Commit**
 
 ```bash
-git add render_target.h render_target.cpp render_target_test.cpp CMakeLists.txt config.h config.cpp config_writer.cpp opengl32_enhancer.ini
+git add render_target.h render_target.cpp render_target_test.cpp CMakeLists.txt config.h config.cpp opengl32_enhancer.ini
 git commit -m "Add the supersampling scaling rule and its config keys"
 ```
 
