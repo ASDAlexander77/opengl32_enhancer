@@ -445,6 +445,68 @@ bool CheckResolveHalvingSteps() {
     return ok;
 }
 
+// The colour space each stage wants to be handed - see ColorSpaceFor in post_effects.h.
+// Every one of the twenty-five EffectKind values is listed, not just the three interesting
+// ones: a stage added later without a considered space is exactly the failure this catches,
+// and a test that only pinned the Display ones would not catch it.
+bool CheckColorSpaceFor() {
+    struct Row { EffectKind stage; ColorSpace expected; const char* why; };
+    const Row rows[] = {
+        // The three that want display-referred values.
+        {EffectKind::LutGrading, ColorSpace::Display,
+         ".cube LUTs are authored against encoded input; a linear value reads the wrong cell"},
+        {EffectKind::Dither, ColorSpace::Display,
+         "it exists to hide the quantisation of the final 8-bit write"},
+        {EffectKind::Gamma, ColorSpace::Display,
+         "an output correction - it should act on what is about to be shown"},
+
+        // acestonemap is the one most likely to be got wrong, so it is pinned with its
+        // reasoning: the Narkowicz fit maps linear light into a display-referred RANGE whose
+        // values still have to be encoded afterwards, so its output is still 'linear, not yet
+        // encoded'. If this were Display, every stage would need separate in and out spaces.
+        {EffectKind::AcesToneMap, ColorSpace::Linear,
+         "the Narkowicz fit takes linear light and its output still needs encoding"},
+
+        // Everything else averages, filters or blends, and all of those want light.
+        {EffectKind::None, ColorSpace::Linear, "no stage, no opinion"},
+        {EffectKind::Invert, ColorSpace::Linear, "a per-pixel transform on light"},
+        {EffectKind::Bilinear, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::NVScaler, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::Bloom, ColorSpace::Linear, "threshold and blur both weight luminance"},
+        {EffectKind::Sharpen, ColorSpace::Linear, "a neighbourhood weighting"},
+        {EffectKind::Vignette, ColorSpace::Linear, "a multiply on light"},
+        {EffectKind::ChromaticAberration, ColorSpace::Linear, "resamples per channel"},
+        {EffectKind::Taa, ColorSpace::Linear, "blends against history"},
+        {EffectKind::Smaa, ColorSpace::Linear, "blends along detected edges"},
+        {EffectKind::Fsr, ColorSpace::Linear, "reconstruction is an average"},
+        {EffectKind::Cas, ColorSpace::Linear, "a neighbourhood weighting"},
+        {EffectKind::Nr, ColorSpace::Linear, "denoising is an average"},
+        {EffectKind::LocalContrast, ColorSpace::Linear, "a local mean"},
+        {EffectKind::DepthVignette, ColorSpace::Linear, "a multiply on light"},
+        {EffectKind::Ssao, ColorSpace::Linear, "an occlusion multiply on light"},
+        {EffectKind::Dof, ColorSpace::Linear, "a blur"},
+        {EffectKind::Fog, ColorSpace::Linear, "a blend towards a fog colour"},
+        {EffectKind::LightShafts, ColorSpace::Linear, "radial accumulation is an average"},
+        {EffectKind::Ssr, ColorSpace::Linear, "a blend of reflected light"},
+        {EffectKind::MotionBlur, ColorSpace::Linear, "a directional average"},
+    };
+
+    bool ok = true;
+    for (const Row& row : rows) {
+        char what[256];
+        snprintf(what, sizeof(what), "%s wants %s (%s)", EffectNameFor(row.stage),
+                 row.expected == ColorSpace::Display ? "display" : "linear", row.why);
+        ok = Check(ColorSpaceFor(row.stage) == row.expected, what) && ok;
+    }
+
+    // The count is asserted, not assumed. Adding an EffectKind without adding a row here
+    // would otherwise leave the new stage's space silently unpinned, which is the whole
+    // failure this table exists to prevent.
+    ok = Check((int)(sizeof(rows) / sizeof(rows[0])) == 25,
+               "all 25 EffectKind values have a pinned colour space") && ok;
+    return ok;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -533,6 +595,7 @@ int main() {
     ok = CheckShouldSkipEffectChain() && ok;
     ok = CheckShouldSkipAllWork() && ok;
     ok = CheckResolveHalvingSteps() && ok;
+    ok = CheckColorSpaceFor() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {
@@ -577,9 +640,25 @@ int main() {
     gl.glGenFramebuffers(1, &patternFbo);
     gl.glBindFramebuffer(GL_FRAMEBUFFER, patternFbo);
     gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, patternTex, 0);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    // The two halves of "put the known pattern exactly where ApplySelectedEffect() captures
+    // from, then read back exactly what a player would see". Named here rather than left inline
+    // because the scenarios further down need the same pair, and a second hand-written copy of
+    // the blit is how a later case quietly ends up feeding the pipeline a different input than
+    // the primary run did while still comparing its result against inputPixels.
+    auto BlitPatternToBackBuffer = [&]() {
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, patternFbo);
+        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        gl.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT,
+                             GL_NEAREST);
+    };
+    auto ReadBackBuffer = [&](std::vector<unsigned char>& out) {
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glReadBuffer(GL_BACK);
+        gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    };
+
+    BlitPatternToBackBuffer();
     unsigned int blitErr = gl.glGetError();
     ok = Check(blitErr == 0, "test pattern blitted onto the real back buffer with no GL error") && ok;
 
@@ -592,9 +671,7 @@ int main() {
     // Read back the real back buffer - post_effects.cpp always presents to it, so this is
     // what a player would actually see on screen.
     std::vector<unsigned char> outputPixels((size_t)width * height * 4);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
-    gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outputPixels.data());
+    ReadBackBuffer(outputPixels);
     unsigned int readErr = gl.glGetError();
     ok = Check(readErr == 0, "readback of the final back buffer left no GL error") && ok;
 
@@ -957,6 +1034,224 @@ int main() {
         mutableConfig.renderWidth = savedRenderWidth;
         mutableConfig.renderHeight = savedRenderHeight;
         mutableConfig.frameDumpKey = savedFrameDumpKey;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
+
+    // --- the sRGB bracket is an identity around a no-op chain ---
+    //
+    // The safety property: with srgbCorrect=1 and a chain that does nothing, decode-then-encode
+    // must give the image back. If this drifts, every frame drifts.
+    //
+    // `invert, invert` and NOT an empty chain, deliberately. ShouldSkipEffectChain returns early
+    // on an empty chain, so no conversion would run at all and the test would pass while proving
+    // nothing. Two inverts is a real pair of Linear stages with a known composite identity - and
+    // note inverting in linear space is NOT the same operation as inverting in gamma space, so
+    // this also confirms the stages really did see linear values.
+    //
+    // Both stages are Linear, so nothing inside the chain returns the image to display space -
+    // the ONLY thing that can is the encode on present. That makes this the case that tests the
+    // bracket itself rather than a mid-chain conversion, and it is why the chain is exactly two
+    // stages long. (While the present path did not yet encode, this case carried a third stage,
+    // `gamma` at 1/1, purely to close the bracket by hand; the present encode replaced it.)
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        EffectKind savedStage1 = mutableConfig.stages[1];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+
+        mutableConfig.stageCount = 2;
+        mutableConfig.stages[0] = EffectKind::Invert;
+        mutableConfig.stages[1] = EffectKind::Invert;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        // The shipped ini leaves fxIndicator=1, and the badge is painted straight onto the final
+        // texture AFTER the chain - it is not a stage and takes no part in the colour-space
+        // bracket. Left on, it overwrites the pattern's top-right checkerboard with its own
+        // pixels, which is a worst-case difference of 245 that has nothing whatever to do with
+        // sRGB. Off, so this assertion measures the round trip and only the round trip.
+        mutableConfig.fxIndicator = false;
+        ResetRenderTargetState();                 // no supersampling: isolate the bracket
+
+        BlitPatternToBackBuffer();                // the same known pattern the primary run uses
+        ApplySelectedEffect(hdc);
+        std::vector<unsigned char> out((size_t)width * height * 4);
+        ReadBackBuffer(out);
+
+        int worst = 0;
+        for (size_t i = 0; i < inputPixels.size(); ++i) {
+            int d = abs((int)inputPixels[i] - (int)out[i]);
+            worst = d > worst ? d : worst;
+        }
+        printf("srgb bracket identity: worst per-channel difference = %d\n", worst);
+        // +-1, not byte-exact, and that is honest rather than lax: the round trip passes through
+        // RGBA16F, whose ten-bit mantissa can land a value on the wrong side of an 8-bit
+        // rounding boundary. Claiming byte-exactness would claim something the format cannot
+        // deliver. A broken conversion is off by far more than one step.
+        ok = Check(worst <= 1,
+                   "srgb bracket: decode-then-encode returns the image around a no-op chain") && ok;
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.stages[1] = savedStage1;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
+        mutableConfig.fxIndicator = savedFxIndicator;
+    }
+
+    // --- a display-space stage gets handed display-referred values ---
+    //
+    // `gamma` at gamma=1, brightness=1 is documented to reproduce its input EXACTLY (gamma.h:
+    // the pow() is skipped outright at gamma=1). As a Display stage it forces an encode before
+    // it and leaves the image in display space, so the present path must then do nothing - the
+    // fourth row of the design's data-flow table. Net effect: still an identity, but reached
+    // through the mid-chain conversion rather than the bracket's own.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Gamma;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        mutableConfig.fxIndicator = false;   // same reason as the bracket case above
+        ResetRenderTargetState();
+
+        BlitPatternToBackBuffer();
+        ApplySelectedEffect(hdc);
+        std::vector<unsigned char> out((size_t)width * height * 4);
+        ReadBackBuffer(out);
+
+        int worst = 0;
+        for (size_t i = 0; i < inputPixels.size(); ++i) {
+            int d = abs((int)inputPixels[i] - (int)out[i]);
+            worst = d > worst ? d : worst;
+        }
+        printf("srgb mid-chain identity: worst per-channel difference = %d\n", worst);
+        ok = Check(worst <= 1,
+                   "srgb mid-chain: a Display stage is handed encoded values and the present "
+                   "path then correctly does nothing") && ok;
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
+        mutableConfig.fxIndicator = savedFxIndicator;
+    }
+
+    // --- the resolve averages LINEAR light, not encoded values ---
+    //
+    // The whole ordering decision in one number. Black against white, resolved 2:1:
+    //   averaging encoded values -> 128
+    //   averaging light          -> decode to 0 and 1, average to 0.5, encode -> 188
+    // A 60-point gap, far outside any rounding argument.
+    //
+    // Run twice: once with a chain ending in a Linear stage, once ending in a Display stage.
+    // The second is the shipped effect= line's shape (it ends '... dither, gamma') and is the
+    // only one that catches a missing decode-before-resolve.
+    //
+    // fxIndicator is deliberately NOT forced off here, unlike the two identity cases above, and
+    // that is a checked decision rather than an oversight: the badge is a 45x33 plate 8 texels
+    // from the top-right corner of the 512x512 pre-resolve image, so after the 2:1 halving it
+    // occupies rows 235-251 of the 256-row result. The row sampled below is row 128. The two
+    // cannot meet, and these cases measure a mean rather than comparing against inputPixels.
+    struct ResolveCase { EffectKind lastStage; const char* label; };
+    const ResolveCase resolveCases[] = {
+        {EffectKind::Invert,  "chain ending Linear"},
+        {EffectKind::Gamma,   "chain ending Display"},
+    };
+
+    for (const ResolveCase& rc : resolveCases) {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount = mutableConfig.stageCount;
+        bool savedSrgb = mutableConfig.srgbCorrect;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        EffectKind savedStage1 = mutableConfig.stages[1];
+        int savedRenderWidth = mutableConfig.renderWidth;
+        int savedRenderHeight = mutableConfig.renderHeight;
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+
+        // Two stages, both no-ops, so the only thing shaping the result is the resolve.
+        // invert+invert composes to identity; gamma at 1/1 is documented to be exact.
+        mutableConfig.stageCount = 2;
+        mutableConfig.stages[0] = EffectKind::Invert;
+        mutableConfig.stages[1] = rc.lastStage;
+        mutableConfig.gamma = 1.0f;
+        mutableConfig.brightness = 1.0f;
+        mutableConfig.srgbCorrect = true;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed = Check(IsSupersampleActive(), "linear resolve: supersampling armed");
+        ok = armed && ok;
+        if (armed) {
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // One-pixel-wide alternating black and white columns in the render target. At 2:1
+            // every destination pixel covers exactly one black and one white texel.
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            for (int x = 1; x < mutableConfig.renderWidth; x += 2) {
+                pGlScissor(x, 0, 1, mutableConfig.renderHeight);
+                pGlClear(GL_COLOR_BUFFER_BIT);
+            }
+            pGlDisable(GL_SCISSOR_TEST);
+
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+
+            std::vector<unsigned char> out((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+
+            long long total = 0;
+            int counted = 0;
+            for (int x = 4; x < width - 4; ++x) {
+                total += out[((size_t)(height / 2) * width + x) * 4];
+                ++counted;
+            }
+            int mean = (int)(total / counted);
+            char what[200];
+            snprintf(what, sizeof(what),
+                     "linear resolve (%s): black against white resolves to ~188 (light), "
+                     "not ~128 (encoded values)", rc.label);
+            printf("linear resolve (%s): middle row mean = %d\n", rc.label, mean);
+            ok = Check(mean >= 170 && mean <= 205, what) && ok;
+        }
+
+        mutableConfig.stageCount = savedStageCount;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.stages[1] = savedStage1;
+        mutableConfig.renderWidth = savedRenderWidth;
+        mutableConfig.renderHeight = savedRenderHeight;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.srgbCorrect = savedSrgb;
         ResetRenderTargetState();
         pGlViewport(0, 0, width, height);
     }

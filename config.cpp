@@ -565,6 +565,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.renderHeight = ParseClampedInt(value, 0, 16384, config.renderHeight, "renderHeight");
         } else if (strcmp(key, "renderFloatBuffer") == 0) {
             config.renderFloatBuffer = ParseBool(value, config.renderFloatBuffer, "renderFloatBuffer");
+        } else if (strcmp(key, "srgbCorrect") == 0) {
+            config.srgbCorrect = ParseBool(value, config.srgbCorrect, "srgbCorrect");
         } else if (strcmp(key, "frameDumpKey") == 0) {
             // A Windows virtual-key code, so the sensible way to write it in an ini is hex
             // (0x7B = F12). strtol with base 0 accepts both that and plain decimal.
@@ -620,7 +622,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            "gamma=%.3f, brightness=%.3f, "
            "windowWidth=%d, windowHeight=%d, "
            "frameDumpKey=0x%02X, frameDumpPath='%s', cameraLogInterval=%d, "
-           "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s)\n",
+           "fxIndicator=%s, anisotropy=%.3f, textureEffect=%s, srgbCorrect=%s)\n",
            path, stageList, config.scale, config.acesStrength,
            config.bloomThreshold, config.bloomIntensity, config.sharpness,
            config.lutPath, config.lutStrength,
@@ -643,7 +645,7 @@ AnaxConfig ParseConfigFile(const char* path) {
            config.windowWidth, config.windowHeight,
            config.frameDumpKey, config.frameDumpPath, config.cameraLogInterval,
            config.fxIndicator ? "true" : "false", config.anisotropy,
-           EffectNameFor(config.textureEffect));
+           EffectNameFor(config.textureEffect), config.srgbCorrect ? "true" : "false");
     return config;
 }
 

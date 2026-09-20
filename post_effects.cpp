@@ -51,6 +51,7 @@
 #include "frame_dump.h"
 #include "gl_loader.h"
 #include "window_override.h"
+#include "srgb_convert.h"
 
 // Same no-<windows.h> discipline as the rest of this DLL (see config.cpp's equivalent block and
 // wrapper.cpp's header comment): <windows.h> declares dllimport wgl*/gl* names that collide with
@@ -385,6 +386,18 @@ bool StageNeedsDepth(EffectKind stage) {
             return true;
         default:
             return false;
+    }
+}
+
+// See post_effects.h.
+ColorSpace ColorSpaceFor(EffectKind stage) {
+    switch (stage) {
+        case EffectKind::LutGrading:
+        case EffectKind::Dither:
+        case EffectKind::Gamma:
+            return ColorSpace::Display;
+        default:
+            return ColorSpace::Linear;
     }
 }
 
@@ -770,6 +783,46 @@ void ApplySelectedEffect(void* hdc) {
     bool atNativeRes = true;
     static bool warnedDepthAfterUpscale = false;
 
+    // The sRGB bracket opens here - see srgb_convert.h and the design doc. The frame the game
+    // drew is sRGB-encoded; every stage below wants light. Decoding once here and encoding
+    // once on present is what makes the whole chain correct, rather than each stage having to
+    // know about the encoding.
+    //
+    // Decoded into pair[1] and the ping-pong advanced, exactly like a stage - the conversion
+    // IS a stage in every respect except that the user did not list it. It sits here, just
+    // below the ping-pong's own declarations rather than up at the capture itself, because
+    // cur/curWidth/curHeight are what it advances and they do not exist any earlier; nothing
+    // between the capture and this point touches colour.
+    ColorSpace space = ColorSpace::Display;
+    if (config.srgbCorrect) {
+        if (ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Linear;
+        }
+        // captureTex is deliberately NOT decoded, and this is the trap: it LOOKS like a frame
+        // that ought to be linear alongside the rest of the pipeline, and it is not read as
+        // light anywhere. Its only two consumers, taa.cpp and motion_blur.cpp, each fetch it at
+        // exactly one place - inside IsHud - where it is compared against worldTex and against
+        // nothing else:
+        //
+        //     IsHud(c) = any(abs(captureTex[c] - worldTex[c]) > 1/128)
+        //
+        // A difference between two textures is space-invariant as long as BOTH sides share a
+        // space. worldTex belongs to world_capture.h and nothing here converts it, so decoding
+        // captureTex alone converts one operand of that comparison and not the other. Mid-grey
+        // is 0.5 encoded and 0.214 linear - a delta of 0.286, thirty-six times the threshold -
+        // so every non-black pixel would read as HUD, motionblur would return its source
+        // frame-wide and taa's reprojected resolve would be bypassed everywhere. The feature
+        // would silently switch both stages off rather than make them more correct.
+        //
+        // Decoding BOTH would be self-consistent but still worse: the threshold is documented
+        // in both shaders as sitting "just clear of 8-bit quantisation (1/255)", which is a
+        // claim about ENCODED values. Decoding compresses differences near black, so the mask
+        // would quietly lose sensitivity in shadows. Leaving the pair encoded is the calibrated
+        // choice, not merely the cheap one. The pipeline image those stages actually filter
+        // arrives separately, through currentTex/colorTex, and that one IS linear.
+    }
+
     for (int i = 0; i < config.stageCount; ++i) {
         EffectKind stage = config.stages[i];
 
@@ -854,6 +907,30 @@ void ApplySelectedEffect(void* hdc) {
         // config.scale is deliberately NOT used for a real upscale: it would additionally
         // simulate a lower-res look on top of a resize that is already real.
         float upscaleRatio = doRealUpscale ? realUpscaleRatio : config.scale;
+
+        // The image is in whatever space the last stage left it in; this stage may want the
+        // other one. Only generated when they actually disagree, so a chain that is entirely
+        // Linear (the common case) pays for the bracket and nothing more.
+        if (config.srgbCorrect && ColorSpaceFor(stage) != space) {
+            bool converted = (space == ColorSpace::Display)
+                                 ? ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)
+                                 : ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight);
+            if (converted) {
+                cur = 1 - cur;
+                space = ColorSpaceFor(stage);
+                // src and dst were taken from the ping-pong a few lines above and the
+                // conversion has just advanced it, so both are stale. Left alone, this stage
+                // would read the pre-conversion texture - and when it is not a real upscale it
+                // would also WRITE the texture it is reading, a feedback loop that is obvious
+                // on screen and silent in a suite that never lists a display-space stage. A
+                // real upscale keeps its own destination (g_pipeline.tex[0]), which the
+                // ping-pong does not name, so only dst outside that case needs recomputing.
+                src = pair[cur];
+                if (!doRealUpscale) {
+                    dst = pair[1 - cur];
+                }
+            }
+        }
 
         bool wrote = false;
         switch (stage) {
@@ -1181,7 +1258,32 @@ void ApplySelectedEffect(void* hdc) {
     // steps is 0 whenever the source is already within 2x, which includes every frame with
     // supersampling off - so this whole block is skipped and the present stays the single blit
     // it has always been.
+
+    // The resolve's halvings are averages, and averages are the whole reason this feature
+    // exists - so the resolve must see light. A chain ending in a display-space stage is
+    // decoded once more first.
+    //
+    // Conditional on there BEING halvings - and this is where the coverage actually ends. This
+    // decode only reaches the halving loop below; the encode that closes the bracket runs right
+    // after that loop and BEFORE the remainder blit in part two below, so only an EXACT
+    // power-of-two ratio (2x, 4x, 8x...) resolves entirely in linear light. At 3x, one halving
+    // here runs linear and the residual 1.5x shrink in part two runs on already-encoded values.
+    // Below 2x, steps is 0: the whole downsample IS that single remainder blit, on encoded
+    // values, so srgbCorrect changes nothing about the resolve at that ratio at all.
+    // ResolveHalvingSteps explicitly supports 3x and 5x, so this is not a corner case - it is a
+    // known follow-up. Not fixed here: shrinking the remainder in linear too is a structural
+    // change to the present path and needs its own non-power-of-two test: this file's suite
+    // only exercises exact 2x and 4x, so it cannot see the gap.
+    //
+    // Without this, the SHIPPED effect= line - which ends '... dither, gamma', both
+    // display-space stages - would have gone straight back into the bug this feature fixes.
     int steps = ResolveHalvingSteps(curWidth, curHeight, presentWidth, presentHeight);
+    if (config.srgbCorrect && steps > 0 && space == ColorSpace::Display) {
+        if (ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Linear;
+        }
+    }
     if (steps > 0) {
         if (g_pipeline.resolveFbo == 0) {
             gl.glGenFramebuffers(1, &g_pipeline.resolveFbo);
@@ -1200,6 +1302,16 @@ void ApplySelectedEffect(void* hdc) {
             cur = 1 - cur;
             curWidth = halfWidth;
             curHeight = halfHeight;
+        }
+    }
+
+    // The bracket closes here. After the resolve, so the halvings above averaged light -
+    // encoding first would have fixed the chain while leaving the largest single instance of
+    // the bug (the downsample) in place.
+    if (config.srgbCorrect && space == ColorSpace::Linear) {
+        if (ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
+            cur = 1 - cur;
+            space = ColorSpace::Display;
         }
     }
 
