@@ -53,8 +53,10 @@ void NotifyGameViewport(int x, int y, int width, int height) {
 
 void ArmSupersampleForFrame(bool targetReady) {
     const AnaxConfig& config = GetAnaxConfig();
+    // No `renderWidth > 0` check: g_haveRef implies the reference is positive, so the >=
+    // comparisons below already imply it. A mutation test proved the explicit check
+    // unreachable, which is the definition of code that is not doing anything.
     g_armed = targetReady &&
-              config.renderWidth > 0 && config.renderHeight > 0 &&
               g_haveRef &&
               config.renderWidth >= g_refWidth && config.renderHeight >= g_refHeight;
 }

@@ -51,10 +51,15 @@ bool ScalesSubViewportProportionally() {
 
 // The factor is fractional in general. Scaling origin and size independently and rounding each
 // makes adjacent rectangles disagree by a pixel; scaling by edges makes them abut exactly.
+//
+// 1000/640 = 1.5625, and the origins are deliberately not multiples of anything that makes
+// the intermediates whole. An earlier version used x=0,100,200 at x3.75, where every
+// intermediate was an exact integer and a width-scaled-independently mutant produced
+// identical output - the mutation table said this test pinned edge scaling, and it did not.
 bool ScalesByEdgesSoAdjacentRectsAbut() {
-    ArmWithReference(2400, 1800, 640, 480);      // x3.75, deliberately not a whole number
-    int ax = 0, ay = 0, aw = 100, ah = 480;
-    int bx = 100, by = 0, bw = 100, bh = 480;
+    ArmWithReference(1000, 750, 640, 480);
+    int ax = 1, ay = 0, aw = 3, ah = 480;
+    int bx = 4, by = 0, bw = 3, bh = 480;
     ScaleGameRect(ax, ay, aw, ah);
     ScaleGameRect(bx, by, bw, bh);
     return Check(ax + aw == bx,
@@ -112,14 +117,27 @@ bool RelatchesAfterAVideoModeChange() {
 }
 
 // Rendering SMALLER than the game asked for is a different feature wearing this one's name.
-bool RefusesATargetBelowTheGameViewport() {
+//
+// Each of these undersizes exactly ONE axis. The original single test undersized both, so
+// whichever guard survived a mutation still blocked arming and the mutation was invisible.
+bool RefusesATargetNarrowerThanTheGameViewport() {
     ResetRenderTargetState();
-    Configure(320, 240);
+    Configure(320, 2400);
     NotifyFrameBoundary();
     NotifyGameViewport(0, 0, 640, 480);
     ArmSupersampleForFrame(true);
     return Check(!IsSupersampleActive(),
-                 "a target smaller than the game's own viewport is refused");
+                 "a target narrower than the game's own viewport is refused");
+}
+
+bool RefusesATargetShorterThanTheGameViewport() {
+    ResetRenderTargetState();
+    Configure(3200, 240);
+    NotifyFrameBoundary();
+    NotifyGameViewport(0, 0, 640, 480);
+    ArmSupersampleForFrame(true);
+    return Check(!IsSupersampleActive(),
+                 "a target shorter than the game's own viewport is refused");
 }
 
 bool RefusesWhenOnlyOneDimensionIsSet() {
@@ -150,7 +168,8 @@ int main() {
     DoesNotArmWhenTheTargetIsNotReady();
     TakesTheFirstViewportOfTheFrameAsReference();
     RelatchesAfterAVideoModeChange();
-    RefusesATargetBelowTheGameViewport();
+    RefusesATargetNarrowerThanTheGameViewport();
+    RefusesATargetShorterThanTheGameViewport();
     RefusesWhenOnlyOneDimensionIsSet();
     DoesNotArmBeforeAnyViewportIsSeen();
 
