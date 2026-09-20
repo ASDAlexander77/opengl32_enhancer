@@ -73,6 +73,7 @@ int main() {
         Check(config.vignetteRadius == 0.7f, "missing file falls back to default vignetteRadius");
         Check(config.chromaticAberrationStrength == 0.3f, "missing file falls back to default chromaticAberrationStrength");
         Check(config.ditherStrength == 1.0f, "missing file falls back to default ditherStrength");
+        Check(!config.srgbCorrect, "missing file falls back to default srgbCorrect (false)");
     }
 
     // A single-stage effect list.
@@ -86,6 +87,17 @@ int main() {
         CheckStages(config, expected, 1, "single-stage effect=nvscaler");
         Check(config.scale == 0.8f, "valid file parses scale=0.8");
         Check(config.sharpness == 0.75f, "valid file parses sharpness=0.75");
+    }
+
+    // srgbCorrect is the opt-in for running the chain on linear light.
+    {
+        WriteFixture("config_test_srgb.ini", "srgbCorrect=1\n");
+        AnaxConfig config = ParseConfigFile("config_test_srgb.ini");
+        Check(config.srgbCorrect, "srgbCorrect=1 turns linear-light processing on");
+
+        WriteFixture("config_test_srgb_off.ini", "srgbCorrect=0\n");
+        AnaxConfig off = ParseConfigFile("config_test_srgb_off.ini");
+        Check(!off.srgbCorrect, "srgbCorrect=0 turns it off");
     }
 
     // The whole pipeline in one list, in a non-default order, with mixed case and stray

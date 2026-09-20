@@ -204,6 +204,17 @@ struct AnaxConfig {
     // should not change anything except sample count.
     bool renderFloatBuffer = false;
 
+    // Runs the whole effect= chain on linear light instead of sRGB-encoded values: the frame
+    // is decoded once after capture and encoded once on present. Every stage that averages,
+    // blurs, thresholds or tone-maps is weighting light rather than an encoding of it -
+    // including the supersample resolve, where black against white resolves to 188 rather
+    // than 128. See docs/superpowers/specs/2026-09-20-srgb-correctness-design.md.
+    //
+    // Off by default because turning it on changes every image the chain produces:
+    // bloomThreshold, acesStrength and every tuned intensity stop meaning what they meant.
+    // Same reasoning as renderFloatBuffer above.
+    bool srgbCorrect = false;
+
     // Draws a small "FX" badge in a corner of the frame whenever the effect= pipeline actually
     // runs, so you can tell "the pipeline ran but nothing looked different" apart from "the
     // proxy isn't loaded/configured at all" without checking the log - see fx_indicator.h.
