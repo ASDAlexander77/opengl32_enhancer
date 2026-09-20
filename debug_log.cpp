@@ -72,10 +72,20 @@ bool RedirectStdoutToDebugLog() {
     }
 
     // A game can sit at a loading screen for a long time between diagnostics, and can be killed
-    // outright rather than exiting cleanly, which would strand a buffered log. Line buffering
-    // costs nothing at these volumes and means the file is worth reading while the game is still
-    // running - which is exactly when it is needed.
-    setvbuf(stdout, nullptr, _IOLBF, 4096);
+    // outright rather than exiting cleanly, which would strand a buffered log. The file has to be
+    // worth reading while the game is still running - which is exactly when it is needed.
+    //
+    // Unbuffered rather than line buffered, because MSVC does not implement _IOLBF: it documents
+    // the mode as equivalent to _IOFBF, so asking for line buffering here silently produced a 4KB
+    // block-buffered log. The symptom is subtle and was mistaken for the game hanging - the last
+    // line in the file is always a truncated fragment sitting on a block boundary, everything
+    // since the last flush is lost when the process is killed, and a quiet run (one where
+    // cameraLogInterval is 0, say) can write almost nothing to disk for minutes at a time.
+    //
+    // The cost is a write per printf, which this DLL can afford precisely because it refuses to
+    // log per call: see generators/gen_wrapper_cpp.py's ANAX_TRACE, which is compile-time off for
+    // exactly this reason.
+    setvbuf(stdout, nullptr, _IONBF, 0);
     g_redirected = true;
     return true;
 }
