@@ -696,6 +696,198 @@ int main() {
         pGlViewport(0, 0, width, height);
     }
 
+    // --- The same end-to-end resolve, beside the empty-chain case above, but with a NON-EMPTY
+    // effect chain - the configuration a real user actually runs (a full effect= list AND a
+    // render size). ---
+    //
+    // The empty-chain case above found a real bug in the capture/pair-selection code
+    // (g_pipeline.hasNativePair vs hasRealUpscale - see post_effects.cpp) that both the
+    // stageCount==0 and stageCount>0 paths share. Proving the fix only against stageCount==0
+    // would leave the actually-shipped configuration - a real chain running while supersampling
+    // is armed - unverified, so this case exercises the same present-resolve path with one
+    // stage actually listed.
+    //
+    // Stage choice: `gamma`, with gamma=1.0 and brightness=0.5. gamma.h documents that gamma=1
+    // skips pow() outright ("gamma=1 with brightness=1 reproduces the input EXACTLY - the pow()
+    // is skipped outright"), so at gamma=1 the whole per-pixel transform is a single multiply,
+    // c = max(color*brightness, 0) - no transcendental function, nothing to reason about beyond
+    // arithmetic. That makes it the cheapest stage in the pipeline to predict exactly, which
+    // matters here: this case DERIVES its expected pixel values from that formula rather than
+    // hardcoding whatever a prior run happened to print - a fixed expected value copied from
+    // observed output would pin this driver's behaviour instead of the production code's.
+    //   - Black is an exact fixed point of the formula for any brightness >= 0 (0 * x is 0), so
+    //     it stays exactly 0 regardless of the stage - the presence check below is unaffected.
+    //   - White (1.0) becomes exactly `brightness` = 0.5, i.e. 127.5/255 - NOT 255 any more.
+    //     brightness is deliberately NOT left at 1.0 for this reason: if the wrong texture were
+    //     presented (the one BEFORE the chain ran, rather than the one it actually last wrote -
+    //     see post_effects.cpp's `cur` ping-pong index), the far corner would still read close
+    //     to 255, not the derived ~127.5, and the destination-rectangle assertion below would
+    //     catch that mismatch. A brightness of 1.0 could not have told the two cases apart.
+    {
+        AnaxConfig& mutableConfig = GetMutableAnaxConfig();
+        int savedStageCount2 = mutableConfig.stageCount;
+        int savedRenderWidth2 = mutableConfig.renderWidth;
+        int savedRenderHeight2 = mutableConfig.renderHeight;
+        EffectKind savedStage0 = mutableConfig.stages[0];
+        float savedGamma = mutableConfig.gamma;
+        float savedBrightness = mutableConfig.brightness;
+        bool savedFxIndicator = mutableConfig.fxIndicator;
+
+        const float kBrightness = 0.5f;
+        const float kGamma = 1.0f;  // skips pow() per gamma.h - a pure linear scale.
+        mutableConfig.stageCount = 1;
+        mutableConfig.stages[0] = EffectKind::Gamma;
+        mutableConfig.gamma = kGamma;
+        mutableConfig.brightness = kBrightness;
+        // The FX badge draws, unconditionally, on the final texture's own corner whenever
+        // stageCount > 0 - the same corner this case samples for its destination-rectangle
+        // check (see the gamma-wiring scenario below for the same reasoning). Off for the same
+        // reason: leaving it on would supply a pixel difference of its own and confound the
+        // assertion this case is actually trying to make.
+        mutableConfig.fxIndicator = false;
+        mutableConfig.renderWidth = width * 2;
+        mutableConfig.renderHeight = height * 2;
+
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, width, height);
+        ArmSupersampleForFrame(EnsureRenderTarget());
+        bool armed2 = Check(IsSupersampleActive(),
+                             "end-to-end resolve (gamma chain): supersampling armed for this "
+                             "frame (if this fails, nothing below proves anything)");
+        ok = armed2 && ok;
+
+        if (armed2) {
+            BindRenderTarget();
+            pGlViewport(0, 0, mutableConfig.renderWidth, mutableConfig.renderHeight);
+
+            // Same one-texel-off-multiple split as the empty-chain case above, and for the same
+            // reason: a split exactly on the 2:1 boundary lands on the edge between two
+            // destination pixels' non-overlapping source windows, and neither one would ever
+            // see both tones.
+            int splitX2 = mutableConfig.renderWidth / 2 - 1;
+            pGlEnable(GL_SCISSOR_TEST);
+            pGlScissor(0, 0, splitX2, mutableConfig.renderHeight);
+            pGlClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlScissor(splitX2, 0, mutableConfig.renderWidth - splitX2,
+                       mutableConfig.renderHeight);
+            pGlClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+            pGlDisable(GL_SCISSOR_TEST);
+
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            pGlClearColor(40.0f / 255.0f, 40.0f / 255.0f, 180.0f / 255.0f, 1.0f);
+            pGlClear(GL_COLOR_BUFFER_BIT);
+
+            ApplySelectedEffect(hdc);
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (gamma chain): ApplySelectedEffect() left no GL "
+                       "error") && ok;
+
+            std::vector<unsigned char> resolvedPixels2((size_t)width * height * 4);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            gl.glReadBuffer(GL_BACK);
+            gl.glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE,
+                             resolvedPixels2.data());
+            ok = Check(gl.glGetError() == 0,
+                       "end-to-end resolve (gamma chain): readback of the real back buffer "
+                       "left no GL error") && ok;
+
+            auto sampleAt2 = [&](int x, int y, unsigned char out[4]) {
+                size_t i = ((size_t)y * width + x) * 4;
+                out[0] = resolvedPixels2[i + 0];
+                out[1] = resolvedPixels2[i + 1];
+                out[2] = resolvedPixels2[i + 2];
+                out[3] = resolvedPixels2[i + 3];
+            };
+
+            // Derived expected channel values - see the block comment above for the formula
+            // each one comes from.
+            const float expectedBlackChannel = 0.0f;
+            const float expectedWhiteChannel = kBrightness * 255.0f;  // 127.5
+
+            // PRESENCE: well inside the left (black) half. Black is a fixed point of the gamma
+            // stage's formula, so the same tight bound as the empty-chain case still applies
+            // unchanged.
+            unsigned char leftPixel[4];
+            sampleAt2(width / 4, height / 2, leftPixel);
+            bool presented2 = leftPixel[0] < 50 && leftPixel[1] < 50 && leftPixel[2] < 50;
+            printf("end-to-end resolve (gamma chain): presence pixel rgb = %d,%d,%d (expected "
+                   "black-ish)\n", leftPixel[0], leftPixel[1], leftPixel[2]);
+            ok = Check(presented2,
+                       "end-to-end resolve (gamma chain): presence - something was presented, "
+                       "not the black-screen regression") && ok;
+
+            // DESTINATION RECTANGLE: a few pixels in from the far (high x, high y) corner, deep
+            // in the (gamma-transformed) white half. Banded around the DERIVED
+            // expectedWhiteChannel (~127.5) rather than a hardcoded 255, with the same +/-45
+            // margin the empty-chain case effectively used around ITS derived value (255) -
+            // wide enough for blit/8-bit-rounding slop, narrow enough to fail both if the
+            // destination rectangle is wrong (which crops to an almost-all-black region, per
+            // the empty-chain case's investigation - comfortably below this band) and if the
+            // WRONG, still-255 pre-gamma texture were presented instead of the chain's actual
+            // last-written one (comfortably above this band).
+            unsigned char farPixel[4];
+            sampleAt2(width - 5, height - 5, farPixel);
+            bool farMatchesTransformedWhite =
+                farPixel[0] > expectedWhiteChannel - 45.0f && farPixel[0] < expectedWhiteChannel + 45.0f &&
+                farPixel[1] > expectedWhiteChannel - 45.0f && farPixel[1] < expectedWhiteChannel + 45.0f &&
+                farPixel[2] > expectedWhiteChannel - 45.0f && farPixel[2] < expectedWhiteChannel + 45.0f;
+            printf("end-to-end resolve (gamma chain): far-corner pixel rgb = %d,%d,%d (expected "
+                   "~%.1f - the gamma-transformed white, not 255 or the clear colour)\n",
+                   farPixel[0], farPixel[1], farPixel[2], expectedWhiteChannel);
+            ok = Check(farMatchesTransformedWhite,
+                       "end-to-end resolve (gamma chain): destination rectangle - the chain's "
+                       "actual output fills the whole window, and it is the chain's last-"
+                       "written texture that was presented") && ok;
+
+            // FILTER: straddling the seam. The present blit mixes the ALREADY gamma-transformed
+            // pixel values (gamma runs before the present blit, at native/offscreen
+            // resolution), so the expected band is the SAME 60/255..195/255 fraction of the way
+            // between the two tones the empty-chain case already justified, rescaled to this
+            // stage's own output range [expectedBlackChannel, expectedWhiteChannel] instead of
+            // [0, 255] - not a fresh tolerance, the same one, applied to the transformed range.
+            //
+            // Checked on ALL THREE channels, not just channel 0: this range is narrower than
+            // the empty-chain case's (0..127.5 rather than 0..255), and the clear colour's own
+            // R and G channels (40) land inside it by coincidence - found empirically by running
+            // the ShouldSkipEffectChain mutation below against a single-channel version of this
+            // check, which passed for the wrong reason (the pixel was still the untouched clear
+            // colour, R=G=40, B=180 - not a real seam blend). The clear colour is not achromatic
+            // like every legitimate value in this test (black, transformed white, and their
+            // blends all have R==G==B), so requiring all three channels in-band is what actually
+            // rules it out.
+            int seamX2 = splitX2 / 2;
+            unsigned char seamPixel[4];
+            sampleAt2(seamX2, height / 2, seamPixel);
+            float seamRange = expectedWhiteChannel - expectedBlackChannel;
+            float seamBandLo = expectedBlackChannel + seamRange * (60.0f / 255.0f);
+            float seamBandHi = expectedBlackChannel + seamRange * (195.0f / 255.0f);
+            bool seamIsIntermediate2 = seamPixel[0] > seamBandLo && seamPixel[0] < seamBandHi &&
+                                       seamPixel[1] > seamBandLo && seamPixel[1] < seamBandHi &&
+                                       seamPixel[2] > seamBandLo && seamPixel[2] < seamBandHi;
+            printf("end-to-end resolve (gamma chain): seam pixel rgb = %d,%d,%d (expected "
+                   "between %.1f and %.1f)\n", seamPixel[0], seamPixel[1], seamPixel[2],
+                   seamBandLo, seamBandHi);
+            ok = Check(seamIsIntermediate2,
+                       "end-to-end resolve (gamma chain): filter - the shrink averaged the "
+                       "seam rather than point-sampling one side of it") && ok;
+        }
+
+        // Restore what this block changed so every scenario below runs exactly as it did
+        // before this case existed.
+        mutableConfig.stageCount = savedStageCount2;
+        mutableConfig.renderWidth = savedRenderWidth2;
+        mutableConfig.renderHeight = savedRenderHeight2;
+        mutableConfig.stages[0] = savedStage0;
+        mutableConfig.gamma = savedGamma;
+        mutableConfig.brightness = savedBrightness;
+        mutableConfig.fxIndicator = savedFxIndicator;
+        ResetRenderTargetState();
+        pGlViewport(0, 0, width, height);
+    }
+
     // --- A second, config-independent scenario: the `gamma` stage is actually WIRED UP. ---
     //
     // Everything above deliberately tests whatever the shipped ini happens to say, which means
