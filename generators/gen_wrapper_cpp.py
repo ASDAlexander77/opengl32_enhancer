@@ -211,6 +211,7 @@ def emit_cpp(funcs):
     lines.append('#include "post_effects.h"')
     lines.append('#include "texture_effect.h"')
     lines.append('#include "texture_filter.h"')
+    lines.append('#include "texture_mipmap.h"')
     lines.append('#include "projection_capture.h"')
     lines.append('#include "modelview_capture.h"')
     lines.append('#include "world_capture.h"')
@@ -316,10 +317,13 @@ def emit_cpp(funcs):
             # See world_capture.h: the same arm also tells the world-only frame capture that a
             # world pass has begun, so the first glOrtho after it is the pre-HUD instant.
             lines.append("    NotifyWorldPassBegan();")
+            # See texture_mipmap.h - the only signal that separates world content from HUD.
+            lines.append("    NotifyMipmapWorldPass();")
         if name == "glOrtho":
             # The other half of that discrimination - the 2D/HUD pass begins here.
             lines.append("    NotifyTwoDProjection();")
             lines.append("    NotifyTwoDPassBegan();")
+            lines.append("    NotifyMipmapTwoDPass();")
         if name == "glMatrixMode":
             lines.append(f"    NotifyMatrixMode({params_call});")
         if name == "glPushMatrix":
@@ -328,6 +332,23 @@ def emit_cpp(funcs):
             lines.append("    NotifyMatrixPop();")
         if name in MATRIX_EDIT_FUNCS:
             lines.append("    NotifyMatrixEdited();")
+        # See texture_mipmap.h: every one of these is recording only, and falls through to
+        # the hook or passthrough underneath unchanged. The generation itself happens at DRAW
+        # time, not here, because nothing about an upload says whether the texture is world
+        # content or HUD artwork - only the projection in force when it is drawn does.
+        if name == "glBindTexture":
+            lines.append("    if (%s == 0x0DE1) NotifyTextureBound(%s);"
+                         % (args[0][0], args[1][0]))
+        if name == "glDeleteTextures":
+            lines.append("    NotifyTexturesDeleted((const unsigned int*)%s, (int)%s);"
+                         % (args[1][0], args[0][0]))
+        if name == "glTexImage2D":
+            lines.append("    if (%s == 0x0DE1) NotifyBoundTextureLevelUploaded(%s);"
+                         % (args[0][0], args[1][0]))
+        # The draw path. glBegin covers immediate mode, which is what an id Tech 2-era engine
+        # actually uses; the two array entry points are here so a modern caller is covered too.
+        if name in ("glBegin", "glDrawArrays", "glDrawElements"):
+            lines.append("    ApplyAutoMipmapForDraw();")
         if name == "glTexImage2D":
             # See texture_effect.h: decides whether to run this upload through the configured
             # texture effect and calls cache_var itself (with either the original pixels or

@@ -14,6 +14,7 @@
 #include "post_effects.h"
 #include "texture_effect.h"
 #include "texture_filter.h"
+#include "texture_mipmap.h"
 #include "projection_capture.h"
 #include "modelview_capture.h"
 #include "world_capture.h"
@@ -182,6 +183,7 @@ extern "C" __declspec(dllexport) void __stdcall glBegin(GLenum mode) {
             printf("[opengl32_enh_cpp]   glBegin: resolved OK\n");
         }
     }
+    ApplyAutoMipmapForDraw();
     __proc_glBegin(mode);
 }
 
@@ -198,6 +200,7 @@ extern "C" __declspec(dllexport) void __stdcall glBindTexture(GLenum target, GLu
             printf("[opengl32_enh_cpp]   glBindTexture: resolved OK\n");
         }
     }
+    if (target == 0x0DE1) NotifyTextureBound(texture);
     __proc_glBindTexture(target, texture);
 }
 
@@ -1062,6 +1065,7 @@ extern "C" __declspec(dllexport) void __stdcall glDeleteTextures(GLsizei n, void
             printf("[opengl32_enh_cpp]   glDeleteTextures: resolved OK\n");
         }
     }
+    NotifyTexturesDeleted((const unsigned int*)textures, (int)n);
     __proc_glDeleteTextures(n, textures);
 }
 
@@ -1158,6 +1162,7 @@ extern "C" __declspec(dllexport) void __stdcall glDrawArrays(GLenum mode, GLint 
             printf("[opengl32_enh_cpp]   glDrawArrays: resolved OK\n");
         }
     }
+    ApplyAutoMipmapForDraw();
     __proc_glDrawArrays(mode, first, count);
 }
 
@@ -1190,6 +1195,7 @@ extern "C" __declspec(dllexport) void __stdcall glDrawElements(GLenum mode, GLsi
             printf("[opengl32_enh_cpp]   glDrawElements: resolved OK\n");
         }
     }
+    ApplyAutoMipmapForDraw();
     __proc_glDrawElements(mode, count, type, indices);
 }
 
@@ -1658,6 +1664,7 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
     CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
     NotifyWorldProjection();
     NotifyWorldPassBegan();
+    NotifyMipmapWorldPass();
     __proc_glFrustum(left, right, bottom, top, zNear, zFar);
 }
 
@@ -3154,6 +3161,7 @@ extern "C" __declspec(dllexport) void __stdcall glOrtho(GLdouble left, GLdouble 
     }
     NotifyTwoDProjection();
     NotifyTwoDPassBegan();
+    NotifyMipmapTwoDPass();
     __proc_glOrtho(left, right, bottom, top, zNear, zFar);
 }
 
@@ -4952,6 +4960,7 @@ extern "C" __declspec(dllexport) void __stdcall glTexImage2D(GLenum target, GLin
             printf("[opengl32_enh_cpp]   glTexImage2D: resolved OK\n");
         }
     }
+    if (target == 0x0DE1) NotifyBoundTextureLevelUploaded(level);
     ApplyTextureEffectUpload(__proc_glTexImage2D, target, level, internalformat, width, height, border, format, type, pixels);
 }
 

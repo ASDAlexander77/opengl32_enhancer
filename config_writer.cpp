@@ -64,6 +64,7 @@ const char* const kManagedKeys[] = {
     "localToneStrength",
     "fxIndicator",
     "anisotropy",
+    "autoMipmap",
     "textureEffect",
 };
 const int kManagedKeyCount = (int)(sizeof(kManagedKeys) / sizeof(kManagedKeys[0]));
@@ -142,6 +143,7 @@ bool FormatValueFor(const AnaxConfig& config, const char* key, std::string& out)
     if (strcmp(key, "localToneStrength") == 0)           { out = FormatFloat(config.localToneStrength); return true; }
     if (strcmp(key, "fxIndicator") == 0)                 { out = config.fxIndicator ? "1" : "0"; return true; }
     if (strcmp(key, "anisotropy") == 0)                  { out = FormatFloat(config.anisotropy); return true; }
+    if (strcmp(key, "autoMipmap") == 0)                  { out = config.autoMipmap ? "1" : "0"; return true; }
     if (strcmp(key, "textureEffect") == 0)               { out = EffectNameFor(config.textureEffect); return true; }
     return false;
 }

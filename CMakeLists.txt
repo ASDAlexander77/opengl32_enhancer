@@ -40,7 +40,7 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
     LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
 )
@@ -98,6 +98,11 @@ add_executable(taa_jitter_test taa_jitter_test.cpp taa_jitter.cpp config.cpp deb
 # Pure CPU: projection_capture.h records only what the glFrustum wrapper hands it and never
 # touches the driver - see projection_capture_test.cpp.
 add_executable(projection_capture_test projection_capture_test.cpp projection_capture.cpp)
+
+# Pure CPU: the lazy-generation decision rule from texture_mipmap.h - which textures are
+# candidates, and the world-pass-only gate that keeps HUD artwork out - with no GL context.
+# See texture_mipmap_test.cpp.
+add_executable(texture_mipmap_test texture_mipmap_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
 
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
@@ -296,6 +301,22 @@ target_link_libraries(fx_indicator_test opengl32 gdi32 user32)
 # leaves every other glTexParameter call byte-for-byte unchanged (wrong pname, non-mipmap
 # filter, wrong target), and is a true no-op end to end when anisotropy=0 - see
 # texture_filter_test.cpp.
+# Creates a real GL context and checks the draw-time hook actually builds the chain on the
+# bound texture, and leaves a 2D-pass texture alone - see texture_mipmap_gpu_test.cpp. Its own
+# output directory for the same reason texture_filter_test has one: it needs its own fixture
+# ini renamed to the filename config.cpp looks for, and two targets writing that name into the
+# shared build directory is an unordered race with the Ninja generator.
+add_executable(texture_mipmap_gpu_test texture_mipmap_gpu_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
+target_link_libraries(texture_mipmap_gpu_test opengl32 gdi32 user32)
+set_target_properties(texture_mipmap_gpu_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/texture_mipmap_gpu_test_dir
+)
+add_custom_command(TARGET texture_mipmap_gpu_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/texture_mipmap_test.ini
+        $<TARGET_FILE_DIR:texture_mipmap_gpu_test>/opengl32_enhancer.ini
+)
+
 add_executable(texture_filter_test texture_filter_test.cpp texture_filter.cpp config.cpp gl_loader.cpp)
 target_link_libraries(texture_filter_test opengl32 gdi32 user32)
 # texture_filter_test resolves opengl32_enhancer.ini next to its own .exe, same as
@@ -423,7 +444,8 @@ foreach(test_target
     depth_view_test
     debug_log_test
     taa_jitter_test
-    projection_capture_test)
+    projection_capture_test
+    texture_mipmap_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)
 endforeach()
@@ -457,6 +479,7 @@ foreach(test_target
     local_contrast_test
     fx_indicator_test
     texture_filter_test
+    texture_mipmap_gpu_test
     post_effects_test)
     add_test(NAME ${test_target} COMMAND ${test_target}
              WORKING_DIRECTORY $<TARGET_FILE_DIR:${test_target}>)

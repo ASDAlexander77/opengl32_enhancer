@@ -572,6 +572,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
         } else if (strcmp(key, "anisotropy") == 0) {
             config.anisotropy = ParseClampedFloat(value, 0.0f, 16.0f, config.anisotropy, "anisotropy");
+        } else if (strcmp(key, "autoMipmap") == 0) {
+            config.autoMipmap = ParseBool(value, config.autoMipmap, "autoMipmap");
         } else if (strcmp(key, "textureSharpen") == 0) {
             // Pre-textureEffect spelling: textureSharpen=1/0 meant sharpen/off.
             bool on = ParseBool(value, config.textureEffect == EffectKind::Sharpen, "textureSharpen");

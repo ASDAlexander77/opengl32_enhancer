@@ -56,6 +56,7 @@ typedef void (__stdcall *PFNGLGENTEXTURESPROC)(int n, unsigned int* textures);
 typedef void (__stdcall *PFNGLDELETETEXTURESPROC)(int n, const unsigned int* textures);
 typedef void (__stdcall *PFNGLBINDTEXTUREPROC)(unsigned int target, unsigned int texture);
 typedef void (__stdcall *PFNGLTEXPARAMETERIPROC)(unsigned int target, unsigned int pname, int param);
+typedef void (__stdcall *PFNGLGENERATEMIPMAPPROC)(unsigned int target);
 typedef void (__stdcall *PFNGLTEXPARAMETERFPROC)(unsigned int target, unsigned int pname, float param);
 typedef void (__stdcall *PFNGLCOPYTEXSUBIMAGE2DPROC)(unsigned int target, int level, int xoffset, int yoffset,
     int x, int y, int width, int height);
@@ -104,6 +105,7 @@ struct GlComputeApi {
     PFNGLDELETETEXTURESPROC glDeleteTextures = nullptr;
     PFNGLBINDTEXTUREPROC glBindTexture = nullptr;
     PFNGLTEXPARAMETERIPROC glTexParameteri = nullptr;
+    PFNGLGENERATEMIPMAPPROC glGenerateMipmap = nullptr;
     PFNGLTEXPARAMETERFPROC glTexParameterf = nullptr;
     PFNGLCOPYTEXSUBIMAGE2DPROC glCopyTexSubImage2D = nullptr;
     PFNGLTEXSUBIMAGE2DPROC glTexSubImage2D = nullptr;

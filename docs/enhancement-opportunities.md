@@ -141,7 +141,7 @@ still defeat the heuristic. `GetCapturedCamera()` returns false in the first cas
 rather than guessing; the second fails silently, and is why `cameraLogInterval`
 stays in the shipped config rather than being removed now the check has passed.
 
-## Tier 3 — pixel format (blocked on a spike)
+## Tier 3 — pixel format (spike run 2026-09-20: the hook fires)
 
 Modifying the pixel format the game receives would allow:
 
@@ -150,23 +150,115 @@ Modifying the pixel format the game receives would allow:
 - **Higher bit depth / float back buffer** — the `dither` stage exists to fight
   8-bit banding that a deeper buffer would not produce.
 
-**Do not design this before running the experiment below.** Most 1.1-era games
-select their pixel format through GDI's `ChoosePixelFormat`/`SetPixelFormat` in
-`gdi32.dll`, not through the `wgl*` variants this proxy exports — in which case
-the hook never fires and the whole tier is unreachable without hooking `gdi32`
-as well.
+### The spike, and what it found
 
-*Experiment:* add a `printf` to the forwarded `wglChoosePixelFormat` and
-`wglSetPixelFormat`, run Anachronox, and see whether either fires. Minutes of
-work, and it decides whether this tier exists at all.
+The worry was that most 1.1-era games select their pixel format through GDI's
+`ChoosePixelFormat`/`SetPixelFormat` in `gdi32.dll`, not through the `wgl*`
+variants this proxy exports, leaving the tier unreachable without hooking
+`gdi32` as well. The experiment was to log the four forwarded `wgl*PixelFormat`
+entry points and run Anachronox.
+
+**Run on 2026-09-20. All four fire.** Verbatim, from the game's
+`opengl32_enhancer.log`:
+
+```
+[TIER3-SPIKE] wglChoosePixelFormat #1 hdc=7F01064A
+[TIER3-SPIKE]   pfd: flags=0x00000025 color=24 depth=32 stencil=0 alpha=0 accum=0 type=0
+[TIER3-SPIKE] wglDescribePixelFormat #1..#16 hdc=7F01064A      (enumeration, capped by the probe)
+[TIER3-SPIKE] wglSetPixelFormat #1 hdc=7F01064A index=9
+[TIER3-SPIKE] wglGetPixelFormat #1..#16 hdc=7F01064A
+```
+
+So `gdi32` forwards to `opengl32` for ICD-provided formats, which is what those
+exports are for, and the proxy sits in the path. What this means concretely:
+
+- The game asks for `PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL`
+  (`0x25`), 24-bit colour, 32-bit depth, **no stencil, no alpha, no accum**,
+  `PFD_TYPE_RGBA`. It takes format index 9.
+- The whole enumeration passes through `wglDescribePixelFormat`, so the proxy
+  can both see and answer the question of what formats exist.
+- The sequence happens **twice** — the engine sets a pixel format, then does it
+  again on a second context. Anything that overrides the choice has to be
+  idempotent across both, and a window can only have its pixel format set once,
+  so the second pass is a re-created window.
+
+**The tier is reachable. It is not, however, cheap — see below.**
+
+### The real cost is the collision with the depth stages
+
+`PIXELFORMATDESCRIPTOR` has no sample-count field, so MSAA injection is not a
+matter of editing the struct the game passed. It means creating a dummy context,
+resolving `wglChoosePixelFormatARB`, asking it for a `WGL_SAMPLES_ARB` format,
+and returning that index from `wglChoosePixelFormat` instead of the one the
+driver picked. Standard, but it is a context-bootstrap inside a proxy that is
+itself loaded late.
+
+The larger problem is downstream. `post_effects.cpp` captures colour and depth
+from the default framebuffer with `glCopyTexSubImage2D`. Against a multisampled
+default framebuffer that call is an `INVALID_OPERATION`, and the depth half has
+no correct cheap fix at all: a resolved multisample depth buffer is meaningless
+to `ssao`, `ssr`, `dof`, `fog`, `motionblur`, `depthvignette` and the real TAA
+resolve, all of which unproject it as if each pixel were one surface. So MSAA
+injection is either:
+
+- **gated** — allowed only when no depth-reading stage is in the chain, which
+  makes MSAA and TAA mutually exclusive and removes most of the reason to want
+  it; or
+- **plumbed** — render into our own multisample FBO, resolve colour for the
+  chain, and keep a separate single-sample depth pass. That touches the one code
+  path every other stage depends on.
+
+Note also that the bit-depth half of this tier is worth less than it looks: the
+post chain is already `RGBA16F` end to end. What a deeper buffer would buy is
+the game's *own* 8-bit rendering, before capture, plus the final present — real,
+but narrower than "the `dither` stage becomes unnecessary".
 
 ## Tier 4 — textures
 
-- **Automatic mipmap generation.** `texture_filter.h` is explicit that it forces
-  trilinear filtering on *the game's own mipmapped* textures. Textures uploaded
-  without a mip chain are untouched and still shimmer at distance. Calling
-  `glGenerateMipmap` on upload would cover them, and complements the anisotropy
-  forcing already there. Probably the best effort-to-reward ratio on this list.
+- ~~**Automatic mipmap generation.**~~ Shipped on 2026-09-20 as `autoMipmap` —
+  see `texture_mipmap.h`. Two things about it are worth carrying forward.
+
+  **It is not done on upload.** The original sketch here said "calling
+  `glGenerateMipmap` on upload would cover them", and that is wrong: "uploaded
+  without a mip chain" is also exactly how 2D/UI/HUD/font artwork is uploaded,
+  which is the category `texture_filter.h` takes pains to leave alone. Nothing
+  about an upload distinguishes a wall from a health bar. The signal that does
+  is the projection in force when the texture is *drawn*, so generation is lazy:
+  recorded at upload, acted on at the first draw under `glFrustum`.
+
+  **The size of the prize was measured, not assumed.** A census of `baltown`,
+  tagging every texture by the pass it was drawn in:
+
+  | mip chain | drawn in | count |
+  |---|---|---|
+  | has chain | never drawn (PVS-culled) | 242 |
+  | has chain | world only | 31 |
+  | has chain | world + 2D | 6 |
+  | has chain | 2D only | 39 |
+  | level 0 only | world only | 11 |
+  | level 0 only | world + 2D | 1 |
+  | level 0 only | 2D only | 5 |
+  | level 0 only | never drawn | 191 |
+
+  So 12 of the 49 textures drawn in the world pass had no mip chain — a real
+  target set, but a small one. Running the game with the shipped feature on
+  generated 15 chains, including the exact texture names the census predicted.
+  Expect a subtle reduction in distant shimmer, not a dramatic change.
+
+  Two traps, both of which caught this work in progress and will catch the next
+  person:
+
+  - **Tag on draw, never on bind.** The first census tagged at `glBindTexture`
+    and reported *zero* world-only textures, because `glTexImage2D` binds its
+    texture to upload it and uploads happen under the loading screen's ortho
+    projection — so all 526 textures looked like 2D.
+  - **A draw uses whatever is still bound.** At the top of a frame's world pass
+    the leftover binding is the previous frame's HUD texture, so the rule also
+    requires that the binding was established since the last projection change.
+
+  A side finding: Anachronox sets `GL_LINEAR_MIPMAP_LINEAR` itself, so
+  `texture_filter.h`'s trilinear upgrade is a no-op in this game and only its
+  anisotropy half does any work.
 - **Texture upscaling at load** — 2x/4x EASU for world textures, or an xBRZ-style
   filter for sprites and UI. `textureEffect=cas` means the upload-time plumbing
   and its pitfalls (see `texture_effect.h` on mipmap-incomplete and stale-UV
@@ -225,14 +317,17 @@ thing checked whenever "the resolution setting isn't working".
 
 ## Suggested order
 
-1. **Auto mipmap generation** (Tier 4) — smallest change, immediate benefit,
-   and it completes a feature that already exists.
+1. ~~**Auto mipmap generation** (Tier 4).~~ Shipped on 2026-09-20 as
+   `autoMipmap` — see above, including why the "generate on upload" shape this
+   list originally proposed would have blurred the HUD.
 2. ~~**Modelview capture** (Tier 2).~~ Done — see above. Two of the consumers
    it unlocks now ship (SSR's world-space `up`, camera `motionblur`); real
    TAA and temporally accumulated SSAO remain separate, smaller pieces of
    work.
-3. **Pixel-format spike** (Tier 3) — cheap, and answers a question that gates a
-   whole tier either way.
+3. ~~**Pixel-format spike** (Tier 3).~~ Done on 2026-09-20 — the hook fires, so
+   the tier exists. It is still not the next thing to build: MSAA injection
+   fights every depth-reading stage (see Tier 3 above), so it costs far more
+   than its position on this list suggests.
 4. ~~Tier 1 stages as appetite allows.~~ Done — all four shipped. Note that the
    last of them (`ssr`) ended up *blocked in quality* on the Tier 2 capture,
    which strengthens the case for item 2 rather than weakening it.

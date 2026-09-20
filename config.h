@@ -173,6 +173,14 @@ struct AnaxConfig {
     // to whatever the GPU/driver actually supports). Independent of the effect= pipeline.
     float anisotropy = 0.0f;
 
+    // Generates a mip chain for textures the game uploaded WITHOUT one, lazily, and only for
+    // the ones actually drawn in the world pass - see texture_mipmap.h, which explains why the
+    // world pass is the only signal that can tell those apart from HUD artwork. false
+    // (default) leaves every upload and every draw completely untouched. Independent of the
+    // effect= pipeline. Complements `anisotropy` above, which covers the textures the game
+    // mipped itself.
+    bool autoMipmap = false;
+
     // Overrides the game window's size at the moment it creates its GL context (see
     // window_override.h) - independent of the effect= pipeline, since it's a Win32 window
     // property, not a rendered stage. Both default to 0, meaning "leave the game's own window

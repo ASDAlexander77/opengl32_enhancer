@@ -135,6 +135,7 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= ResolveLegacy("glDeleteTextures", api.glDeleteTextures);
     ok &= ResolveLegacy("glBindTexture", api.glBindTexture);
     ok &= ResolveLegacy("glTexParameteri", api.glTexParameteri);
+    ok &= Resolve("glGenerateMipmap", api.glGenerateMipmap);
     ok &= ResolveLegacy("glTexParameterf", api.glTexParameterf);
     ok &= ResolveLegacy("glCopyTexSubImage2D", api.glCopyTexSubImage2D);
     ok &= ResolveLegacy("glTexSubImage2D", api.glTexSubImage2D);
