@@ -110,6 +110,7 @@ const unsigned int GL_MAX_TEXTURE_SIZE      = 0x0D33;
 const unsigned int GL_TEXTURE_MIN_FILTER    = 0x2801;
 const unsigned int GL_TEXTURE_MAG_FILTER    = 0x2800;
 const unsigned int GL_LINEAR                = 0x2601;
+const unsigned int GL_TEXTURE_BINDING_2D    = 0x8069;
 
 unsigned int g_fbo = 0;
 unsigned int g_colorTex = 0;
@@ -118,6 +119,15 @@ int g_targetWidth = 0;
 int g_targetHeight = 0;
 bool g_targetFloat = false;
 unsigned int g_generation = 0;
+
+// Remembers the configuration that failed, so a persistent failure costs one attempt rather
+// than one per frame. Cleared by a context change (the generation reset above) or by the
+// config naming a different size - either of which could legitimately succeed where this
+// one did not.
+int g_failedWidth = 0;
+int g_failedHeight = 0;
+bool g_failedFloat = false;
+bool g_haveFailed = false;
 
 void DestroyRenderTarget(const GlComputeApi& gl) {
     if (g_fbo != 0) {
@@ -137,10 +147,10 @@ void DestroyRenderTarget(const GlComputeApi& gl) {
 
 bool EnsureRenderTarget() {
     const AnaxConfig& config = GetAnaxConfig();
-    const GlComputeApi& gl = GetGlComputeApi();
     if (config.renderWidth <= 0 || config.renderHeight <= 0) {
         return false;
     }
+    const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded || gl.glCheckFramebufferStatus == nullptr) {
         static bool warned = false;
         if (!warned) {
@@ -156,11 +166,17 @@ bool EnsureRenderTarget() {
         g_generation = GetGlContextGeneration();
         g_fbo = g_colorTex = g_depthTex = 0;
         g_targetWidth = g_targetHeight = 0;
+        g_haveFailed = false;
     }
 
     if (g_fbo != 0 && g_targetWidth == config.renderWidth &&
         g_targetHeight == config.renderHeight && g_targetFloat == config.renderFloatBuffer) {
         return true;
+    }
+
+    if (g_haveFailed && g_failedWidth == config.renderWidth &&
+        g_failedHeight == config.renderHeight && g_failedFloat == config.renderFloatBuffer) {
+        return false;
     }
 
     // Two guards, deliberately, for two different failures. This one refuses a size the driver
@@ -185,6 +201,14 @@ bool EnsureRenderTarget() {
 
     DestroyRenderTarget(gl);
 
+    // Saved and restored because this runs inside the game's frame, from the swap hook, after
+    // post_effects.cpp has already restored its own state - so anything left bound here is what
+    // the game's next frame starts with. Only the 2D binding: this function never calls
+    // glActiveTexture, so the active unit is not ours to disturb and saving it would be copying
+    // post_effects.cpp's list rather than reasoning about what this code actually touches.
+    int savedTextureBinding = 0;
+    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
+
     gl.glGenTextures(1, &g_colorTex);
     gl.glBindTexture(GL_TEXTURE_2D, g_colorTex);
     gl.glTexStorage2D(GL_TEXTURE_2D, 1, config.renderFloatBuffer ? GL_RGBA16F : GL_RGBA8,
@@ -208,6 +232,11 @@ bool EnsureRenderTarget() {
         printf("[opengl32_enh_cpp] render_target: framebuffer incomplete (0x%04X) at %dx%d, "
                "supersampling off\n", status, config.renderWidth, config.renderHeight);
         DestroyRenderTarget(gl);
+        g_failedWidth = config.renderWidth;
+        g_failedHeight = config.renderHeight;
+        g_failedFloat = config.renderFloatBuffer;
+        g_haveFailed = true;
+        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
         return false;
     }
 
@@ -233,6 +262,7 @@ bool EnsureRenderTarget() {
     }
     printf("[opengl32_enh_cpp] render_target: supersampling into %dx%d (%s)\n",
            g_targetWidth, g_targetHeight, g_targetFloat ? "RGBA16F" : "RGBA8");
+    gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
     return true;
 }
 

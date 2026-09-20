@@ -23,6 +23,7 @@ const unsigned int GL_FRAMEBUFFER               = 0x8D40;
 const unsigned int GL_READ_FRAMEBUFFER          = 0x8CA8;
 const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
 const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
+// GL_TEXTURE_BINDING_2D is already in <GL/gl.h> (core GL 1.1) - not redefined here.
 
 int g_failures = 0;
 
@@ -100,6 +101,36 @@ int main() {
         int w = 0, h = 0;
         GetRenderTargetSize(w, h);
         Check(w == 1280 && h == 960, "the target is the configured size");
+    }
+
+    // --- EnsureRenderTarget's rebuild path does not clobber the game's texture binding ---
+    // Ruling 11's fail-safe. This runs inside the game's frame, from the swap hook, after
+    // post_effects.cpp has already restored its own state - so anything left bound here is what
+    // the game's next frame starts with. Uses a size different from the fixture's 1280x960 so
+    // the "already built" fast path is skipped and the actual glGenTextures/glBindTexture
+    // rebuild sequence runs.
+    {
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        GetMutableAnaxConfig().renderWidth = 800;
+        GetMutableAnaxConfig().renderHeight = 600;
+
+        unsigned int gameTex = 0;
+        gl.glGenTextures(1, &gameTex);
+        gl.glBindTexture(GL_TEXTURE_2D, gameTex);
+
+        bool ready = EnsureRenderTarget();
+        Check(ready, "the rebuild for the binding-restore case succeeded");
+
+        int boundAfter = 0;
+        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &boundAfter);
+        Check((unsigned int)boundAfter == gameTex,
+              "EnsureRenderTarget restores the game's GL_TEXTURE_2D binding after rebuilding");
+
+        gl.glDeleteTextures(1, &gameTex);
+        GetMutableAnaxConfig().renderWidth = 1280;
+        GetMutableAnaxConfig().renderHeight = 960;
     }
 
     // --- drawing lands in the offscreen buffer and NOT in the back buffer ---
