@@ -1,5 +1,6 @@
-// Owns the shared post-effect pipeline: two RGBA16F ping-pong textures. Captures the real
-// back buffer into them exactly once per frame, chains every stage the config listed - in the
+// Owns the shared post-effect pipeline: two RGBA16F ping-pong textures. Captures whatever
+// framebuffer the game rendered into - the real back buffer, or the offscreen supersampling
+// target when one is armed (see render_target.h) - into them exactly once per frame, chains every stage the config listed - in the
 // order it listed them - by alternating which texture is "source" and which is "destination"
 // (each stage's ApplyX reads one and writes the other, returning whether it actually wrote -
 // see e.g. lut_grading.h's header comment for why a stage can legitimately no-op), and blits
@@ -109,8 +110,8 @@ struct PipelineTextures {
     unsigned int tex[2] = {0, 0};
     unsigned int presentFbo = 0;   // reused, re-attached to whichever tex[] is final each frame
 
-    // EXPERIMENTAL (see depth_vignette.h). The default framebuffer's depth attachment, blitted
-    // here once per frame, but only when a depth-consuming stage is actually listed - see
+    // EXPERIMENTAL (see depth_vignette.h). The depth attachment of whatever framebuffer the
+    // game rendered into, blitted here once per frame, but only when a depth-consuming stage is actually listed - see
     // ApplySelectedEffect(). depthFbo exists purely as a blit target for depthTex; nothing ever
     // reads from it as a framebuffer otherwise. ALWAYS sized at the game's own native render
     // resolution (independent of width/height above) - that's the only resolution a depth buffer
@@ -269,11 +270,15 @@ bool ConsumeFrameDumpRequest(int frameDumpKey) {
     return pressed;
 }
 
-// Reads the game's finished frame straight off the default framebuffer - color and depth both -
-// and writes it out for the config editor. Deliberately reads the DEFAULT framebuffer rather
-// than the pipeline's captured textures: this must be the unprocessed frame the game drew, and
-// reading depth from framebuffer 0 also means a dump needs no depth texture and therefore works
-// regardless of whether any depth-consuming stage is listed.
+// Reads the game's finished frame straight off whatever framebuffer the game rendered into -
+// color and depth both - and writes it out for the config editor. Deliberately reads THAT
+// framebuffer rather than the pipeline's captured textures: this must be the unprocessed frame
+// the game drew, and reading depth from it also means a dump needs no depth texture and
+// therefore works regardless of whether any depth-consuming stage is listed.
+//
+// GetGameFramebuffer() rather than a literal 0, because the game does not always render into
+// the default framebuffer any more - see render_target.h. It returns 0 whenever supersampling
+// is not armed, so the unsupersampled case is byte-for-byte what it always was.
 void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) {
     int savedReadFbo = 0;
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
@@ -592,11 +597,13 @@ void ApplySelectedEffect(void* hdc) {
     // there's no real upscale in play at all.
     unsigned int* pair = hasRealUpscale ? g_pipeline.nativeTex : g_pipeline.tex;
 
-    // Force the read framebuffer to the default (live back buffer) before capture, same
+    // Force the read framebuffer to the one the game rendered into before capture, same
     // reasoning as every individual effect used to: whatever the host app had bound as its
-    // read framebuffer at swap time would otherwise still be bound here. Always captures at the
-    // NATIVE resolution - that's the real size of what the game actually drew into the back
-    // buffer, regardless of how much bigger the window/back buffer itself is.
+    // read framebuffer at swap time would otherwise still be bound here. That is the live back
+    // buffer normally, and the offscreen supersampling target when one is armed - see
+    // render_target.h, and note GetGameReadBuffer() exists because glReadBuffer(GL_BACK) is
+    // invalid against a framebuffer object. Always captures at the NATIVE resolution - the real
+    // size of what the game actually drew, regardless of how much bigger the window is.
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
     gl.glReadBuffer(GetGameReadBuffer());
     gl.glBindTexture(GL_TEXTURE_2D, pair[0]);
@@ -615,8 +622,10 @@ void ApplySelectedEffect(void* hdc) {
         return;
     }
 
-    // Blit the default framebuffer's depth attachment into g_pipeline.depthTex, same
-    // read-framebuffer-0 reasoning as the color capture above. Only attempted when a stage that
+    // Blit the depth attachment of whatever the game rendered into onto g_pipeline.depthTex,
+    // same read-framebuffer reasoning as the color capture above. No glReadBuffer call here, and
+    // that is not an omission: the read-buffer selector is a colour concept and a depth blit
+    // does not consult it. Only attempted when a stage that
     // consumes depth is actually listed - everyone else pays nothing for this. A blit error
     // (e.g. this GL context's pixel format has no depth buffer at all) is logged once and leaves
     // depthCaptured false, which makes the depth-consuming stages below no-op for this frame
