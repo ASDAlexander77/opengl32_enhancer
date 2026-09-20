@@ -17,6 +17,7 @@
 
 #include "post_effects.h"
 #include "config.h"
+#include "render_target.h"
 #include "debug_log.h"
 #include "pixel_invert.h"
 #include "bilinear_upscale.h"
@@ -276,8 +277,8 @@ bool ConsumeFrameDumpRequest(int frameDumpKey) {
 void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) {
     int savedReadFbo = 0;
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+    gl.glReadBuffer(GetGameReadBuffer());
 
     size_t texelCount = (size_t)width * (size_t)height;
     unsigned char* color = (unsigned char*)malloc(texelCount * 4);
@@ -390,6 +391,24 @@ bool StageIsSkippedWhenDepthUnavailable(EffectKind stage) {
     return StageNeedsDepth(stage) && stage != EffectKind::Taa;
 }
 
+// See post_effects.h. Named stages are exactly the ones with an upscale mode (a `scale` that
+// maps a smaller source across a larger destination); everything else either doesn't resize at
+// all or resizes without reconstructing (e.g. the implicit stretch this file falls back to when
+// hasRealUpscale is true and no such stage ran).
+bool AnyUpscaleStageListed(const AnaxConfig& config) {
+    for (int i = 0; i < config.stageCount; ++i) {
+        switch (config.stages[i]) {
+            case EffectKind::Bilinear:
+            case EffectKind::NVScaler:
+            case EffectKind::Fsr:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -483,6 +502,20 @@ void ApplySelectedEffect(void* hdc) {
     bool hasRealUpscale = viewportX == 0 && viewportY == 0 &&
                            dstWidth > nativeWidth && dstHeight > nativeHeight;
 
+    // Supersampling already renders above native and downsamples on present (Task 5), so an
+    // upscale stage still listed in effect= has nothing left to reconstruct: its source and
+    // destination are the same size by the time it would run, and it falls back to its
+    // same-size behaviour rather than doing anything harmful - this is purely informational.
+    if (IsSupersampleActive()) {
+        static bool warnedUpscalerSuperseded = false;
+        if (!warnedUpscalerSuperseded && AnyUpscaleStageListed(config)) {
+            printf("[opengl32_enh_cpp] post_effects: supersampling is active, so the upscale "
+                   "stage in effect= has nothing left to reconstruct and falls back to its "
+                   "same-size behaviour\n");
+            warnedUpscalerSuperseded = true;
+        }
+    }
+
     // The exact ratio that maps the real (physically smaller) native-resolution source across a
     // destination-sized output - see fsr.h/bilinear_upscale.cpp/nis_effect.cpp: their `scale`
     // describes a virtual source grid laid over the full output size, which is precisely what a
@@ -505,7 +538,11 @@ void ApplySelectedEffect(void* hdc) {
         }
     }
 
-    if (config.stageCount == 0 && !hasRealUpscale) {
+    // IsSupersampleActive() joins this condition because the present blit below is the ONLY
+    // thing that moves the offscreen render target onto the screen. Returning early with
+    // supersampling armed means nothing is ever presented, and the player sees black - which
+    // an empty effect= list is the most natural way to hit while testing.
+    if (config.stageCount == 0 && !hasRealUpscale && !IsSupersampleActive()) {
         return;
     }
 
@@ -554,8 +591,8 @@ void ApplySelectedEffect(void* hdc) {
     // read framebuffer at swap time would otherwise still be bound here. Always captures at the
     // NATIVE resolution - that's the real size of what the game actually drew into the back
     // buffer, regardless of how much bigger the window/back buffer itself is.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    gl.glReadBuffer(GL_BACK);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+    gl.glReadBuffer(GetGameReadBuffer());
     gl.glBindTexture(GL_TEXTURE_2D, pair[0]);
     gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
 
@@ -582,7 +619,7 @@ void ApplySelectedEffect(void* hdc) {
     bool depthCaptured = false;
     if (needDepth) {
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
         gl.glBlitFramebuffer(0, 0, nativeWidth, nativeHeight, 0, 0, nativeWidth, nativeHeight,
                               GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         unsigned int depthErr = gl.glGetError();

@@ -239,13 +239,14 @@ target_link_libraries(ssr_test opengl32 gdi32 user32)
 # into the next one - see world_capture_test.cpp. Links config.cpp and debug_log.cpp because
 # the cameraLogInterval diagnostic reads the config, same as modelview_capture_test.
 add_executable(world_capture_test world_capture_test.cpp world_capture.cpp gl_loader.cpp
-    config.cpp debug_log.cpp)
+    config.cpp debug_log.cpp render_target.cpp)
 target_link_libraries(world_capture_test opengl32 gdi32 user32)
 
 # Checks the pure reprojection matrix on the CPU and the blur stage against a real GL context -
 # see motion_blur_test.cpp.
 add_executable(motion_blur_test motion_blur_test.cpp motion_blur.cpp gl_loader.cpp
-    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp)
+    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp
+    render_target.cpp)
 target_link_libraries(motion_blur_test opengl32 gdi32 user32)
 
 # Creates a real GL context, drives the matrix-call sequence a Quake II-family engine makes
@@ -368,7 +369,7 @@ add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.c
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp window_override.cpp)
+    local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -395,7 +396,7 @@ add_executable(config_editor WIN32
     post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
     pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
     vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
-    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp
+    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp
     depth_view.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp

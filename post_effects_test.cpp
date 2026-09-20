@@ -258,6 +258,48 @@ bool CheckWorldCaptureStageSet() {
     return allMatched;
 }
 
+// Pins which stages AnyUpscaleStageListed() treats as an upscale stage - see post_effects.h.
+// Same shape and same honesty as CheckDepthStageSet() above, except the predicate takes a whole
+// config rather than a single stage (a chain either has one of these listed or it doesn't), so
+// each case builds a minimal one-stage config to ask the question of. This proves the predicate
+// - and therefore the once-only log in ApplySelectedEffect() that supersampling makes an
+// upscale stage's reconstruction redundant - fires for exactly bilinear/nvscaler/fsr and no
+// other stage, including a stage that resizes without reconstructing (the implicit stretch
+// fallback isn't a listed stage at all, so it can't appear here either way).
+//
+// Needs no GL context, so it runs before main() builds one, same as CheckDepthStageSet().
+bool CheckAnyUpscaleStageListed() {
+    struct Expectation { EffectKind stage; bool isUpscale; const char* name; };
+    const Expectation kExpected[] = {
+        {EffectKind::Bilinear,            true,  "bilinear"},
+        {EffectKind::NVScaler,            true,  "nvscaler"},
+        {EffectKind::Fsr,                 true,  "fsr"},
+        // A sample of stages that resize without reconstructing, or don't resize at all.
+        {EffectKind::Bloom,               false, "bloom"},
+        {EffectKind::Taa,                 false, "taa"},
+        {EffectKind::None,                false, "none"},
+    };
+
+    bool allMatched = true;
+    for (size_t i = 0; i < sizeof(kExpected) / sizeof(kExpected[0]); ++i) {
+        AnaxConfig config;
+        config.stageCount = 1;
+        config.stages[0] = kExpected[i].stage;
+        bool actual = AnyUpscaleStageListed(config);
+        char what[160];
+        snprintf(what, sizeof(what), "AnyUpscaleStageListed({%s}) == %s",
+                 kExpected[i].name, kExpected[i].isUpscale ? "true" : "false");
+        allMatched = Check(actual == kExpected[i].isUpscale, what) && allMatched;
+    }
+
+    AnaxConfig empty;
+    empty.stageCount = 0;
+    allMatched = Check(!AnyUpscaleStageListed(empty),
+                        "AnyUpscaleStageListed({}) == false") && allMatched;
+
+    return allMatched;
+}
+
 int main() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
@@ -336,6 +378,7 @@ int main() {
     bool ok = CheckDepthStageSet();
     ok = CheckDepthStageSkipSet() && ok;
     ok = CheckWorldCaptureStageSet() && ok;
+    ok = CheckAnyUpscaleStageListed() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;
     if (!gl.loaded) {

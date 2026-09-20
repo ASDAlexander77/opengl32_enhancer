@@ -49,3 +49,10 @@ bool StageNeedsDepth(EffectKind stage);
 // Asking this about a stage StageNeedsDepth() returns false for is meaningless and answers
 // false; the chain only consults it inside the `isDepthStage && !atNativeRes` branch.
 bool StageIsSkippedWhenDepthUnavailable(EffectKind stage);
+
+// Whether the chain lists any stage that reconstructs a smaller source up to a larger
+// destination (bilinear/nvscaler/fsr). Supersampling renders above native and downsamples on
+// present instead, so once it is active these stages have nothing left to reconstruct - see the
+// call site in ApplySelectedEffect(), which uses this only to log that once, not to change the
+// chain. Same-file reasoning as StageNeedsDepth: one consumer, post_effects.cpp.
+bool AnyUpscaleStageListed(const AnaxConfig& config);
