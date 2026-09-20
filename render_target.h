@@ -46,3 +46,30 @@ void ScaleGameRect(int& x, int& y, int& width, int& height);
 // Drops every piece of recorded state. Called when the GL context changes, and by the tests
 // between cases.
 void ResetRenderTargetState();
+
+// Creates the offscreen framebuffer at the configured size for the current context, or reuses
+// the existing one. Returns false when the feature is off, when GL 4.3 is unavailable, when the
+// size exceeds what the driver allows, or when the framebuffer is not complete - and a false
+// return is what keeps ArmSupersampleForFrame from arming, so a failure here degrades to exactly
+// today's rendering rather than to a broken image.
+bool EnsureRenderTarget();
+
+// Binds the offscreen framebuffer so the game's subsequent drawing lands in it. Called from the
+// wglSwapBuffers hook after the real SwapBuffers returns. A no-op when not armed.
+void BindRenderTarget();
+
+// The framebuffer the game's drawing is in: the offscreen one when armed, 0 otherwise. Every
+// site that captures what the game rendered asks this instead of hardcoding 0.
+unsigned int GetGameFramebuffer();
+
+// The buffer to read from it: GL_COLOR_ATTACHMENT0 when armed, GL_BACK otherwise.
+// glReadBuffer(GL_BACK) is INVALID against a framebuffer object, so a capture site that forgets
+// this one starts throwing GL_INVALID_OPERATION rather than failing visibly.
+unsigned int GetGameReadBuffer();
+
+// The offscreen framebuffer's size, for the present blit's source rectangle.
+void GetRenderTargetSize(int& width, int& height);
+
+// The game's own full-frame viewport, as latched by NotifyGameViewport. Used for the aspect
+// check below; leaves its arguments alone when no reference has been seen yet.
+void GetReferenceViewport(int& width, int& height);

@@ -120,6 +120,7 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= Resolve("glDeleteFramebuffers", api.glDeleteFramebuffers);
     ok &= Resolve("glBindFramebuffer", api.glBindFramebuffer);
     ok &= Resolve("glFramebufferTexture2D", api.glFramebufferTexture2D);
+    ok &= Resolve("glCheckFramebufferStatus", api.glCheckFramebufferStatus);
     ok &= Resolve("glBlitFramebuffer", api.glBlitFramebuffer);
     ok &= Resolve("glGenBuffers", api.glGenBuffers);
     ok &= Resolve("glDeleteBuffers", api.glDeleteBuffers);
