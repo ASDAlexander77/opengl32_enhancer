@@ -1,7 +1,8 @@
 # sRGB correctness for the post chain — design
 
 **Date:** 2026-09-20
-**Status:** approved, ready for an implementation plan
+**Status:** implemented and unit-verified 2026-09-20; in-game validation
+outstanding
 **Feature name in config:** `srgbCorrect`
 
 ## What this builds

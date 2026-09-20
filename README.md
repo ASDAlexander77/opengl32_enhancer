@@ -623,6 +623,52 @@ carrying the average of the whole 4x4 box rather than the two pixels a single
 bilinear tap reads, and the presented frame is asserted to fill the window
 rather than a corner - but neither stands in for looking at a real scene.
 
+**sRGB correctness** - run the whole post chain on linear light instead of
+sRGB-encoded values:
+
+```ini
+srgbCorrect=1
+```
+
+sRGB is roughly a 2.2-power encoding, so averaging two encoded values is not
+the encoding of their average - it comes out darker. Every stage that
+averages, blurs, thresholds or tone-maps (`bloom`, `acestonemap`,
+`lightshafts`, `nr`, `localcontrast`, `dof`, `motionblur`, `taa`, `smaa`, and
+the supersample resolve itself) has been weighting the encoding instead of the
+light. The supersample resolve makes the error concrete: black against white
+resolves to **127** averaging encoded values, the behaviour without this on,
+and **188** averaging light - both measured by the test suite. With
+`srgbCorrect=1` the chain decodes once after capture, runs entirely in linear
+light, and encodes once on present; three stages that want display-referred
+values instead - `lutgrading`, `dither`, `gamma` - get a conversion inserted
+around them, and the resolve is always fed linear regardless of what the
+chain ends in.
+
+Off by default, and not a drop-in improvement: every tuned value in a working
+`effect=` line - `bloomThreshold`, `acesStrength`, LUT strength, dither
+strength, all of it - was tuned by eye against the gamma-space chain this
+project has always run, and turning this on changes what every one of those
+numbers means. Expect to re-tune, not just flip the switch. It also costs two
+extra full-screen passes per frame.
+
+**This does not make the game's own rendering linear.** The game still
+uploads gamma-encoded textures and blends them in gamma space with its own
+fixed-function pipeline; this corrects the post chain only, from the captured
+frame onward. Making the game's own blending linear would need sRGB texture
+views plus `GL_FRAMEBUFFER_SRGB` on a framebuffer the game believes is
+ordinary, which double-corrects everything the game composites itself -
+including the HUD - and is a different, much riskier feature.
+
+**Status: NOT YET VALIDATED IN-GAME.** This has not been run in Anachronox, or
+any game - no config-summary check, no GL-error check, nothing by eye. Every
+claim above comes from the test suite only: the exact piecewise sRGB transfer
+function (`0.5` decodes to `0.21404`, not the `0.21764` a `pow(2.2)`
+approximation gives), the per-stage colour-space table, and the 127-vs-188
+resolve case. A linear chain running against art authored and tuned for the
+gamma-space look is exactly the kind of change that needs a human's eye before
+it can be trusted, and that check remains outstanding - the same gap
+supersampling and real TAA are still carrying.
+
 **Clean up noisy/grainy source, then add some punch:**
 
 ```ini

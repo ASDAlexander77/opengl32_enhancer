@@ -263,8 +263,35 @@ but narrower than "the `dither` stage becomes unnecessary".
   filter for sprites and UI. `textureEffect=cas` means the upload-time plumbing
   and its pitfalls (see `texture_effect.h` on mipmap-incomplete and stale-UV
   failures) are already understood.
-- **sRGB correctness.** Old games upload gamma-space textures and blend in gamma
-  space; the post chain then does its work on wrongly-weighted colour.
+- ~~**sRGB correctness.**~~ Shipped on 2026-09-20 as `srgbCorrect` — see
+  `srgb_convert.h` and
+  `docs/superpowers/specs/2026-09-20-srgb-correctness-design.md`. Two things
+  about the design are worth carrying forward.
+
+  **`acestonemap` is linear-in AND linear-out.** The Narkowicz fit's output
+  still needs encoding — the canonical use is `color = ACESFitted(linear);
+  color = encode(color)`. That means no stage in the chain has a *different*
+  input and output space, so the per-stage colour-space table collapsed to a
+  single lookup rather than a pair of input/output entries. Had `acestonemap`
+  genuinely changed the space, every stage would have needed two table
+  entries and the chain would have needed to reason about both.
+
+  **The resolve can't default to "whatever the chain ended in."** It always
+  averages linear. The shipped `effect=` line ends `…, dither, gamma`, both
+  display-space stages, so "encode only if still linear" would have put that
+  exact configuration straight back into the bug this feature exists to fix.
+  A chain that ends in display space is decoded once more before the resolve.
+
+  A defect the work itself uncovered, worth flagging for the next person:
+  decoding the pristine capture texture alone silently disabled `taa` and
+  `motionblur`. Both compute a HUD mask as `any(abs(captureTex - worldTex) >
+  1/128)`, and `worldTex` was left undecoded — so with one operand converted
+  and the other not, nearly every non-black pixel read as HUD and both stages
+  became frame-wide no-ops. The fix was to convert neither texture: they are
+  only ever compared against each other, never read as light.
+
+  Not yet validated in-game — see the design doc's status line and
+  `README.md`'s sRGB correctness section.
 
 ## Tier 5 — geometry and lighting
 
@@ -405,5 +432,8 @@ thing checked whenever "the resolution setting isn't working".
 4. ~~Tier 1 stages as appetite allows.~~ Done — all four shipped. Note that the
    last of them (`ssr`) ended up *blocked in quality* on the Tier 2 capture,
    which strengthens the case for item 2 rather than weakening it.
+5. ~~**sRGB correctness** (Tier 4).~~ Shipped on 2026-09-20 as `srgbCorrect` —
+   see above. The last of Tier 4's open items apart from texture upscaling,
+   which remains open.
 
 Tier 5 only after Tier 2 lands.
