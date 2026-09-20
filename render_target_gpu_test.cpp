@@ -19,9 +19,10 @@ namespace {
 // Not in <GL/gl.h> - framebuffer objects are a later extension than the GL 1.1 headers Windows
 // ships. Everything else this file touches (GL_TEXTURE_2D, GL_BACK, GL_MAX_TEXTURE_SIZE,
 // GL_RGBA, GL_UNSIGNED_BYTE, GL_COLOR_BUFFER_BIT, ...) already comes from <GL/gl.h>.
-const unsigned int GL_FRAMEBUFFER        = 0x8D40;
-const unsigned int GL_READ_FRAMEBUFFER   = 0x8CA8;
-const unsigned int GL_COLOR_ATTACHMENT0  = 0x8CE0;
+const unsigned int GL_FRAMEBUFFER               = 0x8D40;
+const unsigned int GL_READ_FRAMEBUFFER          = 0x8CA8;
+const unsigned int GL_COLOR_ATTACHMENT0         = 0x8CE0;
+const unsigned int GL_DRAW_FRAMEBUFFER_BINDING  = 0x8CA6;
 
 int g_failures = 0;
 
@@ -130,6 +131,26 @@ int main() {
 
         Check(offscreen[1] > 200, "the draw landed in the offscreen target");
         Check(backBuffer[1] < 50, "the draw did NOT reach the real back buffer");
+    }
+
+    // --- BindRenderTarget does nothing when the frame is not armed ---
+    // The fail-safe. Without it an unarmed frame would still bind the offscreen target, and the
+    // game would render into a buffer nothing presents - a black window rather than a degraded
+    // one, which is the opposite of this feature's stated failure direction.
+    {
+        ResetRenderTargetState();
+        NotifyFrameBoundary();
+        NotifyGameViewport(0, 0, 640, 480);
+        EnsureRenderTarget();
+        ArmSupersampleForFrame(false);          // target may be fine; the frame is NOT armed
+
+        gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        BindRenderTarget();
+
+        int boundAfter = -1;
+        gl.glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundAfter);
+        Check(boundAfter == 0,
+              "BindRenderTarget leaves the binding alone when the frame is not armed");
     }
 
     // --- a size the driver cannot allocate degrades to today's rendering ---

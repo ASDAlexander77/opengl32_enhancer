@@ -163,6 +163,12 @@ bool EnsureRenderTarget() {
         return true;
     }
 
+    // Two guards, deliberately, for two different failures. This one refuses a size the driver
+    // will not allocate at all - checking first means we never ATTEMPT a doomed allocation, and
+    // the log names the real reason. The glCheckFramebufferStatus check below is the correctness
+    // backstop for anything that allocates but does not assemble into a complete framebuffer.
+    // A mutation test kills neither in isolation, because every size that allocates also
+    // completes; they are lethal together, which is the honest description.
     int maxTextureSize = 0;
     gl.glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
     if (maxTextureSize > 0 &&
