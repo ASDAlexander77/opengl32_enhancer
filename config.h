@@ -190,6 +190,14 @@ struct AnaxConfig {
     int windowWidth = 0;
     int windowHeight = 0;
 
+    // Declares the game process DPI-aware as soon as this DLL is loaded - before the game
+    // creates its window. A DPI-unaware game on a display scaled above 100% has its window
+    // bitmap-stretched by Windows: a 3200x2000 client area on a 150% display really occupies
+    // 4800x3000 physical pixels, so the frame overflows the screen and looks zoomed in, and
+    // even at a size that fits, the stretch blurs every pixel the effect chain produced.
+    // On by default; set dpiAware=0 to keep Windows' own scaling.
+    bool dpiAware = true;
+
     // Renders the game into an offscreen framebuffer of this size and downsamples it to the
     // window on present - see render_target.h. Both default to 0, meaning off; the override
     // only applies when BOTH are positive, the same both-or-nothing rule windowWidth/

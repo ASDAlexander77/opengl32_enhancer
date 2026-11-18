@@ -52,6 +52,7 @@
 #include "gl_loader.h"
 #include "window_override.h"
 #include "srgb_convert.h"
+#include "hud_mask.h"
 
 // Same no-<windows.h> discipline as the rest of this DLL (see config.cpp's equivalent block and
 // wrapper.cpp's header comment): <windows.h> declares dllimport wgl*/gl* names that collide with
@@ -327,6 +328,85 @@ void DumpFrame(const GlComputeApi& gl, int width, int height, const char* path) 
     gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
 }
 
+// The stages that act on the 3D world rather than on the picture: they read depth (or, for
+// lightshafts, look for a light source in the scene), so on a frame that drew no world - a
+// loading screen, a menu, a cutscene plaque - they have nothing true to work with. Run anyway,
+// they apply the LAST world frame's projection to whatever depth is left over: fog washes over a
+// menu, ssr mirrors a loading screen, motionblur reprojects a plaque through a camera that is no
+// longer there. These are also the stages whose output gets the HUD put back (see hud_mask.h).
+bool IsSceneSpaceStage(EffectKind stage) {
+    switch (stage) {
+        case EffectKind::Ssao:
+        case EffectKind::Dof:
+        case EffectKind::Fog:
+        case EffectKind::Ssr:
+        case EffectKind::LightShafts:
+        case EffectKind::DepthVignette:
+        case EffectKind::MotionBlur:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Whether this frame does not continue the previous one, so anything temporal - taa's history,
+// motionblur's camera delta - would be pairing two unrelated pictures. That is what changing
+// rooms looked like: the first frame of the new room was resolved against the last frame of the
+// old one (and against whatever the loading screen left in history in between), which showed
+// as fragments of the previous scene's textures over the new one.
+//
+// A cut is any of: no world drawn this frame or the last; the render size changed; the camera
+// history skipped a frame; or the camera moved further in one frame than anything but a
+// teleport does. The camera tests only apply where a camera has ever been captured, so the
+// config editor - which never captures one - is not treated as cutting on every frame.
+bool DetectSceneCut(int width, int height, bool worldThisFrame) {
+    static bool havePrevious = false;
+    static bool previousWorld = false;
+    static int previousWidth = 0;
+    static int previousHeight = 0;
+
+    bool cut = !havePrevious || !worldThisFrame || !previousWorld ||
+               width != previousWidth || height != previousHeight;
+
+    CameraMatrix current;
+    CameraMatrix previous;
+    if (!cut && GetCapturedCamera(current)) {
+        if (!IsCameraHistoryContinuous() || !GetPreviousCamera(previous)) {
+            cut = true;
+        } else {
+            CameraPose a, b;
+            DecomposeCamera(current, a);
+            DecomposeCamera(previous, b);
+            float dx = a.position[0] - b.position[0];
+            float dy = a.position[1] - b.position[1];
+            float dz = a.position[2] - b.position[2];
+            float moved = sqrtf(dx * dx + dy * dy + dz * dz);
+            float facing = a.forward[0] * b.forward[0] + a.forward[1] * b.forward[1] +
+                           a.forward[2] * b.forward[2];
+            // 96 units is ~8 feet at Quake II scale in a single frame - several times a
+            // running player's per-frame step even at 20fps. 0.5 is a 60-degree snap turn.
+            // NaN fails both comparisons, so the !(...) form counts a garbage camera as a cut.
+            if (!(moved < 96.0f) || !(facing > 0.5f)) {
+                cut = true;
+            }
+        }
+    }
+
+    havePrevious = true;
+    previousWorld = worldThisFrame;
+    previousWidth = width;
+    previousHeight = height;
+    return cut;
+}
+
+// sRGB-encoded colour component -> linear light, the standard piecewise curve.
+float SrgbToLinear(float c) {
+    if (c <= 0.04045f) {
+        return c / 12.92f;
+    }
+    return powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
 }  // namespace
 
 // Diagnostic for "motion blur is on but I see nothing", which has three quite different causes
@@ -590,6 +670,9 @@ void ApplySelectedEffect(void* hdc) {
         dstWidth = fallbackWidth;
         dstHeight = fallbackHeight;
     }
+    // The config editor presenting a loaded frame dump into a sub-rectangle of its window - see
+    // SetExternalSourceFramebuffer in render_target.h. No-op in a game.
+    GetExternalPresentSize(dstWidth, dstHeight);
 
     // Deliberately strict about what counts as "the game is rendering smaller than its window":
     //
@@ -745,23 +828,70 @@ void ApplySelectedEffect(void* hdc) {
     // depthCaptured false, which makes the depth-consuming stages below no-op for this frame
     // exactly like any other stage that can't run. Always native resolution - see depthTex's
     // comment on PipelineTextures.
+    //
+    // A depth blit additionally requires the two depth FORMATS to match exactly, and the default
+    // framebuffer's usually does not: ask a driver for 24 depth bits and it typically hands back
+    // D24S8 (or D32), against depthTex's DEPTH_COMPONENT24, and the blit fails with
+    // GL_INVALID_OPERATION on every frame. That silently switched off every depth stage
+    // whenever supersampling was off - including on the config editor's synthetic scene, which
+    // is why its ssao/ssr/fog/dof sliders did nothing. glCopyTexSubImage2D into a depth texture
+    // reads the read framebuffer's depth with format conversion, so it is the fallback; once the
+    // blit has failed under a context, that context goes straight to the copy.
     bool depthCaptured = false;
     if (needDepth) {
-        gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
-        gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
-        gl.glBlitFramebuffer(0, 0, nativeWidth, nativeHeight, 0, 0, nativeWidth, nativeHeight,
-                              GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-        unsigned int depthErr = gl.glGetError();
+        static unsigned int copyDepthGeneration = 0;
+        bool useCopy = copyDepthGeneration == GetGlContextGeneration();
+        unsigned int depthErr = GL_NO_ERROR;
+        if (!useCopy) {
+            gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_pipeline.depthFbo);
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+            gl.glBlitFramebuffer(0, 0, nativeWidth, nativeHeight, 0, 0, nativeWidth, nativeHeight,
+                                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+            depthErr = gl.glGetError();
+            if (depthErr != GL_NO_ERROR) {
+                printf("[opengl32_enh_cpp] post_effects: depth blit failed (0x%04X) - the "
+                       "framebuffer's depth format differs from the capture's; copying depth "
+                       "instead\n", depthErr);
+                copyDepthGeneration = GetGlContextGeneration();
+                useCopy = true;
+            }
+        }
+        if (useCopy) {
+            gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, GetGameFramebuffer());
+            gl.glBindTexture(GL_TEXTURE_2D, g_pipeline.depthTex);
+            gl.glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, nativeWidth, nativeHeight);
+            depthErr = gl.glGetError();
+        }
         depthCaptured = (depthErr == GL_NO_ERROR);
         if (!depthCaptured) {
             static bool warnedNoDepth = false;
             if (!warnedNoDepth) {
-                printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X blitting depth, "
+                printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X capturing depth, "
                        "depth-based stages will no-op until this changes\n", depthErr);
                 warnedNoDepth = true;
             }
         }
     }
+
+    // Scene state for this frame - see IsSceneSpaceStage() and DetectSceneCut() above.
+    // worldThisFrame is only allowed to veto when a camera has ever been seen: the config editor
+    // never captures one, and its loaded-frame view may not set a frustum at all.
+    CameraMatrix anyCamera;
+    bool gameHasCamera = GetCapturedCamera(anyCamera);
+    bool worldThisFrame = WasProjectionCapturedThisFrame() || !gameHasCamera;
+    bool sceneCut = DetectSceneCut(nativeWidth, nativeHeight, worldThisFrame);
+    if (sceneCut) {
+        ResetTaaHistory();
+    }
+
+    // The world-only frame and the pristine capture, for the HUD mask after scene stages.
+    unsigned int hudWorldTex = 0;
+    int hudWorldW = 0, hudWorldH = 0;
+    bool hudMaskAvailable = needCapture && g_pipeline.captureTex != 0 &&
+                            GetWorldOnlyFrame(hudWorldTex, hudWorldW, hudWorldH) &&
+                            hudWorldW == nativeWidth && hudWorldH == nativeHeight &&
+                            g_pipeline.captureWidth == nativeWidth &&
+                            g_pipeline.captureHeight == nativeHeight;
 
     // Run the stages in exactly the order the config listed them - there is no hard-coded
     // pipeline order any more, and no distinction between a "primary" effect and an "addon".
@@ -825,6 +955,11 @@ void ApplySelectedEffect(void* hdc) {
 
     for (int i = 0; i < config.stageCount; ++i) {
         EffectKind stage = config.stages[i];
+
+        // No world on screen this frame - see IsSceneSpaceStage().
+        if (IsSceneSpaceStage(stage) && !worldThisFrame) {
+            continue;
+        }
 
         // The game's depth buffer only exists at its own native resolution (see depthTex's
         // comment on PipelineTextures) - once the chain has moved on to the larger destination
@@ -1116,7 +1251,10 @@ void ApplySelectedEffect(void* hdc) {
                 CameraMatrix mbPrevious;
                 unsigned int worldTex = 0;
                 int worldW = 0, worldH = 0;
-                bool mbHaveInputs = depthCaptured && GetCapturedProjection(mbProjection) &&
+                // !sceneCut: across a cut the two cameras belong to different places, and the
+                // "velocity" between them is a teleport, not motion.
+                bool mbHaveInputs = !sceneCut && depthCaptured &&
+                                    GetCapturedProjection(mbProjection) &&
                                     GetCapturedCamera(mbCurrent) && GetPreviousCamera(mbPrevious) &&
                                     GetWorldOnlyFrame(worldTex, worldW, worldH) &&
                                     g_pipeline.captureTex != 0;
@@ -1158,10 +1296,20 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::Fog: {
                 // World-unit distances, so it needs the projection for the same reason dof does.
                 ProjectionParams fogProjection;
+                // fogColor is picked as a display colour (it is what the editor's colour picker
+                // shows), so on a linear chain it has to be decoded first. Mixed in raw, 0.55
+                // grey is treated as 0.55 LIGHT - about 0.77 on screen - and even a 3% fog
+                // lifts dark scenes into a visible haze.
+                float fogR = config.fogColorR, fogG = config.fogColorG, fogB = config.fogColorB;
+                if (space == ColorSpace::Linear) {
+                    fogR = SrgbToLinear(fogR);
+                    fogG = SrgbToLinear(fogG);
+                    fogB = SrgbToLinear(fogB);
+                }
                 wrote = depthCaptured && GetCapturedProjection(fogProjection) &&
                          ApplyFog(src, dst, g_pipeline.depthTex, dstW, dstH, fogProjection,
                                   config.fogStart, config.fogEnd, config.fogIntensity,
-                                  config.fogColorR, config.fogColorG, config.fogColorB);
+                                  fogR, fogG, fogB);
                 break;
             }
             case EffectKind::Dof: {
@@ -1185,6 +1333,14 @@ void ApplySelectedEffect(void* hdc) {
                 break;
             }
         }
+        // Undo the stage's change wherever the game drew HUD over the world - see hud_mask.h.
+        // motionblur already skips HUD pixels itself. Only at native resolution, which is the
+        // only resolution the world-only frame and the pristine capture exist at.
+        if (wrote && hudMaskAvailable && atNativeRes && IsSceneSpaceStage(stage) &&
+            stage != EffectKind::MotionBlur && dstW == nativeWidth && dstH == nativeHeight) {
+            ApplyHudRestore(src, dst, hudWorldTex, g_pipeline.captureTex, dstW, dstH);
+        }
+
         if (wrote) {
             if (doRealUpscale) {
                 pair = g_pipeline.tex;

@@ -212,7 +212,45 @@ void ArmSupersampleForFrame(bool targetReady) {
     }
 }
 
+namespace {
+
+// See SetExternalSourceFramebuffer in render_target.h.
+bool g_externalActive = false;
+unsigned int g_externalFbo = 0;
+int g_externalWidth = 0;
+int g_externalHeight = 0;
+int g_externalPresentWidth = 0;
+int g_externalPresentHeight = 0;
+
+}  // namespace
+
+void SetExternalSourceFramebuffer(unsigned int fbo, int width, int height, int presentWidth,
+                                  int presentHeight) {
+    g_externalActive = fbo != 0 && width > 0 && height > 0 && presentWidth > 0 && presentHeight > 0;
+    g_externalFbo = fbo;
+    g_externalWidth = width;
+    g_externalHeight = height;
+    g_externalPresentWidth = presentWidth;
+    g_externalPresentHeight = presentHeight;
+}
+
+void ClearExternalSourceFramebuffer() {
+    g_externalActive = false;
+    g_externalFbo = 0;
+}
+
+void GetExternalPresentSize(int& width, int& height) {
+    if (!g_externalActive) {
+        return;
+    }
+    width = g_externalPresentWidth;
+    height = g_externalPresentHeight;
+}
+
 bool IsSupersampleActive() {
+    if (g_externalActive) {
+        return true;
+    }
     return ArmedInCurrentContext();
 }
 
@@ -448,7 +486,7 @@ bool EnsureRenderTarget() {
 }
 
 void BindRenderTarget() {
-    if (!IsSupersampleActive() || g_fbo == 0) {
+    if (!ArmedInCurrentContext() || g_fbo == 0) {
         // Not armed. If we bound the target on an earlier frame it is STILL bound - nothing
         // else takes it down, and post_effects.cpp's state restore puts back whatever it found
         // at entry, which is our framebuffer - so the game would keep rendering into a buffer
@@ -461,6 +499,9 @@ void BindRenderTarget() {
 }
 
 unsigned int GetGameFramebuffer() {
+    if (g_externalActive) {
+        return g_externalFbo;
+    }
     return IsSupersampleActive() ? g_fbo : 0;
 }
 
@@ -469,6 +510,11 @@ unsigned int GetGameReadBuffer() {
 }
 
 void GetRenderTargetSize(int& width, int& height) {
+    if (g_externalActive) {
+        width = g_externalWidth;
+        height = g_externalHeight;
+        return;
+    }
     if (g_targetWidth <= 0 || g_targetHeight <= 0) {
         return;
     }
@@ -477,6 +523,11 @@ void GetRenderTargetSize(int& width, int& height) {
 }
 
 void GetReferenceViewport(int& width, int& height) {
+    if (g_externalActive) {
+        width = g_externalPresentWidth;
+        height = g_externalPresentHeight;
+        return;
+    }
     if (!g_haveRef) {
         return;
     }

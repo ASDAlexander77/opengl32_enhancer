@@ -120,3 +120,10 @@ bool GetPreviousCamera(CameraMatrix& out);
 
 // Turns a view matrix into a world-space position and basis. Pure function, no state.
 void DecomposeCamera(const CameraMatrix& in, CameraPose& out);
+
+// Whether GetCapturedCamera() and GetPreviousCamera() describe two CONSECUTIVE frames - this
+// frame latched a camera, and the previous camera was latched on the frame immediately before.
+// Both getters keep returning their last value across frames that drew no world at all (a
+// loading screen, a menu), so without this a reprojecting stage on the first frame after a load
+// pairs the new room's camera with the old room's and smears or ghosts one into the other.
+bool IsCameraHistoryContinuous();

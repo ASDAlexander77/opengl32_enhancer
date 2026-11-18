@@ -38,7 +38,9 @@ const char* kDecodeShaderSource =
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 color = texture(inputTex, uv);\n"
     // max() before the curve: pow() of a negative is NaN, and one NaN here propagates
-    // through every later stage and out to the screen.
+    // through every later stage and out to the screen. max() of a NaN is not guaranteed to
+    // return the other operand, so non-finite input is scrubbed explicitly first.
+    "    if (any(isnan(color.rgb)) || any(isinf(color.rgb))) { color.rgb = vec3(0.0); }\n"
     "    imageStore(outputImage, outCoord, vec4(SrgbToLinear(max(color.rgb, vec3(0.0))), color.a));\n"
     "}\n";
 
@@ -58,6 +60,9 @@ const char* kEncodeShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 color = texture(inputTex, uv);\n"
+    // Last line of defence before the back buffer: a non-finite texel from any stage shows as
+    // black (or a driver-specific colour), so it is presented as black deliberately instead.
+    "    if (any(isnan(color.rgb)) || any(isinf(color.rgb))) { color.rgb = vec3(0.0); }\n"
     "    imageStore(outputImage, outCoord, vec4(LinearToSrgb(max(color.rgb, vec3(0.0))), color.a));\n"
     "}\n";
 

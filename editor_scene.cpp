@@ -11,6 +11,7 @@
 #include "frame_dump.h"
 #include "gl_loader.h"
 #include "projection_capture.h"
+#include "render_target.h"
 
 namespace {
 
@@ -83,6 +84,9 @@ void RenderSyntheticScene(int windowWidth, int windowHeight) {
     if (windowWidth <= 0 || windowHeight <= 0) {
         return;
     }
+
+    // Back to the window's own back buffer, in case a loaded frame was showing last frame.
+    ClearExternalSourceFramebuffer();
 
     glViewport(0, 0, windowWidth, windowHeight);
     glEnable(GL_DEPTH_TEST);
@@ -291,20 +295,19 @@ void RenderLoadedFrame(int windowWidth, int windowHeight) {
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Color and depth together in one blit. NEAREST is mandatory once GL_DEPTH_BUFFER_BIT is in
-    // the mask, and is what we want for color here anyway - this is a 1:1-ish preview of a real
-    // frame, so filtering it would misrepresent what the stages actually see.
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER_, g_frame.fbo);
-    gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER_, 0);
-    gl.glBlitFramebuffer(0, 0, g_frame.width, g_frame.height,
-                          0, 0, previewWidth, previewHeight,
-                          GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER_, 0);
+    // The pipeline reads the dump straight out of its own framebuffer, at the dump's own
+    // resolution, and resamples on present into the preview rectangle - see
+    // SetExternalSourceFramebuffer in render_target.h. This replaces a colour+depth blit into
+    // the window's default framebuffer, which failed outright whenever the window's depth
+    // format was not exactly DEPTH_COMPONENT24 (a D24S8 window, the common case) and so never
+    // showed the dump at all. It also means every stage runs on the dump at its real size, the
+    // way the game would, rather than on a copy already squeezed into the window.
+    SetExternalSourceFramebuffer(g_frame.fbo, g_frame.width, g_frame.height,
+                                 previewWidth, previewHeight);
 
-    // The viewport has to match the region the frame actually occupies, because that is what
-    // ApplySelectedEffect() reads to decide how much of the back buffer to capture - and it
-    // always captures from the origin.
-    glViewport(0, 0, previewWidth, previewHeight);
+    // ApplySelectedEffect() still rejects a frame whose live viewport is degenerate, so leave
+    // one that describes the source.
+    glViewport(0, 0, g_frame.width, g_frame.height);
 
     if (g_frame.hasProjection) {
         CaptureProjectionFrustum(g_frame.projection.left, g_frame.projection.right,
@@ -326,6 +329,8 @@ void RenderLoadedFrameDepth(int windowWidth, int windowHeight) {
     if (!PreviewSize(windowWidth, windowHeight, previewWidth, previewHeight)) {
         return;
     }
+
+    ClearExternalSourceFramebuffer();
 
     glViewport(0, 0, windowWidth, windowHeight);
     glClearColor(0.05f, 0.06f, 0.08f, 1.0f);

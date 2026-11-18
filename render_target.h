@@ -138,3 +138,20 @@ void GetRenderTargetSize(int& width, int& height);
 // target's own (larger) size. The aspect-ratio warning that used to be the other consumer now
 // reads the reference directly, from the arming path - see ReportSupersampleVerdict.
 void GetReferenceViewport(int& width, int& height);
+
+// For the config editor only: makes ApplySelectedEffect() read the frame from `fbo` (colour
+// attachment 0 plus its depth attachment, `width` x `height`) instead of the window's back
+// buffer, and present the result into the window's bottom-left `presentWidth` x
+// `presentHeight` rectangle. While set, IsSupersampleActive() reports true, because that is
+// exactly the "the frame lives in an offscreen buffer of known size and is resampled on present"
+// path the pipeline already has.
+//
+// It exists because the editor used to copy a loaded dump into its default framebuffer with one
+// colour+depth glBlitFramebuffer, and a depth blit requires identical depth formats on both
+// sides - a DEPTH_COMPONENT24 texture against a D24S8 window is GL_INVALID_OPERATION, which
+// dropped the colour half too and left the dumped frame never appearing at all.
+void SetExternalSourceFramebuffer(unsigned int fbo, int width, int height, int presentWidth,
+                                  int presentHeight);
+void ClearExternalSourceFramebuffer();
+// Overwrites width/height with the external present size when one is set; untouched otherwise.
+void GetExternalPresentSize(int& width, int& height);

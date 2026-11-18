@@ -25,3 +25,16 @@ void ApplyWindowSizeOverride(void* hdc);
 // upscale - not just windowWidth/windowHeight's cosmetic resize - needs to detect and fill.
 // Returns false (outWidth/outHeight left untouched) if the HDC has no window behind it.
 bool GetWindowClientSize(void* hdc, int& outWidth, int& outHeight);
+
+// Declares the process DPI-aware (per-monitor v2 where the OS has it, plain system-aware
+// otherwise) when config.dpiAware is set. Must run BEFORE the game creates its window: a
+// window's DPI awareness is fixed at creation, so this is called from the DLL's load-time
+// initializer (dll_init.cpp) - a Quake II-family renderer LoadLibrary's opengl32 before it
+// creates its window, which is what makes that early enough. Idempotent; logs what it did.
+void EnsureProcessDpiAware();
+
+// Pure helper behind ApplyWindowSizeOverride's fullscreen handling, exposed for the tests: fits
+// a requested client size inside a monitor of the given size, preserving the requested aspect
+// ratio. Returns the request unchanged when it already fits.
+void FitClientSizeToMonitor(int requestedWidth, int requestedHeight, int monitorWidth,
+                            int monitorHeight, int& outWidth, int& outHeight);

@@ -46,6 +46,12 @@
 bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend,
               float shimmerSuppression);
 
+// Discards the accumulated history (both paths share it), so the next call outputs the current
+// frame unchanged and reseeds from it. post_effects.cpp calls this on a scene cut - a level
+// load, a teleport, a frame with no 3D world in it - where history describes a different
+// place entirely and blending it in shows the previous room smeared over the new one.
+void ResetTaaHistory();
+
 // ORDERING: this stage softens the image. History is resampled and re-filtered every frame, so
 // fine detail loses a little contrast each time it is carried forward - that is inherent to
 // accumulating a resampled history, not a defect to tune out. The conventional remedy is a mild

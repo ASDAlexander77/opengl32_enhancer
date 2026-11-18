@@ -88,13 +88,18 @@ const char* kShaftShaderSource =
     "    float decay;\n"
     "    float threshold;\n"
     "};\n"
-    "const int kSteps = 32;\n"
+    "const int kSteps = 64;\n"
+    // Interleaved gradient noise (Jimenez 2014): a per-pixel offset in [0,1) that is cheap,
+    // stable for a still frame and well spread between neighbours.
+    "float Ign(vec2 p) {\n"
+    "    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));\n"
+    "}\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
-    "    vec4 scene = texture(srcTex, uv);\n"
+    "    vec4 scene = texelFetch(srcTex, outCoord, 0);\n"
     // Nothing above the threshold anywhere in the frame: no light, so no shafts. Writing the
     // source verbatim keeps this an exact no-op rather than a very dark wash.
     "    if (sumW == 0u || intensity <= 0.0) {\n"
@@ -102,21 +107,42 @@ const char* kShaftShaderSource =
     "        return;\n"
     "    }\n"
     "    vec2 light = vec2(float(sumX), float(sumY)) / float(sumW);\n"
-    "    vec2 delta = (light - uv) * density / float(kSteps);\n"
-    "    vec2 samplePos = uv;\n"
-    "    float weight = 1.0;\n"
+    "    vec2 toLight = light - uv;\n"
+    // DECAY IS A DISTANCE FALLOFF. It used to be a per-step weight, and because every pixel
+    // takes the same number of steps whatever its distance from the light, it could never make
+    // a far pixel dimmer than a near one: every ray ran at the same strength right across the
+    // frame, and no decay setting could pull them in. It is now applied once per 1% of the
+    // screen height between this pixel and the light (aspect-corrected, so rays fall off
+    // equally in every direction): 0.99 keeps ~37% at a full screen away, 0.97 ~5%, 0.9 makes a
+    // tight glow around the source.
+    "    float dist = length(toLight * vec2(float(outSize.x) / float(outSize.y), 1.0));\n"
+    "    float falloff = pow(clamp(decay, 0.0, 1.0), dist * 100.0);\n"
+    "    if (falloff < 1.0 / 1024.0) {\n"
+    "        imageStore(outImage, outCoord, scene);\n"
+    "        return;\n"
+    "    }\n"
+    "    vec2 delta = toLight * density / float(kSteps);\n"
+    // The march starts a random fraction of a step along. With every pixel starting exactly at
+    // itself, neighbours along a ray sampled the same few texels of the source, and the frame
+    // came out as discrete hard-edged streaks - the 'laser' look - instead of a continuous
+    // shaft. Jittering the start turns that banding into fine noise, which taa (or simply the
+    // eye, at 64 steps) averages away.
+    "    vec2 samplePos = uv + delta * Ign(vec2(outCoord));\n"
     "    vec3 shaft = vec3(0.0);\n"
     "    for (int i = 0; i < kSteps; ++i) {\n"
-    "        samplePos += delta;\n"
-    "        vec3 c = texture(srcTex, samplePos).rgb;\n"
+    "        vec3 c = min(texture(srcTex, samplePos).rgb, vec3(4.0));\n"
     "        float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
     // Only light above the threshold travels; everything else is an occluder and contributes
-    // nothing, which is what carves the shafts out around silhouettes.
-    "        shaft += max(luma - threshold, 0.0) * c * weight;\n"
-    "        weight *= decay;\n"
+    // nothing, which is what carves the shafts out around silhouettes. The contribution is
+    // soft-kneed so a texel barely crossing the threshold does not switch a whole ray on.
+    "        float over = max(luma - threshold, 0.0);\n"
+    "        shaft += c * (over / (over + 0.1)) * over;\n"
+    "        samplePos += delta;\n"
     "    }\n"
     "    shaft /= float(kSteps);\n"
-    "    imageStore(outImage, outCoord, vec4(scene.rgb + shaft * intensity, scene.a));\n"
+    "    vec3 result = scene.rgb + shaft * intensity * falloff;\n"
+    "    if (any(isnan(result)) || any(isinf(result))) { result = scene.rgb; }\n"
+    "    imageStore(outImage, outCoord, vec4(result, scene.a));\n"
     "}\n";
 
 struct DetectConfigData {

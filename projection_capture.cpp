@@ -56,6 +56,10 @@ bool GetPreviousProjection(ProjectionParams& out) {
     return true;
 }
 
+bool WasProjectionCapturedThisFrame() {
+    return g_capturedThisFrame;
+}
+
 void AdvanceProjectionHistory() {
     // Only a frame that actually captured a frustum promotes one, so this history's promotion
     // rule reads the same as modelview_capture.cpp's (gated on g_latched) instead of on the

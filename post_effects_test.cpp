@@ -241,6 +241,10 @@ bool CheckWorldCaptureStageSet() {
     const Expectation kExpected[] = {
         {EffectKind::MotionBlur,          true,  "motionblur"},
         {EffectKind::Taa,                 true,  "taa"},
+        // Scene-space stages - they need it for the HUD mask (see hud_mask.h).
+        {EffectKind::Fog,                 true,  "fog"},
+        {EffectKind::Ssr,                 true,  "ssr"},
+        {EffectKind::LightShafts,         true,  "lightshafts"},
         // A sample of stages that don't need it. If one of these ever starts reporting true the
         // pipeline pays for a full-resolution capture and a permanent texture every frame that
         // does not need one.

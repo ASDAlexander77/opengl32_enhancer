@@ -240,6 +240,27 @@ void DrawParameters(AnaxConfig& config) {
     }
 }
 
+// g_dumpPath re-rooted at the ini's directory, for a relative g_dumpPath when the ini path has a
+// directory part. False when there is nothing different to try.
+bool DumpPathNextToIni(char* out, size_t outSize) {
+    bool absolute = (g_dumpPath[0] != '\0' && g_dumpPath[1] == ':') ||
+                    g_dumpPath[0] == '\\' || g_dumpPath[0] == '/';
+    if (absolute) {
+        return false;
+    }
+    const char* lastSlash = nullptr;
+    for (const char* p = g_iniPath; *p; ++p) {
+        if (*p == '\\' || *p == '/') {
+            lastSlash = p;
+        }
+    }
+    if (lastSlash == nullptr) {
+        return false;
+    }
+    int dirLen = (int)(lastSlash - g_iniPath) + 1;
+    return snprintf(out, outSize, "%.*s%s", dirLen, g_iniPath, g_dumpPath) > 0;
+}
+
 void DrawSceneControls() {
     int dumpWidth = 0, dumpHeight = 0;
     LoadedFrameSize(dumpWidth, dumpHeight);
@@ -258,7 +279,19 @@ void DrawSceneControls() {
 
     ImGui::InputText("dump path", g_dumpPath, sizeof(g_dumpPath));
     if (ImGui::Button("Load frame dump")) {
-        if (LoadFrameDump(g_dumpPath)) {
+        // The game writes the dump relative to ITS working directory - normally the game folder,
+        // which is also where the ini lives. A relative path that is not found relative to this
+        // editor's own working directory (started from a shortcut, a build folder, with the
+        // ini passed as an argument) is therefore retried next to the ini before giving up.
+        bool loaded = LoadFrameDump(g_dumpPath);
+        if (!loaded) {
+            char alt[512];
+            if (DumpPathNextToIni(alt, sizeof(alt)) && LoadFrameDump(alt)) {
+                snprintf(g_dumpPath, sizeof(g_dumpPath), "%s", alt);
+                loaded = true;
+            }
+        }
+        if (loaded) {
             g_useLoadedFrame = true;
             LoadedFrameSize(dumpWidth, dumpHeight);
             snprintf(g_status, sizeof(g_status), "Loaded %s (%dx%d, projection=%s)",

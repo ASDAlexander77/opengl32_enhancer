@@ -70,3 +70,10 @@ bool GetPreviousProjection(ProjectionParams& out);
 // jittered frame rotates through. Bounded and transient, and it is a taa_jitter.h question,
 // not one this file can answer on its own.
 void AdvanceProjectionHistory();
+
+// Whether a 3D frustum was set since the last AdvanceProjectionHistory() - i.e. whether the frame
+// now being presented actually drew a 3D world pass. GetCapturedProjection() cannot answer this:
+// it keeps returning the last frustum ever seen, so on a loading screen, a menu or a cutscene
+// plaque it hands the depth stages a projection that describes a frame that is no longer on
+// screen. Those stages must not run on such frames at all.
+bool WasProjectionCapturedThisFrame();

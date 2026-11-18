@@ -81,6 +81,10 @@ const char* kMotionBlurShaderSource =
     // and projecting it anyway would divide by a vanishing distance.
     "    if (before.z > -params.x) { imageStore(outputImage, coord, src); return; }\n"
     "    vec2 velocity = (uv - UvForViewPos(before, params.x)) * params.z;\n"
+    // A non-finite velocity (a degenerate camera pair, a depth texel that unprojects to
+    // infinity) must not reach the taps: one NaN tap makes the pixel NaN, which displays as black
+    // and is then spread frame-wide by any blur listed after this stage.
+    "    if (any(isnan(velocity)) || any(isinf(velocity))) { imageStore(outputImage, coord, src); return; }\n"
     "    float len = length(velocity);\n"
     // A cost saving, not a correctness guarantee: a still camera - the common case across a
     // static scene - makes velocity IEEE-754-exact zero, which sends every one of the 7
@@ -119,7 +123,9 @@ const char* kMotionBlurShaderSource =
     "        sum += texture(colorTex, clampedUv).rgb;\n"
     "        count += 1.0;\n"
     "    }\n"
-    "    imageStore(outputImage, coord, vec4(sum / count, src.a));\n"
+    "    vec3 blurred = sum / count;\n"
+    "    if (any(isnan(blurred)) || any(isinf(blurred))) { blurred = src.rgb; }\n"
+    "    imageStore(outputImage, coord, vec4(blurred, src.a));\n"
     "}\n";
 
 struct MotionBlurConfigData {

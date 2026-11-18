@@ -65,6 +65,11 @@ unsigned int g_matrixMode = kGlModelview;
 int g_modelviewDepth = 0;
 unsigned int g_frameCounter = 0;
 
+// g_frameCounter at the moment g_current / g_previous were latched - see
+// IsCameraHistoryContinuous().
+unsigned int g_currentLatchFrame = 0;
+unsigned int g_previousLatchFrame = 0;
+
 // Reads the driver's modelview matrix, if one is pending and none has been taken this frame.
 // Idempotent within a frame, which is what lets all three latch points call it unconditionally.
 void LatchCamera() {
@@ -88,6 +93,7 @@ void LatchCamera() {
         return;
     }
     g_current = taken;
+    g_currentLatchFrame = g_frameCounter;
     g_hasCurrent = true;
     g_latched = true;
     g_pending = false;
@@ -184,6 +190,7 @@ void AdvanceCameraHistory() {
 
     if (g_latched) {
         g_previous = g_current;
+        g_previousLatchFrame = g_currentLatchFrame;
         g_hasPrevious = true;
     }
     g_armed = false;
@@ -206,6 +213,10 @@ bool GetPreviousCamera(CameraMatrix& out) {
     }
     out = g_previous;
     return true;
+}
+
+bool IsCameraHistoryContinuous() {
+    return g_latched && g_hasPrevious && g_previousLatchFrame + 1u == g_currentLatchFrame;
 }
 
 void DecomposeCamera(const CameraMatrix& in, CameraPose& out) {

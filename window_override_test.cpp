@@ -162,6 +162,18 @@ int main() {
         Check(w == secondWidth && h == secondHeight, label);
     }
 
+    // Fullscreen fit: a request bigger than the monitor shrinks to fit, keeping its shape - the
+    // 3200x2000-on-a-smaller-display case that used to push most of the frame off-screen.
+    {
+        int w = 0, h = 0;
+        FitClientSizeToMonitor(3200, 2000, 2560, 1440, w, h);
+        Check(w == 2304 && h == 1440, "3200x2000 on a 2560x1440 monitor fits to 2304x1440");
+        FitClientSizeToMonitor(3200, 2000, 3840, 2160, w, h);
+        Check(w == 3200 && h == 2000, "3200x2000 on a 3840x2160 monitor is left alone");
+        FitClientSizeToMonitor(3200, 2000, 1600, 1000, w, h);
+        Check(w == 1600 && h == 1000, "3200x2000 on a 1600x1000 monitor halves exactly");
+    }
+
     ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
 

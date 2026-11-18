@@ -127,6 +127,29 @@ const char* kSsrShaderSource =
     "        imageStore(outputImage, outCoord, color);\n"
     "        return;\n"
     "    }\n"
+    // PLANARITY - the second half of the gate. Facing up is not enough on its own: the tops of
+    // heads, shoulders, crates and every upward facet of a low-poly model face up too, and they
+    // came out mirrored as if each were a little patch of floor. What actually separates a floor
+    // from those is that it stays on one plane for a long way. So positions 4 and 12 pixels out
+    // in each direction must lie on this pixel's own tangent plane; the worst deviation, as a
+    // fraction of the distance to that neighbour, fades the reflection out. A neighbour across a
+    // depth edge (a different object, or sky) is far off the plane, so edges and small objects
+    // fail together, which is the intent.
+    "    float worstOff = 0.0;\n"
+    "    for (int s = 0; s < 2; ++s) {\n"
+    "        int r = (s == 0) ? 4 : 12;\n"
+    "        for (int d = 0; d < 4; ++d) {\n"
+    "            ivec2 o = (d == 0) ? ivec2(r, 0) : (d == 1) ? ivec2(-r, 0) : (d == 2) ? ivec2(0, r) : ivec2(0, -r);\n"
+    "            vec3 Q = ViewPosAt(outCoord + o, size, zNear, zFar) - P;\n"
+    "            float qLen = length(Q);\n"
+    "            if (qLen > 1e-4) { worstOff = max(worstOff, abs(dot(Q, N)) / qLen); }\n"
+    "        }\n"
+    "    }\n"
+    "    float planarity = 1.0 - smoothstep(0.04, 0.15, worstOff);\n"
+    "    if (planarity <= 0.0) {\n"
+    "        imageStore(outputImage, outCoord, color);\n"
+    "        return;\n"
+    "    }\n"
     "    vec3 R = reflect(normalize(P), N);\n"
     "    float stepLen = maxDistance / 32.0;\n"
     "    bool hit = false;\n"
@@ -171,7 +194,8 @@ const char* kSsrShaderSource =
     "    vec3 reflected = texture(colorTex, hitUv).rgb;\n"
     // At a blend of 0 mix() returns color.rgb bit-exact, which is what makes intensity=0 an
     // exact no-op rather than a near-miss.
-    "    float blend = clamp(intensity * fade, 0.0, 1.0);\n"
+    "    float blend = clamp(intensity * fade * planarity, 0.0, 1.0);\n"
+    "    if (any(isnan(reflected)) || any(isinf(reflected))) { blend = 0.0; reflected = color.rgb; }\n"
     "    imageStore(outputImage, outCoord, vec4(mix(color.rgb, reflected, blend), color.a));\n"
     "}\n";
 

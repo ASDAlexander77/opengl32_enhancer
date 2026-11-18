@@ -347,6 +347,15 @@ bool StageNeedsWorldCapture(EffectKind stage) {
     switch (stage) {
         case EffectKind::MotionBlur:
         case EffectKind::Taa:
+        // The scene-space stages below need it for the HUD mask (see hud_mask.h): they act on
+        // the 3D world, and a HUD or menu drawn over it must come out of them untouched -
+        // otherwise fog tints the HUD, ssr reflects into it and lightshafts streak across it.
+        case EffectKind::Ssao:
+        case EffectKind::Dof:
+        case EffectKind::Fog:
+        case EffectKind::Ssr:
+        case EffectKind::LightShafts:
+        case EffectKind::DepthVignette:
             return true;
         default:
             return false;
@@ -559,6 +568,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.windowWidth = ParseClampedInt(value, 0, 16384, config.windowWidth, "windowWidth");
         } else if (strcmp(key, "windowHeight") == 0) {
             config.windowHeight = ParseClampedInt(value, 0, 16384, config.windowHeight, "windowHeight");
+        } else if (strcmp(key, "dpiAware") == 0) {
+            config.dpiAware = ParseBool(value, config.dpiAware, "dpiAware");
         } else if (strcmp(key, "renderWidth") == 0) {
             config.renderWidth = ParseClampedInt(value, 0, 16384, config.renderWidth, "renderWidth");
         } else if (strcmp(key, "renderHeight") == 0) {

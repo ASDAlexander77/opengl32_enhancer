@@ -50,6 +50,14 @@ const char* kExtractShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec3 c = texture(inputTex, uv).rgb;\n"
+    // The bright pass is the one place a bad texel gets AMPLIFIED: whatever passes it is
+    // smeared over the blur's whole footprint and added back. A NaN (from any earlier stage, or
+    // a float render target the game over-blended into) became a black blot the size of the
+    // kernel, and a huge HDR value a blown-out square - both of which showed up exactly on the
+    // frames around a level reload, where the game draws its loading plaque with extreme
+    // blending. Non-finite texels contribute nothing and the rest are capped.
+    "    if (any(isnan(c)) || any(isinf(c))) { c = vec3(0.0); }\n"
+    "    c = clamp(c, vec3(0.0), vec3(8.0));\n"
     "    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
     "    float knee = 0.2;\n"
     "    float contribution = smoothstep(value - knee, value + knee, luma);\n"
@@ -100,7 +108,9 @@ const char* kCompositeShaderSource =
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 orig = texture(inputTex, uv);\n"
     "    vec3 bloom = texture(bloomTex, uv).rgb;\n"
+    "    if (any(isnan(bloom)) || any(isinf(bloom))) { bloom = vec3(0.0); }\n"
     "    vec3 result = clamp(orig.rgb + bloom * value, 0.0, 1.0);\n"
+    "    if (any(isnan(result))) { result = clamp(bloom * value, 0.0, 1.0); }\n"
     "    imageStore(outputImage, outCoord, vec4(result, orig.a));\n"
     "}\n";
 

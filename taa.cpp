@@ -62,7 +62,7 @@ const char* kTaaShaderSource =
     "    vec4 currentColor = texture(currentTex, uv);\n"
     "    if (historyValid == 0) {\n"
     "        imageStore(outputImage, outCoord, currentColor);\n"
-    "        imageStore(historyImage, outCoord, currentColor);\n"
+    "        imageStore(historyImage, outCoord, vec4(currentColor.rgb, 1.0));\n"
     "        return;\n"
     "    }\n"
     "    vec3 neighborMin = currentColor.rgb;\n"
@@ -76,6 +76,9 @@ const char* kTaaShaderSource =
     "        }\n"
     "    }\n"
     "    vec4 historyColor = texture(historyTex, uv);\n"
+    // A non-finite history texel (a NaN that reached the pipeline once) would otherwise be
+    // blended back in forever - a permanent black blotch. Fall back to the current frame.
+    "    if (any(isnan(historyColor)) || any(isinf(historyColor))) { historyColor = currentColor; }\n"
     "    vec3 clampedHistory = clamp(historyColor.rgb, neighborMin, neighborMax);\n"
     // History rejection: the neighborhood clamp above only bounds history to the CURRENT
     // frame's own local color range at this pixel - it has no idea whether that range still
@@ -102,7 +105,8 @@ const char* kTaaShaderSource =
     "    vec3 result = mix(currentColor.rgb, clampedHistory, effectiveBlend);\n"
     "    vec4 out4 = vec4(result, currentColor.a);\n"
     "    imageStore(outputImage, outCoord, out4);\n"
-    "    imageStore(historyImage, outCoord, out4);\n"
+    // History alpha is this stage's own validity flag, not the game's alpha - see the real path.
+    "    imageStore(historyImage, outCoord, vec4(result, 1.0));\n"
     "}\n";
 
 struct TaaConfigData {
@@ -172,9 +176,16 @@ const char* kTaaRealShaderSource =
     // Every early-out writes src to BOTH targets, so a declined pixel is bit-identical to one
     // this stage never saw AND seeds history correctly for the next frame. Writing only the
     // output here would leave a stale history texel that the next frame would clip against.
-    "    if (historyValid == 0 || IsHud(coord)) {\n"
+    // History ALPHA is this stage's own per-texel validity flag, never the game's alpha (the
+    // output image keeps src.a for that): 1 where the texel holds resolved world, 0 where it holds
+    // a HUD/menu pixel. Without it, a HUD element that disappears leaves its colour in history,
+    // and the next frames reproject the world onto it and blend the old UI back in - ghosts of
+    // the interface over the scene. The flag is bilinearly filtered with the colour, so a fetch
+    // straddling a UI edge is down-weighted in proportion rather than all or nothing.
+    "    bool hud = IsHud(coord);\n"
+    "    if (historyValid == 0 || hud) {\n"
     "        imageStore(outputImage, coord, src);\n"
-    "        imageStore(historyImage, coord, src);\n"
+    "        imageStore(historyImage, coord, vec4(src.rgb, hud ? 0.0 : 1.0));\n"
     "        return;\n"
     "    }\n"
     "    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(size);\n"
@@ -183,9 +194,9 @@ const char* kTaaRealShaderSource =
     "    vec3 before = (reprojection * vec4(here, 1.0)).xyz;\n"
     // Behind the previous frame's near plane there is no screen position to measure against,
     // and projecting it anyway would divide by a vanishing distance.
-    "    if (before.z > -planes.z) {\n"
+    "    if (before.z > -planes.z || any(isnan(before)) || any(isinf(before))) {\n"
     "        imageStore(outputImage, coord, src);\n"
-    "        imageStore(historyImage, coord, src);\n"
+    "        imageStore(historyImage, coord, vec4(src.rgb, 1.0));\n"
     "        return;\n"
     "    }\n"
     // Unprojecting with the JITTERED current frustum and projecting into the UNJITTERED
@@ -202,9 +213,9 @@ const char* kTaaRealShaderSource =
     "    vec2 histUv = UvForViewPos(prevFrustum, before, planes.z) - curJitterUv;\n"
     // Off screen last frame means there is no history for this pixel - not history worth
     // clamping. Sampling anyway would drag an edge texel across the whole border.
-    "    if (histUv.x < 0.0 || histUv.x > 1.0 || histUv.y < 0.0 || histUv.y > 1.0) {\n"
+    "    if (!(histUv.x >= 0.0 && histUv.x <= 1.0 && histUv.y >= 0.0 && histUv.y <= 1.0)) {\n"
     "        imageStore(outputImage, coord, src);\n"
-    "        imageStore(historyImage, coord, src);\n"
+    "        imageStore(historyImage, coord, vec4(src.rgb, 1.0));\n"
     "        return;\n"
     "    }\n"
     // Variance clipping rather than the neighbourhood min/max the fallback path uses. The
@@ -223,11 +234,14 @@ const char* kTaaRealShaderSource =
     "    }\n"
     "    vec3 mean = m1 / 9.0;\n"
     "    vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));\n"
-    "    vec3 history = texture(historyTex, histUv).rgb;\n"
-    "    vec3 clipped = clamp(history, mean - sigma, mean + sigma);\n"
-    "    vec4 out4 = vec4(mix(src.rgb, clipped, planes.w), src.a);\n"
-    "    imageStore(outputImage, coord, out4);\n"
-    "    imageStore(historyImage, coord, out4);\n"
+    "    vec4 history4 = texture(historyTex, histUv);\n"
+    "    float historyWeight = clamp(history4.a, 0.0, 1.0);\n"
+    // A non-finite history texel would otherwise be blended back in on every later frame.
+    "    if (any(isnan(history4)) || any(isinf(history4))) { history4 = src; historyWeight = 0.0; }\n"
+    "    vec3 clipped = clamp(history4.rgb, mean - sigma, mean + sigma);\n"
+    "    vec3 resolved = mix(src.rgb, clipped, planes.w * historyWeight);\n"
+    "    imageStore(outputImage, coord, vec4(resolved, src.a));\n"
+    "    imageStore(historyImage, coord, vec4(resolved, 1.0));\n"
     "}\n";
 
 // std140 layout for TaaRealConfigBlock above, offsets in bytes: the three vec4s occupy 0..47,
@@ -362,6 +376,12 @@ void EnsureRealUbo(const GlComputeApi& gl, TaaState& state) {
 }
 
 }  // namespace
+
+void ResetTaaHistory() {
+    // The textures stay allocated; only their contents stop counting. The next dispatch on
+    // either path takes the historyValid=0 passthrough and reseeds history from that frame.
+    g_state.historyValid = false;
+}
 
 bool ApplyTaa(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float blend,
               float shimmerSuppression) {

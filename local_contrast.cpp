@@ -63,14 +63,35 @@ const char* kBlurShaderSource =
     "    vec2 texelSize = 1.0 / vec2(outSize);\n"
     "    vec2 dir = params.x > 0.5 ? vec2(1.0, 0.0) : vec2(0.0, 1.0);\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) * texelSize;\n"
-    "    float w[5] = float[](0.2270270270, 0.1945945946, 0.1216216216, 0.0540540541, 0.0162162162);\n"
-    "    vec3 sum = texture(srcTex, uv).rgb * w[0];\n"
-    "    for (int i = 1; i < 5; ++i) {\n"
-    "        vec2 offset = dir * texelSize * float(i) * params.y;\n"
-    "        sum += texture(srcTex, uv + offset).rgb * w[i];\n"
-    "        sum += texture(srcTex, uv - offset).rgb * w[i];\n"
+    // A DENSE Gaussian whose sigma scales with radiusScale - not the fixed 9-tap kernel with its
+    // taps pushed radiusScale texels apart, which is what this used to be. At the tone layer's
+    // scale of 8 that kernel sampled one texel in eight: not a blur but a comb, so every edge
+    // came back as a row of faint copies 8, 16, 24 and 32 texels away, and subtracting that
+    // from the image (the unsharp mask) printed those echoes onto the frame - the artifacts.
+    // sigma 1.7 matches the old kernel's own spread at scale 1, so both layers keep their reach.
+    // Taps are taken in pairs at the weighted midpoint of two texels, letting the bilinear filter
+    // do half the work - the standard linear-sampling trick.
+    "    float sigma = 1.7 * max(params.y, 0.5);\n"
+    "    int radius = min(int(ceil(3.0 * sigma)), 48);\n"
+    "    float twoSigmaSq = 2.0 * sigma * sigma;\n"
+    "    vec3 c0 = texture(srcTex, uv).rgb;\n"
+    "    if (any(isnan(c0)) || any(isinf(c0))) { c0 = vec3(0.0); }\n"
+    "    vec3 sum = c0;\n"
+    "    float total = 1.0;\n"
+    "    for (int i = 1; i <= radius; i += 2) {\n"
+    "        float w1 = exp(-float(i * i) / twoSigmaSq);\n"
+    "        float w2 = (i + 1 <= radius) ? exp(-float((i + 1) * (i + 1)) / twoSigmaSq) : 0.0;\n"
+    "        float w = w1 + w2;\n"
+    "        float o = (float(i) * w1 + float(i + 1) * w2) / w;\n"
+    "        vec2 offset = dir * texelSize * o;\n"
+    "        vec3 a = texture(srcTex, uv + offset).rgb;\n"
+    "        vec3 b = texture(srcTex, uv - offset).rgb;\n"
+    "        if (any(isnan(a)) || any(isinf(a))) { a = c0; }\n"
+    "        if (any(isnan(b)) || any(isinf(b))) { b = c0; }\n"
+    "        sum += (a + b) * w;\n"
+    "        total += 2.0 * w;\n"
     "    }\n"
-    "    imageStore(dstImage, outCoord, vec4(sum, 1.0));\n"
+    "    imageStore(dstImage, outCoord, vec4(sum / total, 1.0));\n"
     "}\n";
 
 const char* kCompositeShaderSource =
