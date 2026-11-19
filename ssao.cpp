@@ -168,8 +168,12 @@ const char* kSsaoShaderSource =
     "    vec3 B = cross(N, T);\n"
     "    mat3 TBN = mat3(T, B, N);\n"
     "    float occlusion = 0.0;\n"
-    "    for (int i = 0; i < 16; ++i) {\n"
-    "        vec3 k = kKernel[i];\n"
+    // Interleaved sampling: each texel takes 8 of the 16 kernel taps - the first half or the
+    // second, in a checkerboard - and the blur below averages neighbours from both halves back
+    // into a 16-tap estimate. Halves the cost of the most expensive SSAO pass.
+    "    int firstTap = ((aoCoord.x + aoCoord.y) & 1) * 8;\n"
+    "    for (int t = 0; t < 8; ++t) {\n"
+    "        vec3 k = kKernel[firstTap + t];\n"
     "        k.z = abs(k.z);\n"
     "        vec3 samplePos = P + (TBN * k) * radius;\n"
     "        if (samplePos.z > -zNear) { continue; }\n"
@@ -188,16 +192,20 @@ const char* kSsaoShaderSource =
     "            occlusion += rangeCheck;\n"
     "        }\n"
     "    }\n"
-    "    float ao = 1.0 - (occlusion / float(16)) * intensity;\n"
+    "    float ao = 1.0 - (occlusion / float(8)) * intensity;\n"
     "    imageStore(aoImage, aoCoord, vec4(ao));\n"
     "}\n";
 
-// Depth-aware blur, on the AO grid. A 16-sample kernel is far too noisy to show directly, and
+// Depth-aware blur, on the AO grid. An 8-sample estimate is far too noisy to show directly, and
 // a plain blur would smear the AO across depth discontinuities - weighting each tap by how
 // close its linear depth is to the centre's keeps occlusion from bleeding between a foreground
-// object and the background behind it.
-const char* kBlurShaderSource =
+// object and the background behind it. Separable: a 5-tap horizontal pass then a 5-tap
+// vertical one (10 taps instead of the 25 of the 2D kernel it replaced). Either pass alone
+// spans both checkerboard phases of the AO pass's interleaved taps, so the two halves of the
+// 16-tap kernel are recombined here.
+const char* kBlurHShaderSource =
     "#version 430\n"
+    "const ivec2 kDir = ivec2(1, 0);\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D aoTex;\n"
     "layout(binding = 2) uniform sampler2D linearDepth;\n"
@@ -216,18 +224,49 @@ const char* kBlurShaderSource =
     "    float centerDist = texelFetch(linearDepth, outCoord, 0).r;\n"
     "    float sum = 0.0;\n"
     "    float weightSum = 0.0;\n"
-    "    for (int y = -2; y <= 2; ++y) {\n"
-    "        for (int x = -2; x <= 2; ++x) {\n"
-    "            ivec2 c = clamp(outCoord + ivec2(x, y), ivec2(0), size - ivec2(1));\n"
-    "            float dist = texelFetch(linearDepth, c, 0).r;\n"
-    "            float w = exp(-abs(dist - centerDist) / max(depthSigma, 1e-4));\n"
-    "            sum += texelFetch(aoTex, c, 0).r * w;\n"
-    "            weightSum += w;\n"
-    "        }\n"
+    "    for (int i = -2; i <= 2; ++i) {\n"
+    "        ivec2 c = clamp(outCoord + kDir * i, ivec2(0), size - ivec2(1));\n"
+    "        float dist = texelFetch(linearDepth, c, 0).r;\n"
+    "        float w = exp(-abs(dist - centerDist) / max(depthSigma, 1e-4));\n"
+    "        sum += texelFetch(aoTex, c, 0).r * w;\n"
+    "        weightSum += w;\n"
     "    }\n"
     "    float ao = (weightSum > 1e-4) ? (sum / weightSum) : 1.0;\n"
     "    imageStore(outputImage, outCoord, vec4(ao));\n"
     "}\n";
+
+const char* kBlurVShaderSource =
+    "#version 430\n"
+    "const ivec2 kDir = ivec2(0, 1);\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(binding = 0) uniform sampler2D aoTex;\n"
+    "layout(binding = 2) uniform sampler2D linearDepth;\n"
+    "layout(r16f, binding = 0) uniform writeonly image2D outputImage;\n"
+    "layout(std140, binding = 0) uniform SsaoConfigBlock {\n"
+    "    vec4 frustum;\n"
+    "    vec4 params;\n"
+    "    vec4 params2;\n"
+    "    vec4 params3;\n"
+    "};\n"
+    "void main() {\n"
+    "    ivec2 size = imageSize(outputImage);\n"
+    "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (outCoord.x >= size.x || outCoord.y >= size.y) { return; }\n"
+    "    float depthSigma = params2.y;\n"
+    "    float centerDist = texelFetch(linearDepth, outCoord, 0).r;\n"
+    "    float sum = 0.0;\n"
+    "    float weightSum = 0.0;\n"
+    "    for (int i = -2; i <= 2; ++i) {\n"
+    "        ivec2 c = clamp(outCoord + kDir * i, ivec2(0), size - ivec2(1));\n"
+    "        float dist = texelFetch(linearDepth, c, 0).r;\n"
+    "        float w = exp(-abs(dist - centerDist) / max(depthSigma, 1e-4));\n"
+    "        sum += texelFetch(aoTex, c, 0).r * w;\n"
+    "        weightSum += w;\n"
+    "    }\n"
+    "    float ao = (weightSum > 1e-4) ? (sum / weightSum) : 1.0;\n"
+    "    imageStore(outputImage, outCoord, vec4(ao));\n"
+    "}\n";
+
 
 // Composite: multiply the (bilinearly upsampled) blurred AO into the colour. At scale 1 every
 // sample lands on a texel centre, so this is exactly a per-pixel multiply.
@@ -261,6 +300,7 @@ struct PipelineState {
     unsigned int generation = 0;
     unsigned int ssaoProgram = 0;
     unsigned int blurProgram = 0;
+    unsigned int blurVProgram = 0;
     unsigned int compositeProgram = 0;
     unsigned int linearizeProgram = 0;
     unsigned int configUbo = 0;
@@ -270,6 +310,7 @@ struct PipelineState {
     int height = 0;
     unsigned int aoTexture = 0;
     unsigned int aoBlurTexture = 0;
+    unsigned int aoTempTexture = 0;
     unsigned int linearDepthTexture = 0;
     int depthLevels = 1;
 };
@@ -337,6 +378,7 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
     if (g_state.texturesValid) {
         gl.glDeleteTextures(1, &g_state.aoTexture);
         gl.glDeleteTextures(1, &g_state.aoBlurTexture);
+        gl.glDeleteTextures(1, &g_state.aoTempTexture);
         gl.glDeleteTextures(1, &g_state.linearDepthTexture);
         g_state.texturesValid = false;
     }
@@ -350,6 +392,7 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
                                                    GL_R32F, levels);
 
     g_state.aoTexture = CreateWorkTexture(gl, width, height);
+    g_state.aoTempTexture = CreateWorkTexture(gl, width, height);
     // Sampled bilinearly by the composite, which is what upsamples it.
     g_state.aoBlurTexture = CreateWorkTexture(gl, width, height, GL_LINEAR);
     g_state.width = width;
@@ -405,7 +448,8 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     if (!g_state.initTried) {
         g_state.initTried = true;
         g_state.initOk = CompileAndLink(gl, kSsaoShaderSource, "ssao", g_state.ssaoProgram) &&
-                          CompileAndLink(gl, kBlurShaderSource, "blur", g_state.blurProgram) &&
+                          CompileAndLink(gl, kBlurHShaderSource, "blur", g_state.blurProgram) &&
+                          CompileAndLink(gl, kBlurVShaderSource, "blur v", g_state.blurVProgram) &&
                           CompileAndLink(gl, kCompositeShaderSource, "composite",
                                          g_state.compositeProgram) &&
                           CompileAndLink(gl, kLinearizeShaderSource, "linearize",
@@ -473,6 +517,13 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     gl.glBindTexture(GL_TEXTURE_2D, g_state.aoTexture);
     gl.glActiveTexture(GL_TEXTURE2);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.linearDepthTexture);
+    gl.glBindImageTexture(0, g_state.aoTempTexture, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
+    gl.glDispatchCompute(aoGroupsX, aoGroupsY, 1);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+    gl.glUseProgram(g_state.blurVProgram);
+    gl.glActiveTexture(GL_TEXTURE0);
+    gl.glBindTexture(GL_TEXTURE_2D, g_state.aoTempTexture);
     gl.glBindImageTexture(0, g_state.aoBlurTexture, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
     gl.glDispatchCompute(aoGroupsX, aoGroupsY, 1);
     PerfGpuMark("ssao blur");
@@ -487,6 +538,7 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute((unsigned int)((width + 7) / 8), (unsigned int)((height + 7) / 8), 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+    PerfGpuMark("ssao composite");
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
