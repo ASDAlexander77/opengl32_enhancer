@@ -32,12 +32,18 @@
 // a candidate; ANY level above 0 means the game supplied its own chain and permanently
 // disqualifies it, since replacing an engine's deliberate mip chain is not this module's job.
 // A later level-0 upload re-opens the question, because engines reuse texture names.
-void NotifyTextureLevelUploaded(unsigned int texture, int level);
+// Returns true when the texture had a chain WE generated, which this upload makes stale - the
+// caller must then take back the mipmapped min filter we installed (see the .cpp).
+bool NotifyTextureLevelUploaded(unsigned int texture, int level);
 
 // The same record, for the texture currently bound to GL_TEXTURE_2D. glTexImage2D names no
 // texture - it applies to whatever is bound - so this is what the wrapper actually calls; the
 // explicit form above exists so the rule stays testable without a binding to set up.
 void NotifyBoundTextureLevelUploaded(int level);
+
+// glTexSubImage2D on the bound texture, called AFTER the real call. If we generated this
+// texture's chain, rebuilds it from the new level 0 so distant samples show current content.
+void NotifyBoundTextureSubImageUploaded(int level);
 
 // Records glDeleteTextures, so a recycled texture name cannot inherit the previous texture's
 // state. Names are handed out by the driver and id Tech 2-era engines reuse them freely.

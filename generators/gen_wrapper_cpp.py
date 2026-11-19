@@ -389,6 +389,12 @@ def emit_cpp(funcs):
             lines.append(f"    BOOL __swapResult = {cache_var}({params_call});")
             lines.append("    BindRenderTarget();")
             lines.append("    return __swapResult;")
+        elif name == "glTexSubImage2D":
+            # See texture_mipmap.h: must run AFTER the real call, since it rebuilds a chain we
+            # generated from the level 0 content this call has just written.
+            lines.append(f"    {cache_var}({params_call});")
+            lines.append("    if (%s == 0x0DE1) NotifyBoundTextureSubImageUploaded(%s);"
+                         % (args[0][0], args[1][0]))
         elif ret == "void":
             lines.append(f"    {cache_var}({params_call});")
         else:

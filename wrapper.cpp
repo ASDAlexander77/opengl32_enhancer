@@ -5060,6 +5060,7 @@ extern "C" __declspec(dllexport) void __stdcall glTexSubImage2D(GLenum target, G
         }
     }
     __proc_glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
+    if (target == 0x0DE1) NotifyBoundTextureSubImageUploaded(level);
 }
 
 typedef void (__stdcall *__pfn_glTranslated)(GLdouble, GLdouble, GLdouble);

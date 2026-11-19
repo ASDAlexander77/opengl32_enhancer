@@ -11,6 +11,8 @@ namespace {
 const unsigned int GL_TEXTURE_2D           = 0x0DE1;
 const unsigned int GL_TEXTURE_MIN_FILTER   = 0x2801;
 const unsigned int GL_LINEAR_MIPMAP_LINEAR = 0x2703;
+const unsigned int GL_LINEAR               = 0x2601;
+const unsigned int GL_TEXTURE_BINDING_2D   = 0x8069;
 
 // What this module knows about one texture object.
 enum TextureState : unsigned char {
@@ -33,6 +35,15 @@ enum TextureState : unsigned char {
 // degrades to "leave that texture alone" rather than to anything unsafe.
 const unsigned int kMaxTrackedTexture = 16384;
 unsigned char g_state[kMaxTrackedTexture];
+
+// The min filter the GAME had on each texture at the moment we replaced it with a mipmapped
+// one, so it can be put back. That is not cosmetic: once level 0 is re-uploaded at a different
+// size, the chain we generated no longer matches it, and a mipmapped min filter over an
+// inconsistent chain makes the texture INCOMPLETE - which fixed-function GL draws as if
+// texturing were off, i.e. as a solid quad in the vertex colour. In Anachronox that is the
+// white box behind HUD labels: label textures are regenerated in place at a new size, long
+// after we mipped them. GL enum values for filters fit in 16 bits.
+unsigned short g_savedMinFilter[kMaxTrackedTexture];
 
 // The game's current GL_TEXTURE_2D binding and current projection, as reported by the Notify*
 // calls. Both are needed at draw time and neither is queryable cheaply from GL.
@@ -58,6 +69,7 @@ unsigned int g_generation = 0;
 void ClearTextureTable() {
     for (unsigned int i = 0; i < kMaxTrackedTexture; ++i) {
         g_state[i] = kUnknown;
+        g_savedMinFilter[i] = 0;
     }
 }
 
@@ -75,18 +87,71 @@ void DiscardStateIfContextChanged() {
 
 }  // namespace
 
-void NotifyTextureLevelUploaded(unsigned int texture, int level) {
+bool NotifyTextureLevelUploaded(unsigned int texture, int level) {
     if (texture >= kMaxTrackedTexture) {
-        return;
+        return false;
     }
+    bool invalidatesOurChain = (g_state[texture] == kGenerated);
     // Level 0 re-opens the question unconditionally, including over a texture we already
     // generated for: engines reuse texture names, so new level-0 content in an old name is a
     // different texture as far as this decision goes.
     g_state[texture] = (level == 0) ? kCandidate : kGameOwnsChain;
+    return invalidatesOurChain;
 }
 
+namespace {
+
+// The texture actually bound to GL_TEXTURE_2D on the ACTIVE unit. g_boundTexture is the last
+// glBindTexture the game made on ANY unit - a multitexturing engine binds its lightmap on unit
+// 1 and its diffuse on unit 0, and selects units through an extension entry point this DLL
+// never sees - so it is not reliable enough to decide which texture a GL call lands on. Only
+// queried on paths that are already rare (uploads, a first claim), never per draw.
+bool QueryActiveBinding(const GlComputeApi& gl, unsigned int& out) {
+    if (!gl.loaded || gl.glGetIntegerv == nullptr) {
+        return false;
+    }
+    int binding = 0;
+    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
+    out = (unsigned int)binding;
+    return true;
+}
+
+}  // namespace
+
 void NotifyBoundTextureLevelUploaded(int level) {
-    NotifyTextureLevelUploaded(g_boundTexture, level);
+    const GlComputeApi& gl = GetGlComputeApi();
+    unsigned int texture = g_boundTexture;
+    if (GetAnaxConfig().autoMipmap) {
+        QueryActiveBinding(gl, texture);
+    }
+    if (!NotifyTextureLevelUploaded(texture, level)) {
+        return;
+    }
+    // We had replaced this texture's min filter with a mipmapped one; the upload about to happen
+    // makes our generated levels stale or (at a new size) inconsistent. Hand the game its own
+    // filter back now - it is the bound texture, so no bind is needed. If the texture is drawn
+    // in the world pass again it is simply claimed and re-mipped from the new content.
+    if (gl.loaded && gl.glTexParameteri != nullptr) {
+        unsigned short saved = g_savedMinFilter[texture];
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                           (int)(saved != 0 ? saved : GL_LINEAR));
+    }
+}
+
+void NotifyBoundTextureSubImageUploaded(int level) {
+    if (level != 0 || !GetAnaxConfig().autoMipmap) {
+        return;
+    }
+    const GlComputeApi& gl = GetGlComputeApi();
+    unsigned int texture = 0;
+    if (!QueryActiveBinding(gl, texture) || texture >= kMaxTrackedTexture ||
+        g_state[texture] != kGenerated || gl.glGenerateMipmap == nullptr) {
+        return;
+    }
+    // Same size, so the chain stays complete - but it still shows the OLD content at a distance
+    // (a dynamic lightmap that never lights up far away, a label that reads the previous text).
+    // Rebuilding is GPU-side only, with no readback, so it does not stall.
+    gl.glGenerateMipmap(GL_TEXTURE_2D);
 }
 
 void NotifyTexturesDeleted(const unsigned int* textures, int count) {
@@ -157,8 +222,25 @@ void ApplyAutoMipmapForDraw() {
     if (!gl.loaded || gl.glGenerateMipmap == nullptr) {
         return;
     }
+    // Cheap pre-check before the one GL query below, so the query is only paid for a texture
+    // that would actually be claimed - not on every draw of an already-handled texture.
+    if (!g_boundSincePassChange || g_boundTexture >= kMaxTrackedTexture ||
+        g_state[g_boundTexture] != kCandidate) {
+        return;
+    }
+    // glGenerateMipmap acts on the ACTIVE unit's binding; if that is not the texture we are
+    // about to mark done, we would mip one texture and record another. Leave both alone.
+    unsigned int active = 0;
+    if (!QueryActiveBinding(gl, active) || active != g_boundTexture) {
+        return;
+    }
     if (!ClaimMipmapGenerationForBoundTexture(true)) {
         return;
+    }
+    if (gl.glGetTexParameteriv != nullptr) {
+        int gameFilter = 0;
+        gl.glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &gameFilter);
+        g_savedMinFilter[g_boundTexture] = (unsigned short)gameFilter;
     }
     // The game's own bind is still in effect, so this needs no bind of its own and no restore -
     // same reasoning texture_filter.cpp gives for acting inside the game's glTexParameter call.

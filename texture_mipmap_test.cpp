@@ -98,6 +98,22 @@ bool ReopensAfterLevelZeroReupload() {
                  "re-uploading level 0 makes the texture a candidate again");
 }
 
+// A re-upload over a chain WE generated must be reported, because the caller has to take back
+// the mipmapped min filter we installed: at a new size the stale chain makes the texture
+// incomplete, which fixed-function GL draws as a solid white quad (Anachronox's HUD labels).
+// A re-upload over a texture we never touched must NOT be reported - the game's filter is
+// still its own there and is not ours to rewrite.
+bool ReportsReuploadOverGeneratedChainOnly() {
+    ResetTextureMipmapState();
+    bool firstUpload = NotifyTextureLevelUploaded(7, 0);
+    bool reuploadUnclaimed = NotifyTextureLevelUploaded(7, 0);
+    ClaimMipmapGeneration(7, kWorldPass, kEnabled);
+    bool reuploadClaimed = NotifyTextureLevelUploaded(7, 0);
+    bool again = NotifyTextureLevelUploaded(7, 0);
+    return Check(!firstUpload && !reuploadUnclaimed && reuploadClaimed && !again,
+                 "only a re-upload over a generated chain asks for the filter to be restored");
+}
+
 // A texture drawn in the 2D pass first and the world pass later is still world content - the
 // rejection above must be per-decision, not a permanent blacklisting.
 bool ClaimsAfterEarlierTwoDRejection() {
@@ -155,6 +171,7 @@ int main() {
     RejectsUnknownTexture();
     ForgetsDeletedTexture();
     ReopensAfterLevelZeroReupload();
+    ReportsReuploadOverGeneratedChainOnly();
     ClaimsAfterEarlierTwoDRejection();
     RejectsBindingLeftOverFromTheTwoDPass();
     ClaimsBindingEstablishedInsideTheWorldPass();

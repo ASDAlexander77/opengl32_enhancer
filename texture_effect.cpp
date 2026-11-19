@@ -12,12 +12,24 @@
 #include "pixel_invert.h"
 #include "cas.h"
 
+// Same no-<windows.h> discipline as config.cpp - see the comment there.
+extern "C" __declspec(dllimport) unsigned long long __stdcall GetTickCount64(void);
+
 namespace {
 
 const unsigned int GL_TEXTURE_2D                = 0x0DE1;
 const unsigned int GL_TEXTURE0                  = 0x84C0;
 const unsigned int GL_ACTIVE_TEXTURE            = 0x84E0;
 const unsigned int GL_TEXTURE_BINDING_2D        = 0x8069;
+const unsigned int GL_CURRENT_PROGRAM           = 0x8B8D;
+
+// The texture units our effects bind on: unit 0 for MakeTexture/cas/invert and unit 1 for the
+// NIS shaders' in_texture. Every one of them must be put back, not just the game's active unit.
+// id Tech 2-era engines cache "texture N is bound on unit U" and skip glBindTexture when they
+// believe it already is - so a unit we leave pointing at a texture we then delete (name 0, the
+// empty default texture) makes the game's next draw on it untextured: a solid quad in the
+// vertex colour. In Anachronox that is the white box next to the main menu and white HUD labels.
+const int kTouchedUnits = 2;
 const unsigned int GL_TEXTURE_MIN_FILTER        = 0x2801;
 const unsigned int GL_TEXTURE_MAG_FILTER        = 0x2800;
 const unsigned int GL_TEXTURE_WRAP_S            = 0x2802;
@@ -124,6 +136,29 @@ bool IsEligible(unsigned int target, int internalformat, unsigned int format, un
         && width <= kMaxDim && height <= kMaxDim;
 }
 
+// Every processed upload ends in a synchronous glReadPixels, which drains the whole GPU queue -
+// harmless at a level load, a frame-rate killer if the game re-uploads a texture every frame
+// (dynamic text, cinematics). Count them per second and say so, a few times at most, so a slow
+// session can be traced to textureEffect= rather than to the post-process chain.
+void NoteProcessedUpload(int width, int height) {
+    static unsigned long long windowStart = 0;
+    static int count = 0;
+    static int warnings = 0;
+    unsigned long long now = GetTickCount64();
+    if (now - windowStart >= 1000) {
+        if (count >= 30 && warnings < 5) {
+            ++warnings;
+            printf("[opengl32_enh_cpp] texture_effect: %d texture uploads were run through "
+                   "textureEffect in the last second (latest %dx%d) - each one stalls the GPU "
+                   "for a readback; set textureEffect=none if the game is slow\n",
+                   count, width, height);
+        }
+        windowStart = now;
+        count = 0;
+    }
+    ++count;
+}
+
 }  // namespace
 
 void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int level, int internalformat,
@@ -164,6 +199,14 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
     int savedTextureBinding = 0;
     gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
+    int savedUnitBinding[kTouchedUnits] = {};
+    for (int unit = 0; unit < kTouchedUnits; ++unit) {
+        gl.glActiveTexture(GL_TEXTURE0 + unit);
+        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedUnitBinding[unit]);
+    }
+    // Our effects leave their compute program current; the game draws with fixed function.
+    int savedProgram = 0;
+    gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
     gl.glActiveTexture(GL_TEXTURE0);
     int savedReadFbo = 0;
     gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
@@ -185,6 +228,8 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
             warnedPending = true;
         }
     }
+
+    NoteProcessedUpload(width, height);
 
     unsigned int srcTex = MakeTexture(gl, GL_RGBA8, width, height);
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, pixels);
@@ -257,6 +302,11 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     // Active unit must be restored before the texture binding: glBindTexture always targets
     // whichever unit is currently active, and realFn's upload below must land on the same
     // unit+binding the game had before this call, not unit 0.
+    gl.glUseProgram((unsigned int)savedProgram);
+    for (int unit = 0; unit < kTouchedUnits; ++unit) {
+        gl.glActiveTexture(GL_TEXTURE0 + unit);
+        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedUnitBinding[unit]);
+    }
     gl.glActiveTexture((unsigned int)savedActiveTexture);
     gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
 

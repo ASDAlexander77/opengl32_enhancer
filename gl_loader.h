@@ -65,6 +65,7 @@ typedef void (__stdcall *PFNGLTEXSUBIMAGE2DPROC)(unsigned int target, int level,
     int width, int height, unsigned int format, unsigned int type, const void* pixels);
 typedef void (__stdcall *PFNGLREADBUFFERPROC)(unsigned int mode);
 typedef void (__stdcall *PFNGLGETINTEGERVPROC)(unsigned int pname, int* params);
+typedef void (__stdcall *PFNGLGETTEXPARAMETERIVPROC)(unsigned int target, unsigned int pname, int* params);
 typedef unsigned int (__stdcall *PFNGLGETERRORPROC)(void);
 typedef void (__stdcall *PFNGLPIXELSTOREIPROC)(unsigned int pname, int param);
 typedef void (__stdcall *PFNGLREADPIXELSPROC)(int x, int y, int width, int height,
@@ -113,6 +114,7 @@ struct GlComputeApi {
     PFNGLTEXSUBIMAGE2DPROC glTexSubImage2D = nullptr;
     PFNGLREADBUFFERPROC glReadBuffer = nullptr;
     PFNGLGETINTEGERVPROC glGetIntegerv = nullptr;
+    PFNGLGETTEXPARAMETERIVPROC glGetTexParameteriv = nullptr;
     PFNGLGETERRORPROC glGetError = nullptr;
     PFNGLPIXELSTOREIPROC glPixelStorei = nullptr;
     PFNGLREADPIXELSPROC glReadPixels = nullptr;
