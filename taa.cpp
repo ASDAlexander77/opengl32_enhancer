@@ -13,6 +13,7 @@
 
 #include "taa.h"
 #include "gl_loader.h"
+#include "hud_mask.h"
 
 namespace {
 
@@ -133,8 +134,7 @@ const char* kTaaRealShaderSource =
     "layout(binding = 0) uniform sampler2D currentTex;\n"
     "layout(binding = 1) uniform sampler2D historyTex;\n"
     "layout(binding = 2) uniform sampler2D depthTex;\n"
-    "layout(binding = 3) uniform sampler2D worldTex;\n"
-    "layout(binding = 4) uniform sampler2D captureTex;\n"
+    "layout(binding = 3) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(rgba16f, binding = 1) uniform writeonly image2D historyImage;\n"
     "layout(std140, binding = 0) uniform TaaRealConfigBlock {\n"
@@ -164,9 +164,7 @@ const char* kTaaRealShaderSource =
     // threshold sits just clear of 8-bit quantisation (1/255), which makes this "did the game
     // draw here" rather than a tolerance to tune.
     "bool IsHud(ivec2 c) {\n"
-    "    vec3 finished = texelFetch(captureTex, c, 0).rgb;\n"
-    "    vec3 world = texelFetch(worldTex, c, 0).rgb;\n"
-    "    return any(greaterThan(abs(finished - world), vec3(1.0 / 128.0)));\n"
+    "    return texelFetch(hudMask, c, 0).r > 0.5;\n"
     "}\n"
     "void main() {\n"
     "    ivec2 size = imageSize(outputImage);\n"
@@ -477,6 +475,11 @@ bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
         worldTexture == 0 || captureTexture == 0 || width <= 0 || height <= 0) {
         return false;
     }
+
+    unsigned int hudMaskTexture = GetHudMaskTexture(worldTexture, captureTexture, width, height);
+    if (hudMaskTexture == 0) {
+        return false;
+    }
     // A degenerate frustum on either side divides by zero somewhere in the unprojection, so it
     // is refused rather than dispatched and hoped about.
     if (currentProjection.zNear <= 0.0f || currentProjection.zFar <= currentProjection.zNear ||
@@ -563,10 +566,12 @@ bool ApplyTaaReal(unsigned int srcTexture, unsigned int dstTexture,
     gl.glBindTexture(GL_TEXTURE_2D, g_state.pingPong[readIndex]);
     gl.glActiveTexture(GL_TEXTURE0 + 2);
     gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
+    // The HUD test reads this frame's shared mask (see hud_mask.h) - one byte per pixel instead
+    // of comparing the capture against the world-only frame here, two RGBA16F fetches per pixel.
+    // The mask is dilated by a pixel, so the one-pixel fringe around the HUD also keeps the
+    // current frame rather than blending history, which is the safe side to err on.
     gl.glActiveTexture(GL_TEXTURE0 + 3);
-    gl.glBindTexture(GL_TEXTURE_2D, worldTexture);
-    gl.glActiveTexture(GL_TEXTURE0 + 4);
-    gl.glBindTexture(GL_TEXTURE_2D, captureTexture);
+    gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glBindImageTexture(1, g_state.pingPong[writeIndex], 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
 

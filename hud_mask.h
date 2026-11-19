@@ -22,5 +22,11 @@
 // previous frame's capture must not be reused even when the texture names are unchanged.
 void InvalidateHudMask();
 
+// This frame's HUD mask itself - an R8 texture, width x height, 1 where the game drew an overlay
+// (dilated by one pixel, see hud_mask.cpp). Built on first use in a frame, like the restore, so
+// a stage that only needs to KNOW where the HUD is (taa) reads one byte per pixel instead of
+// comparing two RGBA16F frames itself. Returns 0 when it cannot be built.
+unsigned int GetHudMaskTexture(unsigned int worldTex, unsigned int captureTex, int width, int height);
+
 bool ApplyHudRestore(unsigned int stageInput, unsigned int stageOutput, unsigned int worldTex,
                      unsigned int captureTex, int width, int height);

@@ -193,16 +193,10 @@ void InvalidateHudMask() {
     ++g_frameSerial;
 }
 
-bool ApplyHudRestore(unsigned int stageInput, unsigned int stageOutput, unsigned int worldTex,
-                     unsigned int captureTex, int width, int height) {
-    if (stageInput == 0 || stageOutput == 0 || worldTex == 0 || captureTex == 0 ||
-        width <= 0 || height <= 0) {
-        return false;
-    }
-    const GlComputeApi& gl = GetGlComputeApi();
-    if (!gl.loaded) {
-        return false;
-    }
+namespace {
+
+bool EnsureMask(const GlComputeApi& gl, unsigned int worldTex, unsigned int captureTex,
+                int width, int height) {
     if (g_state.generation != GetGlContextGeneration()) {
         g_state = PipelineState{};
         g_state.generation = GetGlContextGeneration();
@@ -216,12 +210,41 @@ bool ApplyHudRestore(unsigned int stageInput, unsigned int stageOutput, unsigned
     if (!g_state.initOk) {
         return false;
     }
-
     if (!g_state.built || g_state.builtSerial != g_frameSerial ||
         g_state.builtWorldTex != worldTex || g_state.builtCaptureTex != captureTex ||
         g_state.maskWidth != width || g_state.maskHeight != height) {
         BuildMask(gl, worldTex, captureTex, width, height);
         PerfGpuMark("hud mask");
+    }
+    return true;
+}
+
+}  // namespace
+
+unsigned int GetHudMaskTexture(unsigned int worldTex, unsigned int captureTex, int width,
+                               int height) {
+    if (worldTex == 0 || captureTex == 0 || width <= 0 || height <= 0) {
+        return 0;
+    }
+    const GlComputeApi& gl = GetGlComputeApi();
+    if (!gl.loaded || !EnsureMask(gl, worldTex, captureTex, width, height)) {
+        return 0;
+    }
+    return g_state.maskTex;
+}
+
+bool ApplyHudRestore(unsigned int stageInput, unsigned int stageOutput, unsigned int worldTex,
+                     unsigned int captureTex, int width, int height) {
+    if (stageInput == 0 || stageOutput == 0 || worldTex == 0 || captureTex == 0 ||
+        width <= 0 || height <= 0) {
+        return false;
+    }
+    const GlComputeApi& gl = GetGlComputeApi();
+    if (!gl.loaded) {
+        return false;
+    }
+    if (!EnsureMask(gl, worldTex, captureTex, width, height)) {
+        return false;
     }
 
     // The stage that just ran wrote stageOutput through an image store; this pass writes it

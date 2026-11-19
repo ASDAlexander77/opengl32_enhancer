@@ -32,7 +32,13 @@ const char* kDitherShaderSource =
     "layout(rgba16f, binding = 1) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform DitherConfigBlock {\n"
     "    float strength;\n"
+    "    float encodeInput;\n"
     "};\n"
+    "vec3 LinearToSrgb(vec3 l) {\n"
+    "    vec3 lo = l * 12.92;\n"
+    "    vec3 hi = 1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055;\n"
+    "    return mix(hi, lo, lessThanEqual(l, vec3(0.0031308)));\n"
+    "}\n"
     // 4x4 Bayer ordered-dither matrix, indexed by pixel position mod 4. threshold spans
     // [-0.5, 0.5) of one 8-bit step; at strength=0 offset is always exactly 0.0, so
     // strength=0 stays an exact no-op regardless of which Bayer cell a pixel falls in.
@@ -43,6 +49,10 @@ const char* kDitherShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 color = texture(inputTex, uv);\n"
+    "    if (encodeInput > 0.5) {\n"
+    "        if (any(isnan(color.rgb)) || any(isinf(color.rgb))) { color.rgb = vec3(0.0); }\n"
+    "        color.rgb = LinearToSrgb(max(color.rgb, vec3(0.0)));\n"
+    "    }\n"
     "    ivec2 p = outCoord % 4;\n"
     "    float threshold = (float(kBayer[p.y * 4 + p.x]) + 0.5) / 16.0 - 0.5;\n"
     "    float offset = threshold * strength / 255.0;\n"
@@ -52,7 +62,8 @@ const char* kDitherShaderSource =
 
 struct DitherConfigData {
     float strength;
-    float pad[3];
+    float encodeInput;
+    float pad[2];
 };
 
 struct PipelineState {
@@ -113,7 +124,8 @@ void EnsureUbo(const GlComputeApi& gl) {
 
 }  // namespace
 
-bool ApplyDither(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float strength) {
+bool ApplyDither(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float strength,
+                 bool encodeSrgbFirst) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -153,6 +165,7 @@ bool ApplyDither(unsigned int srcTexture, unsigned int dstTexture, int width, in
 
     DitherConfigData configData{};
     configData.strength = strength;
+    configData.encodeInput = encodeSrgbFirst ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(DitherConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);

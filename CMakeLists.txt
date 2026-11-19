@@ -163,7 +163,7 @@ target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 # HUD-masked, variance-clipped path - which is why taa_jitter.cpp (and the config/debug_log it
 # pulls in) is linked here: the anti-aliasing fixture drives the same jitter the game gets.
 # See taa_test.cpp.
-add_executable(taa_test taa_test.cpp taa.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(taa_test taa_test.cpp taa.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp hud_mask.cpp perf_stats.cpp)
 target_link_libraries(taa_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, writes an identity .cube LUT fixture,

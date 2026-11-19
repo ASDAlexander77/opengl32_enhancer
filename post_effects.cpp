@@ -1067,7 +1067,10 @@ void ApplySelectedEffect(void* hdc) {
         // The image is in whatever space the last stage left it in; this stage may want the
         // other one. Only generated when they actually disagree, so a chain that is entirely
         // Linear (the common case) pays for the bracket and nothing more.
-        if (config.srgbCorrect && ColorSpaceFor(stage) != space) {
+        // Dither can do the sRGB encode itself, in the same pass - see dither.h.
+        bool ditherEncodes = config.srgbCorrect && stage == EffectKind::Dither &&
+                             space == ColorSpace::Linear;
+        if (config.srgbCorrect && ColorSpaceFor(stage) != space && !ditherEncodes) {
             bool converted = (space == ColorSpace::Display)
                                  ? ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)
                                  : ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight);
@@ -1211,7 +1214,10 @@ void ApplySelectedEffect(void* hdc) {
                 break;
             }
             case EffectKind::Dither:
-                wrote = ApplyDither(src, dst, dstW, dstH, config.ditherStrength);
+                wrote = ApplyDither(src, dst, dstW, dstH, config.ditherStrength, ditherEncodes);
+                if (wrote && ditherEncodes) {
+                    space = ColorSpace::Display;
+                }
                 break;
             case EffectKind::Gamma:
                 wrote = ApplyGamma(src, dst, dstW, dstH, config.gamma, config.brightness);
