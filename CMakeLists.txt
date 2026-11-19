@@ -269,7 +269,7 @@ target_link_libraries(modelview_capture_test opengl32 gdi32 user32)
 # box in front of it), and checks ApplySsao()'s two-pass GPU pipeline reproduces the input exactly
 # at intensity=0, produces occlusion beside the box but not on open wall at full intensity, and
 # no-ops when no projection has been captured - see ssao_test.cpp.
-add_executable(ssao_test ssao_test.cpp ssao.cpp projection_capture.cpp gl_loader.cpp)
+add_executable(ssao_test ssao_test.cpp ssao.cpp projection_capture.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
 target_link_libraries(ssao_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyChromaticAberration()'s

@@ -509,6 +509,26 @@ unsigned int GetGameReadBuffer() {
     return IsSupersampleActive() ? GL_COLOR_ATTACHMENT0 : GL_BACK;
 }
 
+unsigned int TranslateGameColorBuffer(unsigned int mode) {
+    if (!IsSupersampleActive()) {
+        return mode;
+    }
+    switch (mode) {
+        case 0x0400:  // GL_FRONT_LEFT
+        case 0x0401:  // GL_FRONT_RIGHT
+        case 0x0402:  // GL_BACK_LEFT
+        case 0x0403:  // GL_BACK_RIGHT
+        case 0x0404:  // GL_FRONT
+        case 0x0405:  // GL_BACK
+        case 0x0406:  // GL_LEFT
+        case 0x0407:  // GL_RIGHT
+        case 0x0408:  // GL_FRONT_AND_BACK
+            return GL_COLOR_ATTACHMENT0;
+        default:
+            return mode;
+    }
+}
+
 void GetRenderTargetSize(int& width, int& height) {
     if (g_externalActive) {
         width = g_externalWidth;

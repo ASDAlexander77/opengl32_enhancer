@@ -126,6 +126,15 @@ unsigned int GetGameFramebuffer();
 // this one starts throwing GL_INVALID_OPERATION rather than failing visibly.
 unsigned int GetGameReadBuffer();
 
+// The game's own glDrawBuffer/glReadBuffer argument, made valid for wherever its drawing is
+// going. While supersampling is armed the game is drawing into our framebuffer object, where
+// GL_BACK, GL_FRONT and the other window-system buffers are GL_INVALID_OPERATION - an engine
+// that calls glDrawBuffer(GL_BACK) every frame (id Tech 2 does) would raise that error every
+// frame, and it would surface as a stray 0x0502 blamed on whatever checks glGetError next.
+// Those map to GL_COLOR_ATTACHMENT0, the one buffer the target has. Anything else, and every
+// value when not armed, passes through unchanged.
+unsigned int TranslateGameColorBuffer(unsigned int mode);
+
 // The offscreen framebuffer's size, for the present blit's source rectangle.
 void GetRenderTargetSize(int& width, int& height);
 

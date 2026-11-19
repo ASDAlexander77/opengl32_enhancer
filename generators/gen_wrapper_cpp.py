@@ -365,6 +365,10 @@ def emit_cpp(funcs):
                          % (args[0][0], args[1][0], args[2][0], args[3][0]))
             lines.append("    ScaleGameRect(%s, %s, %s, %s);"
                          % (args[0][0], args[1][0], args[2][0], args[3][0]))
+        # See render_target.h: window-system buffer names are invalid while the game draws into
+        # the supersampling framebuffer object.
+        if name in ("glDrawBuffer", "glReadBuffer"):
+            lines.append("    %s = TranslateGameColorBuffer(%s);" % (args[0][0], args[0][0]))
         if name == "glScissor":
             lines.append("    ScaleGameRect(%s, %s, %s, %s);"
                          % (args[0][0], args[1][0], args[2][0], args[3][0]))

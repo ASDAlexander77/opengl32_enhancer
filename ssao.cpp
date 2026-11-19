@@ -6,6 +6,7 @@
 
 #include "ssao.h"
 #include "gl_loader.h"
+#include "perf_stats.h"
 
 namespace {
 
@@ -20,6 +21,14 @@ const unsigned int GL_TEXTURE_WRAP_S            = 0x2802;
 const unsigned int GL_TEXTURE_WRAP_T            = 0x2803;
 const unsigned int GL_NEAREST                   = 0x2600;
 const unsigned int GL_LINEAR                    = 0x2601;
+const unsigned int GL_NEAREST_MIPMAP_NEAREST    = 0x2700;
+const unsigned int GL_TEXTURE_MAX_LEVEL         = 0x813D;
+const unsigned int GL_R16F                      = 0x822D;
+const unsigned int GL_R32F                      = 0x822E;
+
+// Mip levels of the linear-depth texture the AO taps can fall back to. Five is enough for a
+// tap 2^(5+3) = 256 AO texels away to read a texel spacing comparable to its own distance.
+const int kMaxDepthLevels = 5;
 
 // AO is a soft, low-frequency term, and on a supersampled target (4000x3200 in Anachronox) the
 // full-resolution AO + 5x5 bilateral blur cost 31 ms a frame - the single most expensive stage,
@@ -39,35 +48,58 @@ const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
 const unsigned int GL_DYNAMIC_DRAW              = 0x88E8;
 const unsigned int GL_NO_ERROR                  = 0;
 
-// Both passes unproject raw (non-linear, hardware) depth back to a positive eye-space distance,
-// and the AO pass goes further to a full view-space position. Keeping left/right/bottom/top
-// separate rather than assuming a symmetric field of view means an off-center frustum (which
-// glFrustum permits, and some engines use for split/offset views) unprojects correctly instead
-// of skewing everything toward one side. View space here puts the camera at the origin looking
-// down -z, so a position's z is negative while `eyeDist` is the positive distance along the
-// view axis.
-const char* kSsaoShaderSource =
+// Linear depth, once, on the AO grid. Every later pass used to fetch the 24-bit hardware depth
+// at full resolution and unproject it per tap - 16 scattered taps plus 4 neighbours per AO
+// texel, and 25 more per blur texel. Converting once into a small R32F texture, with a mip
+// chain the AO taps can read coarser levels of, is what makes the AO pass cache-friendly. The
+// sky (raw depth 1.0) linearizes to exactly zFar, which every reader treats as "no surface".
+//
+// View space puts the camera at the origin looking down -z, so a position's z is negative
+// while `eyeDist` is the positive distance along the view axis. Keeping left/right/bottom/top
+// separate rather than assuming a symmetric field of view means an off-center frustum
+// unprojects correctly instead of skewing everything toward one side.
+const char* kLinearizeShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D depthTex;\n"
-    "layout(rgba16f, binding = 0) uniform writeonly image2D aoImage;\n"
+    "layout(r32f, binding = 0) uniform writeonly image2D linearImage;\n"
     "layout(std140, binding = 0) uniform SsaoConfigBlock {\n"
-    "    vec4 frustum;\n"   // left, right, bottom, top
-    "    vec4 params;\n"    // zNear, zFar, radius, bias
-    "    vec4 params2;\n"   // intensity, depthSigma, scale (AO grid step in depth texels), unused
+    "    vec4 frustum;\n"
+    "    vec4 params;\n"
+    "    vec4 params2;\n"
+    "    vec4 params3;\n"
     "};\n"
-    "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
-    "    float ndc = rawDepth * 2.0 - 1.0;\n"
-    "    return (2.0 * zNear * zFar) / (zFar + zNear - ndc * (zFar - zNear));\n"
-    "}\n"
-    "vec3 ViewPosFor(vec2 uv, float eyeDist, vec4 frustum, float zNear) {\n"
-    "    float x = (frustum.x + (frustum.y - frustum.x) * uv.x) * (eyeDist / zNear);\n"
-    "    float y = (frustum.z + (frustum.w - frustum.z) * uv.y) * (eyeDist / zNear);\n"
-    "    return vec3(x, y, -eyeDist);\n"
-    "}\n"
-    // The classic ShaderX/Crysis sample set. It is a full sphere, not a hemisphere, so z is
-    // taken as abs() below to fold every sample onto the normal's side - which is also why the
-    // set does not need to be regenerated to stay correctly oriented.
+    "void main() {\n"
+    "    ivec2 size = imageSize(linearImage);\n"
+    "    ivec2 q = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (q.x >= size.x || q.y >= size.y) { return; }\n"
+    "    ivec2 depthSize = textureSize(depthTex, 0);\n"
+    "    int scale = int(params2.z);\n"
+    "    ivec2 c = min(q * scale + ivec2(scale / 2), depthSize - ivec2(1));\n"
+    "    float zNear = params.x;\n"
+    "    float zFar = params.y;\n"
+    "    float ndc = texelFetch(depthTex, c, 0).r * 2.0 - 1.0;\n"
+    "    float eyeDist = (2.0 * zNear * zFar) / (zFar + zNear - ndc * (zFar - zNear));\n"
+    "    imageStore(linearImage, q, vec4(eyeDist));\n"
+    "}\n";
+
+// The AO itself. Normals are reconstructed from neighbouring positions, picking whichever of
+// the forward/backward difference spans the smaller depth step on each axis, so a silhouette's
+// normal stays attached to its own surface. The kernel is the classic ShaderX/Crysis full
+// sphere, folded onto the normal's side with abs(z), and rotated per texel so its 16 samples
+// trade banding for noise the blur removes. The range check stops a wall metres behind the
+// pixel from counting as a contact occluder just because it lines up in screen space.
+const char* kSsaoShaderSource =
+    "#version 430\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(binding = 0) uniform sampler2D linearDepth;\n"
+    "layout(r16f, binding = 0) uniform writeonly image2D aoImage;\n"
+    "layout(std140, binding = 0) uniform SsaoConfigBlock {\n"
+    "    vec4 frustum;\n"
+    "    vec4 params;\n"
+    "    vec4 params2;\n"
+    "    vec4 params3;\n"
+    "};\n"
     "const vec3 kKernel[16] = vec3[16](\n"
     "    vec3( 0.5381,  0.1856,  0.4319), vec3( 0.1379,  0.2486,  0.4430),\n"
     "    vec3( 0.3371,  0.5679,  0.0057), vec3(-0.6999, -0.0451,  0.0019),\n"
@@ -81,59 +113,53 @@ const char* kSsaoShaderSource =
     "float Hash(vec2 p) {\n"
     "    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);\n"
     "}\n"
-    "vec3 ViewPosAt(ivec2 coord, ivec2 size, vec4 frustum, float zNear, float zFar) {\n"
-    "    ivec2 c = clamp(coord, ivec2(0), size - ivec2(1));\n"
-    "    float raw = texelFetch(depthTex, c, 0).r;\n"
-    "    vec2 uv = (vec2(c) + vec2(0.5)) / vec2(size);\n"
-    "    return ViewPosFor(uv, LinearEyeDistance(raw, zNear, zFar), frustum, zNear);\n"
+    "vec3 ViewPosFor(vec2 uv, float eyeDist, float zNear) {\n"
+    "    float x = (frustum.x + (frustum.y - frustum.x) * uv.x) * (eyeDist / zNear);\n"
+    "    float y = (frustum.z + (frustum.w - frustum.z) * uv.y) * (eyeDist / zNear);\n"
+    "    return vec3(x, y, -eyeDist);\n"
+    "}\n"
+    "vec2 UvFor(ivec2 q, ivec2 aoSize, ivec2 fullSize, int scale) {\n"
+    "    ivec2 c = min(q * scale + ivec2(scale / 2), fullSize - ivec2(1));\n"
+    "    return (vec2(c) + vec2(0.5)) / vec2(fullSize);\n"
+    "}\n"
+    "vec3 ViewPosAt(ivec2 q, ivec2 aoSize, ivec2 fullSize, int scale, float zNear) {\n"
+    "    ivec2 c = clamp(q, ivec2(0), aoSize - ivec2(1));\n"
+    "    float d = texelFetch(linearDepth, c, 0).r;\n"
+    "    return ViewPosFor(UvFor(c, aoSize, fullSize, scale), d, zNear);\n"
     "}\n"
     "void main() {\n"
     "    ivec2 aoSize = imageSize(aoImage);\n"
     "    ivec2 aoCoord = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (aoCoord.x >= aoSize.x || aoCoord.y >= aoSize.y) { return; }\n"
-    "    ivec2 size = textureSize(depthTex, 0);\n"
     "    int scale = int(params2.z);\n"
-    "    ivec2 outCoord = min(aoCoord * scale + ivec2(scale / 2), size - ivec2(1));\n"
+    "    ivec2 fullSize = ivec2(params3.xy);\n"
     "    float zNear = params.x;\n"
     "    float zFar = params.y;\n"
     "    float radius = params.z;\n"
     "    float bias = params.w;\n"
     "    float intensity = params2.x;\n"
-    "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(size);\n"
-    "    float rawDepth = texelFetch(depthTex, outCoord, 0).r;\n"
-    // Nothing was drawn here (cleared depth / sky): there is no surface to occlude, and
-    // unprojecting the far plane would put the sample kernel kilometres away.
-    "    if (rawDepth >= 1.0) {\n"
+    "    float maxLod = params2.w;\n"
+    "    float eyeDist = texelFetch(linearDepth, aoCoord, 0).r;\n"
+    "    if (eyeDist >= zFar * 0.999) {\n"
     "        imageStore(aoImage, aoCoord, vec4(1.0));\n"
     "        return;\n"
     "    }\n"
-    "    float eyeDist = LinearEyeDistance(rawDepth, zNear, zFar);\n"
-    "    vec3 P = ViewPosFor(uv, eyeDist, frustum, zNear);\n"
-    // Normals are reconstructed from neighbouring positions, picking whichever of the forward/
-    // backward difference spans the smaller depth step on each axis. Taking the nearer neighbour
-    // keeps a silhouette's normal attached to the surface it belongs to instead of tilting it
-    // toward whatever distant geometry happens to sit on the other side of the edge.
-    "    vec3 Pr = ViewPosAt(outCoord + ivec2(scale, 0), size, frustum, zNear, zFar);\n"
-    "    vec3 Pl = ViewPosAt(outCoord - ivec2(scale, 0), size, frustum, zNear, zFar);\n"
-    "    vec3 Pu = ViewPosAt(outCoord + ivec2(0, scale), size, frustum, zNear, zFar);\n"
-    "    vec3 Pd = ViewPosAt(outCoord - ivec2(0, scale), size, frustum, zNear, zFar);\n"
+    "    vec2 uv = UvFor(aoCoord, aoSize, fullSize, scale);\n"
+    "    vec3 P = ViewPosFor(uv, eyeDist, zNear);\n"
+    "    vec3 Pr = ViewPosAt(aoCoord + ivec2(1, 0), aoSize, fullSize, scale, zNear);\n"
+    "    vec3 Pl = ViewPosAt(aoCoord - ivec2(1, 0), aoSize, fullSize, scale, zNear);\n"
+    "    vec3 Pu = ViewPosAt(aoCoord + ivec2(0, 1), aoSize, fullSize, scale, zNear);\n"
+    "    vec3 Pd = ViewPosAt(aoCoord - ivec2(0, 1), aoSize, fullSize, scale, zNear);\n"
     "    vec3 dx = (abs(Pr.z - P.z) < abs(P.z - Pl.z)) ? (Pr - P) : (P - Pl);\n"
     "    vec3 dy = (abs(Pu.z - P.z) < abs(P.z - Pd.z)) ? (Pu - P) : (P - Pd);\n"
     "    vec3 N = cross(dx, dy);\n"
     "    float nLen = length(N);\n"
-    // A degenerate cross product means the four neighbours were collinear (or the surface is
-    // exactly edge-on), leaving no usable normal - report "unoccluded" rather than normalizing
-    // a zero vector into NaN and poisoning the blur with it.
     "    if (nLen < 1e-8) {\n"
     "        imageStore(aoImage, aoCoord, vec4(1.0));\n"
     "        return;\n"
     "    }\n"
     "    N /= nLen;\n"
     "    if (dot(N, P) > 0.0) { N = -N; }\n"
-    // Rotate the kernel per pixel so the 16 samples trade visible banding for high-frequency
-    // noise, which the blur pass then removes. Building the basis from an axis chosen against N
-    // (rather than rotating a fixed in-plane vector) keeps it well-conditioned for surfaces
-    // seen edge-on, where the naive construction collapses.
     "    float angle = Hash(vec2(aoCoord)) * 6.2831853;\n"
     "    vec3 up = (abs(N.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);\n"
     "    vec3 T0 = normalize(cross(up, N));\n"
@@ -153,19 +179,17 @@ const char* kSsaoShaderSource =
     "        vec2 sampleUv = vec2((xn - frustum.x) / (frustum.y - frustum.x),\n"
     "                             (yn - frustum.z) / (frustum.w - frustum.z));\n"
     "        if (any(lessThan(sampleUv, vec2(0.0))) || any(greaterThan(sampleUv, vec2(1.0)))) { continue; }\n"
-    "        float sampleRaw = texture(depthTex, sampleUv).r;\n"
-    "        if (sampleRaw >= 1.0) { continue; }\n"
-    "        float sceneDist = LinearEyeDistance(sampleRaw, zNear, zFar);\n"
-    // Occluded when real geometry sits in front of where this sample landed. The range check
-    // stops a wall metres behind the pixel from counting as a contact occluder just because it
-    // happens to line up in screen space.
+    "        float offsetTexels = length((sampleUv - uv) * vec2(aoSize));\n"
+    "        float lod = clamp(floor(log2(max(offsetTexels, 1.0))) - 3.0, 0.0, maxLod);\n"
+    "        float sceneDist = textureLod(linearDepth, sampleUv, lod).r;\n"
+    "        if (sceneDist >= zFar * 0.999) { continue; }\n"
     "        if (sceneDist < sampleDist - bias) {\n"
     "            float rangeCheck = smoothstep(0.0, 1.0, radius / max(abs(eyeDist - sceneDist), 1e-4));\n"
     "            occlusion += rangeCheck;\n"
     "        }\n"
     "    }\n"
     "    float ao = 1.0 - (occlusion / float(16)) * intensity;\n"
-    "    imageStore(aoImage, aoCoord, vec4(ao, ao, ao, 1.0));\n"
+    "    imageStore(aoImage, aoCoord, vec4(ao));\n"
     "}\n";
 
 // Depth-aware blur, on the AO grid. A 16-sample kernel is far too noisy to show directly, and
@@ -176,47 +200,37 @@ const char* kBlurShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D aoTex;\n"
-    "layout(binding = 2) uniform sampler2D depthTex;\n"
-    "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
+    "layout(binding = 2) uniform sampler2D linearDepth;\n"
+    "layout(r16f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform SsaoConfigBlock {\n"
     "    vec4 frustum;\n"
     "    vec4 params;\n"
     "    vec4 params2;\n"
+    "    vec4 params3;\n"
     "};\n"
-    "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
-    "    float ndc = rawDepth * 2.0 - 1.0;\n"
-    "    return (2.0 * zNear * zFar) / (zFar + zNear - ndc * (zFar - zNear));\n"
-    "}\n"
     "void main() {\n"
     "    ivec2 size = imageSize(outputImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (outCoord.x >= size.x || outCoord.y >= size.y) { return; }\n"
-    "    ivec2 depthSize = textureSize(depthTex, 0);\n"
-    "    int scale = int(params2.z);\n"
-    "    float zNear = params.x;\n"
-    "    float zFar = params.y;\n"
     "    float depthSigma = params2.y;\n"
-    "    ivec2 centerDepthCoord = min(outCoord * scale + ivec2(scale / 2), depthSize - ivec2(1));\n"
-    "    float centerDist = LinearEyeDistance(texelFetch(depthTex, centerDepthCoord, 0).r, zNear, zFar);\n"
+    "    float centerDist = texelFetch(linearDepth, outCoord, 0).r;\n"
     "    float sum = 0.0;\n"
     "    float weightSum = 0.0;\n"
     "    for (int y = -2; y <= 2; ++y) {\n"
     "        for (int x = -2; x <= 2; ++x) {\n"
     "            ivec2 c = clamp(outCoord + ivec2(x, y), ivec2(0), size - ivec2(1));\n"
-    "            ivec2 dc = min(c * scale + ivec2(scale / 2), depthSize - ivec2(1));\n"
-    "            float dist = LinearEyeDistance(texelFetch(depthTex, dc, 0).r, zNear, zFar);\n"
+    "            float dist = texelFetch(linearDepth, c, 0).r;\n"
     "            float w = exp(-abs(dist - centerDist) / max(depthSigma, 1e-4));\n"
     "            sum += texelFetch(aoTex, c, 0).r * w;\n"
     "            weightSum += w;\n"
     "        }\n"
     "    }\n"
     "    float ao = (weightSum > 1e-4) ? (sum / weightSum) : 1.0;\n"
-    "    imageStore(outputImage, outCoord, vec4(ao, ao, ao, 1.0));\n"
+    "    imageStore(outputImage, outCoord, vec4(ao));\n"
     "}\n";
 
-// Composite: multiply the (bilinearly upsampled) blurred AO into the colour. At
-// scale 1 every sample lands on a texel centre, so this is exactly the old in-blur
-// multiply.
+// Composite: multiply the (bilinearly upsampled) blurred AO into the colour. At scale 1 every
+// sample lands on a texel centre, so this is exactly a per-pixel multiply.
 const char* kCompositeShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
@@ -237,6 +251,7 @@ struct SsaoConfigData {
     float frustum[4];
     float params[4];
     float params2[4];
+    float params3[4];   // full-resolution width, height, unused, unused
 };
 
 struct PipelineState {
@@ -247,6 +262,7 @@ struct PipelineState {
     unsigned int ssaoProgram = 0;
     unsigned int blurProgram = 0;
     unsigned int compositeProgram = 0;
+    unsigned int linearizeProgram = 0;
     unsigned int configUbo = 0;
 
     bool texturesValid = false;
@@ -254,6 +270,8 @@ struct PipelineState {
     int height = 0;
     unsigned int aoTexture = 0;
     unsigned int aoBlurTexture = 0;
+    unsigned int linearDepthTexture = 0;
+    int depthLevels = 1;
 };
 
 PipelineState g_state;
@@ -296,15 +314,18 @@ bool CompileAndLink(const GlComputeApi& gl, const char* source, const char* labe
 }
 
 unsigned int CreateWorkTexture(const GlComputeApi& gl, int width, int height,
-                               unsigned int filter = GL_NEAREST) {
+                               unsigned int filter = GL_NEAREST,
+                               unsigned int format = GL_R16F, int levels = 1) {
     unsigned int texture = 0;
     gl.glGenTextures(1, &texture);
     gl.glBindTexture(GL_TEXTURE_2D, texture);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)filter);
-    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)filter);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                       (int)(filter == GL_NEAREST_MIPMAP_NEAREST ? GL_NEAREST : filter));
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16F, width, height);
+    gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
+    gl.glTexStorage2D(GL_TEXTURE_2D, levels, format, width, height);
     return texture;
 }
 
@@ -316,8 +337,17 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
     if (g_state.texturesValid) {
         gl.glDeleteTextures(1, &g_state.aoTexture);
         gl.glDeleteTextures(1, &g_state.aoBlurTexture);
+        gl.glDeleteTextures(1, &g_state.linearDepthTexture);
         g_state.texturesValid = false;
     }
+
+    int levels = 1;
+    while (levels < kMaxDepthLevels && ((width >> levels) > 0 || (height >> levels) > 0)) {
+        ++levels;
+    }
+    g_state.depthLevels = levels;
+    g_state.linearDepthTexture = CreateWorkTexture(gl, width, height, GL_NEAREST_MIPMAP_NEAREST,
+                                                   GL_R32F, levels);
 
     g_state.aoTexture = CreateWorkTexture(gl, width, height);
     // Sampled bilinearly by the composite, which is what upsamples it.
@@ -377,7 +407,9 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
         g_state.initOk = CompileAndLink(gl, kSsaoShaderSource, "ssao", g_state.ssaoProgram) &&
                           CompileAndLink(gl, kBlurShaderSource, "blur", g_state.blurProgram) &&
                           CompileAndLink(gl, kCompositeShaderSource, "composite",
-                                         g_state.compositeProgram);
+                                         g_state.compositeProgram) &&
+                          CompileAndLink(gl, kLinearizeShaderSource, "linearize",
+                                         g_state.linearizeProgram);
         if (!g_state.initOk) {
             printf("[opengl32_enh_cpp] ssao: shader init failed, effect disabled until the "
                    "GL context changes\n");
@@ -408,6 +440,9 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     // of "same surface" in step with the AO's own scale when radius is retuned per game.
     configData.params2[1] = radius * 0.25f;
     configData.params2[2] = (float)scale;
+    configData.params2[3] = (float)(g_state.depthLevels - 1);
+    configData.params3[0] = (float)width;
+    configData.params3[1] = (float)height;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(SsaoConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
@@ -415,11 +450,20 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     unsigned int aoGroupsX = (unsigned int)((aoWidth + 7) / 8);
     unsigned int aoGroupsY = (unsigned int)((aoHeight + 7) / 8);
 
-    gl.glUseProgram(g_state.ssaoProgram);
+    gl.glUseProgram(g_state.linearizeProgram);
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
-    gl.glBindImageTexture(0, g_state.aoTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    gl.glBindImageTexture(0, g_state.linearDepthTexture, 0, 0, 0, GL_WRITE_ONLY, GL_R32F);
     gl.glDispatchCompute(aoGroupsX, aoGroupsY, 1);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    gl.glBindTexture(GL_TEXTURE_2D, g_state.linearDepthTexture);
+    gl.glGenerateMipmap(GL_TEXTURE_2D);
+    PerfGpuMark("ssao depth");
+
+    gl.glUseProgram(g_state.ssaoProgram);
+    gl.glBindImageTexture(0, g_state.aoTexture, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
+    gl.glDispatchCompute(aoGroupsX, aoGroupsY, 1);
+    PerfGpuMark("ssao ao");
     // Each pass samples the previous one's image as a texture, so the writes have to land
     // before it runs - these barriers order the dispatches, they are not an optimization.
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -428,9 +472,10 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.aoTexture);
     gl.glActiveTexture(GL_TEXTURE2);
-    gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
-    gl.glBindImageTexture(0, g_state.aoBlurTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
+    gl.glBindTexture(GL_TEXTURE_2D, g_state.linearDepthTexture);
+    gl.glBindImageTexture(0, g_state.aoBlurTexture, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
     gl.glDispatchCompute(aoGroupsX, aoGroupsY, 1);
+    PerfGpuMark("ssao blur");
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     gl.glUseProgram(g_state.compositeProgram);

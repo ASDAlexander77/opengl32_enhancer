@@ -94,6 +94,38 @@ bool ResolveLegacy(const char* name, T& outFn) {
     return true;
 }
 
+// Texture names for every texture this DLL creates.
+//
+// id Tech 2-era engines never call glGenTextures: they choose their own texture numbers
+// (Anachronox binds 36, 43, 94, 513... directly), which compatibility-profile GL allows - the
+// first glBindTexture of an unused name creates it. glGenTextures, meanwhile, hands out the
+// lowest names not yet in use. So any texture of ours created early could be given a number
+// the game picks for itself LATER - a dialog's text texture, say. The game then binds our
+// texture as its own, and its glTexImage2D fails with GL_INVALID_OPERATION, because ours were
+// made with glTexStorage2D and are immutable. It draws whatever our texture holds instead:
+// HUD dialogs whose text came out as black boxes with fragments of our pipeline images.
+//
+// Handing out names from a range far above anything an engine numbers its textures with makes
+// the two allocators disjoint. Names are never reused, and a context only ever sees a few
+// hundred of ours, so the range cannot run out. Core-profile contexts do not allow a name that
+// glGenTextures did not return, and engines that number their own textures do not run on
+// them, so there the driver's allocator is used as before.
+PFNGLGENTEXTURESPROC g_realGenTextures = nullptr;
+bool g_useReservedTextureNames = false;
+unsigned int g_nextReservedTextureName = 0x40000000u;
+
+void __stdcall GenReservedTextureNames(int n, unsigned int* textures) {
+    if (!g_useReservedTextureNames) {
+        if (g_realGenTextures != nullptr) {
+            g_realGenTextures(n, textures);
+        }
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        textures[i] = g_nextReservedTextureName++;
+    }
+}
+
 }  // namespace
 
 bool LoadGlComputeApi(GlComputeApi& api) {
@@ -155,6 +187,22 @@ bool LoadGlComputeApi(GlComputeApi& api) {
             api.glGetQueryObjectiv = reinterpret_cast<PFNGLGETQUERYOBJECTIVPROC>(getProc("glGetQueryObjectiv"));
             api.glGetQueryObjectui64v = reinterpret_cast<PFNGLGETQUERYOBJECTUI64VPROC>(getProc("glGetQueryObjectui64v"));
         }
+    }
+
+    // See GenReservedTextureNames above. Decided per context, from the profile it was created
+    // with; the profile-mask query is GL 3.2+, and a context that does not understand it is a
+    // compatibility one by definition.
+    if (api.glGenTextures != nullptr && api.glGetIntegerv != nullptr) {
+        const unsigned int GL_CONTEXT_PROFILE_MASK = 0x9126;
+        const int GL_CONTEXT_CORE_PROFILE_BIT = 0x1;
+        int profileMask = 0;
+        api.glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &profileMask);
+        if (api.glGetError != nullptr) {
+            api.glGetError();   // an old context rejecting the query must not leave an error
+        }
+        g_realGenTextures = api.glGenTextures;
+        g_useReservedTextureNames = (profileMask & GL_CONTEXT_CORE_PROFILE_BIT) == 0;
+        api.glGenTextures = &GenReservedTextureNames;
     }
 
     api.loaded = ok;

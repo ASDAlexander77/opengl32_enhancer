@@ -1183,6 +1183,7 @@ extern "C" __declspec(dllexport) void __stdcall glDrawBuffer(GLenum mode) {
             printf("[opengl32_enh_cpp]   glDrawBuffer: resolved OK\n");
         }
     }
+    mode = TranslateGameColorBuffer(mode);
     __proc_glDrawBuffer(mode);
 }
 
@@ -3921,6 +3922,7 @@ extern "C" __declspec(dllexport) void __stdcall glReadBuffer(GLenum mode) {
             printf("[opengl32_enh_cpp]   glReadBuffer: resolved OK\n");
         }
     }
+    mode = TranslateGameColorBuffer(mode);
     __proc_glReadBuffer(mode);
 }
 
