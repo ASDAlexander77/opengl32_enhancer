@@ -111,7 +111,17 @@ const char* kCompositeShaderSource =
     "layout(std140, binding = 0) uniform BloomConfigBlock {\n"
     "    float value;\n"
     "    float scale;\n"
+    "    float toneMap;\n"
+    "    float toneStrength;\n"
     "};\n"
+    "vec3 acesFilm(vec3 x) {\n"
+    "    float a = 2.51;\n"
+    "    float b = 0.03;\n"
+    "    float c = 2.43;\n"
+    "    float d = 0.59;\n"
+    "    float e = 0.14;\n"
+    "    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);\n"
+    "}\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outputImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -122,13 +132,15 @@ const char* kCompositeShaderSource =
     "    if (any(isnan(bloom)) || any(isinf(bloom))) { bloom = vec3(0.0); }\n"
     "    vec3 result = clamp(orig.rgb + bloom * value, 0.0, 1.0);\n"
     "    if (any(isnan(result))) { result = clamp(bloom * value, 0.0, 1.0); }\n"
+    "    if (toneMap > 0.5) { result = mix(result, acesFilm(result), toneStrength); }\n"
     "    imageStore(outputImage, outCoord, vec4(result, orig.a));\n"
     "}\n";
 
 struct BloomConfigData {
     float value;
     float scale;
-    float pad[2];
+    float toneMap;        // composite only: also apply the acestonemap curve (see bloom.h)
+    float toneStrength;
 };
 
 struct PipelineState {
@@ -230,11 +242,15 @@ void EnsureUbo(const GlComputeApi& gl) {
 
 // The bright-pass and blur grid step: 2 on large targets, 1 otherwise. See ApplyBloom.
 int g_bloomScale = 1;
+// Set for the composite pass only, when acestonemap is fused into it - see bloom.h.
+float g_toneStrength = -1.0f;
 
 void UploadConfig(const GlComputeApi& gl, float value) {
     BloomConfigData configData{};
     configData.value = value;
     configData.scale = (float)g_bloomScale;
+    configData.toneMap = g_toneStrength >= 0.0f ? 1.0f : 0.0f;
+    configData.toneStrength = g_toneStrength;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BloomConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
@@ -246,7 +262,8 @@ unsigned int GroupCount(int extent) {
 
 }  // namespace
 
-bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float threshold, float intensity) {
+bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float threshold, float intensity,
+                float fusedToneMapStrength) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -336,7 +353,9 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
     // resolution; the blur result is sampled bilinearly, which is what upsamples it.
     groupsX = GroupCount(width);
     groupsY = GroupCount(height);
+    g_toneStrength = fusedToneMapStrength;
     UploadConfig(gl, intensity);
+    g_toneStrength = -1.0f;
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);

@@ -977,8 +977,15 @@ void ApplySelectedEffect(void* hdc) {
 
     PerfGpuMark("srgb decode");
 
+    // A stage that another stage already performed inside its own pass this frame (acestonemap
+    // fused into bloom - see bloom.h) - skipped when the loop reaches it.
+    int fusedIntoPrevious = -1;
     for (int i = 0; i < config.stageCount; ++i) {
         EffectKind stage = config.stages[i];
+        if (i == fusedIntoPrevious) {
+            PerfGpuMark(EffectNameFor(stage));
+            continue;
+        }
 
         // No world on screen this frame - see IsSceneSpaceStage().
         if (IsSceneSpaceStage(stage) && !worldThisFrame) {
@@ -1133,9 +1140,19 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::AcesToneMap:
                 wrote = ApplyHdrLook(src, dst, dstW, dstH, config.acesStrength);
                 break;
-            case EffectKind::Bloom:
-                wrote = ApplyBloom(src, dst, dstW, dstH, config.bloomThreshold, config.bloomIntensity);
+            case EffectKind::Bloom: {
+                // acestonemap straight after bloom is applied in bloom's composite - see bloom.h.
+                // Both are linear-space, per-pixel at the end, and at the same resolution, so
+                // nothing that would have happened between them is skipped.
+                bool fuseToneMap = i + 1 < config.stageCount &&
+                                   config.stages[i + 1] == EffectKind::AcesToneMap;
+                wrote = ApplyBloom(src, dst, dstW, dstH, config.bloomThreshold, config.bloomIntensity,
+                                   fuseToneMap ? config.acesStrength : -1.0f);
+                if (wrote && fuseToneMap) {
+                    fusedIntoPrevious = i + 1;
+                }
                 break;
+            }
             case EffectKind::Sharpen:
                 wrote = ApplyNVSharpen(src, dst, dstW, dstH, config.sharpness);
                 break;

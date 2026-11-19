@@ -16,4 +16,11 @@
 // stronger glow. Returns true if dstTexture was actually written (the caller must only treat
 // dstTexture as the pipeline's new source when this returns true); returns false if GL 4.3
 // compute support is unavailable or shader init failed.
-bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float threshold, float intensity);
+// fusedToneMapStrength >= 0: also apply acestonemap (hdr_look.h, at that strength) to the
+// composited result, in the same pass - the same curve, applied to the value bloom would have
+// written, so the output matches bloom-then-acestonemap up to the half-float rounding that the
+// intermediate texture no longer adds. post_effects.cpp uses it when acestonemap directly
+// follows bloom, which spares acestonemap's own full-frame pass (~0.5 ms at 4000x3200,
+// measured with debugStats). Negative (the default): bloom alone.
+bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int height, float threshold, float intensity,
+                float fusedToneMapStrength = -1.0f);
