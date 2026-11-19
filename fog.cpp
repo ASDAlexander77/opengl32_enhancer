@@ -31,6 +31,7 @@ const char* kFogShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
     "layout(binding = 1) uniform sampler2D depthTex;\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform FogConfigBlock {\n"
     "    vec4 fogColor;\n"
@@ -39,6 +40,7 @@ const char* kFogShaderSource =
     "    float intensity;\n"
     "    float zNear;\n"
     "    float zFar;\n"
+    "    float useHudMask;\n"
     "};\n"
     // Raw hardware depth -> eye-space distance in world units. Same conversion as depth_view.h's
     // LinearizeDepth and dof.cpp's.
@@ -52,6 +54,10 @@ const char* kFogShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 color = texture(inputTex, uv);\n"
+    "    if (useHudMask > 0.5 && texelFetch(hudMask, outCoord, 0).r > 0.5) {\n"
+    "        imageStore(outputImage, outCoord, color);\n"
+    "        return;\n"
+    "    }\n"
     "    float dist = Linearize(texture(depthTex, uv).r);\n"
     // fogSpan is precomputed on the CPU and guaranteed positive, so this cannot divide by zero.
     "    float t = clamp((dist - fogStart) / fogSpan, 0.0, 1.0) * intensity;\n"
@@ -70,7 +76,8 @@ struct FogConfigData {
     float intensity;
     float zNear;
     float zFar;
-    float pad[3];
+    float useHudMask;
+    float pad[2];
 };
 
 struct PipelineState {
@@ -134,7 +141,7 @@ void EnsureUbo(const GlComputeApi& gl) {
 bool ApplyFog(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
                int width, int height, const ProjectionParams& projection,
                float fogStart, float fogEnd, float intensity,
-               float colorR, float colorG, float colorB) {
+               float colorR, float colorG, float colorB, unsigned int hudMaskTexture) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -201,6 +208,7 @@ bool ApplyFog(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     configData.intensity = intensity;
     configData.zNear = projection.zNear;
     configData.zFar = projection.zFar;
+    configData.useHudMask = hudMaskTexture != 0 ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(FogConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
@@ -210,6 +218,10 @@ bool ApplyFog(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE1 + 1);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     unsigned int groupsX = (unsigned int)((width + 7) / 8);
     unsigned int groupsY = (unsigned int)((height + 7) / 8);

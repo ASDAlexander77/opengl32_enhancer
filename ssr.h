@@ -89,4 +89,5 @@ void SsrViewSpaceWorldUp(const CameraMatrix& camera, SsrWorldUpAxis axis, float 
 bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
               int width, int height, const ProjectionParams& projection,
               const float* viewSpaceWorldUp,
-              float intensity, float maxDistance, float thickness, float upThreshold);
+              float intensity, float maxDistance, float thickness, float upThreshold,
+              unsigned int hudMaskTexture = 0);

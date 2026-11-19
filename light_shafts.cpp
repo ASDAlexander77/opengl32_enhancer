@@ -181,6 +181,7 @@ const char* kCompositeShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D srcTex;\n"
     "layout(binding = 1) uniform sampler2D shaftTex;\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outImage;\n"
     "layout(std430, binding = 1) buffer LightAccum {\n"
     "    uint sumX;\n"
@@ -192,12 +193,17 @@ const char* kCompositeShaderSource =
     "    float density;\n"
     "    float decay;\n"
     "    float threshold;\n"
+    "    float useHudMask;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec4 scene = texelFetch(srcTex, outCoord, 0);\n"
+    "    if (useHudMask > 0.5 && texelFetch(hudMask, outCoord, 0).r > 0.5) {\n"
+    "        imageStore(outImage, outCoord, scene);\n"
+    "        return;\n"
+    "    }\n"
     "    if (sumW == 0u || intensity <= 0.0) {\n"
     "        imageStore(outImage, outCoord, scene);\n"
     "        return;\n"
@@ -229,6 +235,8 @@ struct ShaftConfigData {
     float density;
     float decay;
     float threshold;
+    float useHudMask;   // read by the composite pass only
+    float pad[3];
 };
 
 struct PipelineState {
@@ -306,7 +314,8 @@ unsigned int MakeLowResTexture(const GlComputeApi& gl, int width, int height) {
 }  // namespace
 
 bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
-                       float intensity, float density, float decay, float threshold) {
+                       float intensity, float density, float decay, float threshold,
+                       unsigned int hudMaskTexture) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -385,6 +394,7 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     shaftData.density = density;
     shaftData.decay = decay;
     shaftData.threshold = threshold;
+    shaftData.useHudMask = hudMaskTexture != 0 ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.shaftUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(shaftData), &shaftData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.shaftUbo);
@@ -422,6 +432,10 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.shaftTex);
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE1 + 1);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);

@@ -41,4 +41,4 @@
 // see projection_capture.h).
 bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
                 int width, int height, const ProjectionParams& projection,
-                float radius, float intensity, float bias);
+                float radius, float intensity, float bias, unsigned int hudMaskTexture = 0);

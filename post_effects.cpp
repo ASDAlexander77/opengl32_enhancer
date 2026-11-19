@@ -1095,6 +1095,16 @@ void ApplySelectedEffect(void* hdc) {
         // Set by a scene stage that already left HUD pixels untouched in its own pass, so the
         // separate restore below is not run on top of it.
         bool hudRestoredByStage = false;
+        // This frame's HUD mask for a scene stage that skips HUD pixels in its own pass (depth
+        // vignette, fog, ssr, lightshafts, ssao - see each one's header), or 0 where the separate
+        // restore below is the only option: off the native-resolution grid the mask does not
+        // describe this image.
+        auto stageHudMask = [&]() -> unsigned int {
+            if (!hudMaskAvailable || !atNativeRes || dstW != nativeWidth || dstH != nativeHeight) {
+                return 0;
+            }
+            return GetHudMaskTexture(hudWorldTex, g_pipeline.captureTex, dstW, dstH);
+        };
         switch (stage) {
             case EffectKind::None:
                 break;
@@ -1239,11 +1249,7 @@ void ApplySelectedEffect(void* hdc) {
                 break;
             case EffectKind::DepthVignette: {
                 // Restores the HUD itself, in its own pass - see depth_vignette.h.
-                unsigned int dvMask = 0;
-                if (hudMaskAvailable && atNativeRes && dstW == nativeWidth &&
-                    dstH == nativeHeight) {
-                    dvMask = GetHudMaskTexture(hudWorldTex, g_pipeline.captureTex, dstW, dstH);
-                }
+                unsigned int dvMask = stageHudMask();
                 wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, dstW, dstH,
                                                               config.depthVignetteIntensity,
                                                               config.depthVignetteThreshold, dvMask);
@@ -1253,10 +1259,14 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::LightShafts:
                 // No depth and no projection: the light is found in the colour buffer itself,
                 // so this is the one late-era stage with no scene-geometry prerequisites.
+            {
+                unsigned int lsMask = stageHudMask();
                 wrote = ApplyLightShafts(src, dst, dstW, dstH, config.shaftsIntensity,
                                           config.shaftsDensity, config.shaftsDecay,
-                                          config.shaftsThreshold);
+                                          config.shaftsThreshold, lsMask);
+                hudRestoredByStage = wrote && lsMask != 0;
                 break;
+            }
             case EffectKind::Ssr: {
                 // Reconstructs view-space positions and normals from depth, so it needs the
                 // projection for the same reason ssao does.
@@ -1277,7 +1287,8 @@ void ApplySelectedEffect(void* hdc) {
                          ApplySsr(src, dst, g_pipeline.depthTex, dstW, dstH, ssrProjection,
                                   ssrWorldUpPtr,
                                   config.ssrIntensity, config.ssrMaxDistance,
-                                  config.ssrThickness, config.ssrUpThreshold);
+                                  config.ssrThickness, config.ssrUpThreshold, stageHudMask());
+                hudRestoredByStage = wrote && stageHudMask() != 0;
                 break;
             }
             case EffectKind::MotionBlur: {
@@ -1347,7 +1358,8 @@ void ApplySelectedEffect(void* hdc) {
                 wrote = depthCaptured && GetCapturedProjection(fogProjection) &&
                          ApplyFog(src, dst, g_pipeline.depthTex, dstW, dstH, fogProjection,
                                   config.fogStart, config.fogEnd, config.fogIntensity,
-                                  fogR, fogG, fogB);
+                                  fogR, fogG, fogB, stageHudMask());
+                hudRestoredByStage = wrote && stageHudMask() != 0;
                 break;
             }
             case EffectKind::Dof: {
@@ -1367,7 +1379,9 @@ void ApplySelectedEffect(void* hdc) {
                 ProjectionParams projection;
                 wrote = depthCaptured && GetCapturedProjection(projection) &&
                          ApplySsao(src, dst, g_pipeline.depthTex, dstW, dstH, projection,
-                                   config.ssaoRadius, config.ssaoIntensity, config.ssaoBias);
+                                   config.ssaoRadius, config.ssaoIntensity, config.ssaoBias,
+                                   stageHudMask());
+                hudRestoredByStage = wrote && stageHudMask() != 0;
                 break;
             }
         }

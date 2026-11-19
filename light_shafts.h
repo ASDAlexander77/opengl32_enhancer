@@ -38,4 +38,5 @@
 // pipeline's new source when this returns true); returns false if GL 4.3 compute support is
 // unavailable or shader init failed.
 bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
-                       float intensity, float density, float decay, float threshold);
+                       float intensity, float density, float decay, float threshold,
+                       unsigned int hudMaskTexture = 0);

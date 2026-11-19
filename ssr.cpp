@@ -49,7 +49,7 @@ const char* kSsrShaderSource =
     "layout(std140, binding = 0) uniform SsrConfigBlock {\n"
     "    vec4 frustum;\n"   // left, right, bottom, top
     "    vec4 params;\n"    // zNear, zFar, maxDistance, thickness
-    "    vec4 params2;\n"   // intensity, upThreshold, scale (trace grid step), unused
+    "    vec4 params2;\n"   // intensity, upThreshold, scale (trace grid step), useHudMask
     "    vec4 upVector;\n"  // xyz = world up in view space, w = 1 when a camera was captured
     "};\n"
     "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
@@ -223,6 +223,7 @@ const char* kSsrCompositeShaderSource =
     "layout(binding = 0) uniform sampler2D colorTex;\n"
     "layout(binding = 1) uniform sampler2D depthTex;\n"
     "layout(binding = 2) uniform sampler2D traceTex;\n"
+    "layout(binding = 3) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform SsrConfigBlock {\n"
     "    vec4 frustum;\n"
@@ -239,6 +240,10 @@ const char* kSsrCompositeShaderSource =
     "    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (p.x >= size.x || p.y >= size.y) { return; }\n"
     "    vec4 color = texelFetch(colorTex, p, 0);\n"
+    "    if (params2.w > 0.5 && texelFetch(hudMask, p, 0).r > 0.5) {\n"
+    "        imageStore(outputImage, p, color);\n"
+    "        return;\n"
+    "    }\n"
     "    int scale = int(params2.z);\n"
     "    ivec2 t = min(p / scale, textureSize(traceTex, 0) - ivec2(1));\n"
     "    vec4 trace = texelFetch(traceTex, t, 0);\n"
@@ -354,7 +359,8 @@ void SsrViewSpaceWorldUp(const CameraMatrix& camera, SsrWorldUpAxis axis, float 
 bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
               int width, int height, const ProjectionParams& projection,
               const float* viewSpaceWorldUp,
-              float intensity, float maxDistance, float thickness, float upThreshold) {
+              float intensity, float maxDistance, float thickness, float upThreshold,
+              unsigned int hudMaskTexture) {
 
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
@@ -424,6 +430,7 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     configData.params2[1] = upThreshold;
     int scale = ((long long)width * height > kHalfResTraceAbovePixels) ? 2 : 1;
     configData.params2[2] = (float)scale;
+    configData.params2[3] = hudMaskTexture != 0 ? 1.0f : 0.0f;
     if (viewSpaceWorldUp != nullptr) {
         configData.upVector[0] = viewSpaceWorldUp[0];
         configData.upVector[1] = viewSpaceWorldUp[1];
@@ -464,6 +471,10 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE2);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.traceTex);
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE2 + 1);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute((unsigned int)((width + 7) / 8), (unsigned int)((height + 7) / 8), 1);

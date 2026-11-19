@@ -275,7 +275,14 @@ const char* kCompositeShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D aoTex;\n"
     "layout(binding = 1) uniform sampler2D colorTex;\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
+    "layout(std140, binding = 0) uniform SsaoConfigBlock {\n"
+    "    vec4 frustum;\n"
+    "    vec4 params;\n"
+    "    vec4 params2;\n"
+    "    vec4 params3;\n"
+    "};\n"
     "void main() {\n"
     "    ivec2 size = imageSize(outputImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -283,6 +290,10 @@ const char* kCompositeShaderSource =
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(size);\n"
     "    float ao = texture(aoTex, uv).r;\n"
     "    vec4 color = texelFetch(colorTex, outCoord, 0);\n"
+    "    if (params3.z > 0.5 && texelFetch(hudMask, outCoord, 0).r > 0.5) {\n"
+    "        imageStore(outputImage, outCoord, color);\n"
+    "        return;\n"
+    "    }\n"
     "    imageStore(outputImage, outCoord, vec4(color.rgb * ao, color.a));\n"
     "}\n";
 
@@ -290,7 +301,7 @@ struct SsaoConfigData {
     float frustum[4];
     float params[4];
     float params2[4];
-    float params3[4];   // full-resolution width, height, unused, unused
+    float params3[4];   // full-resolution width, height, useHudMask (composite), unused
 };
 
 struct PipelineState {
@@ -413,7 +424,7 @@ void EnsureUbo(const GlComputeApi& gl) {
 
 bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
                 int width, int height, const ProjectionParams& projection,
-                float radius, float intensity, float bias) {
+                float radius, float intensity, float bias, unsigned int hudMaskTexture) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -487,6 +498,7 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     configData.params2[3] = (float)(g_state.depthLevels - 1);
     configData.params3[0] = (float)width;
     configData.params3[1] = (float)height;
+    configData.params3[2] = hudMaskTexture != 0 ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(SsaoConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
@@ -534,6 +546,10 @@ bool ApplySsao(unsigned int srcTexture, unsigned int dstTexture, unsigned int de
     gl.glBindTexture(GL_TEXTURE_2D, g_state.aoBlurTexture);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE2);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute((unsigned int)((width + 7) / 8), (unsigned int)((height + 7) / 8), 1);

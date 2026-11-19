@@ -43,4 +43,4 @@
 bool ApplyFog(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
                int width, int height, const ProjectionParams& projection,
                float fogStart, float fogEnd, float intensity,
-               float colorR, float colorG, float colorB);
+               float colorR, float colorG, float colorB, unsigned int hudMaskTexture = 0);
