@@ -65,6 +65,10 @@ typedef void (__stdcall *PFNGLTEXSUBIMAGE2DPROC)(unsigned int target, int level,
     int width, int height, unsigned int format, unsigned int type, const void* pixels);
 typedef void (__stdcall *PFNGLREADBUFFERPROC)(unsigned int mode);
 typedef void (__stdcall *PFNGLGETINTEGERVPROC)(unsigned int pname, int* params);
+typedef void (__stdcall *PFNGLGENQUERIESPROC)(int n, unsigned int* ids);
+typedef void (__stdcall *PFNGLQUERYCOUNTERPROC)(unsigned int id, unsigned int target);
+typedef void (__stdcall *PFNGLGETQUERYOBJECTIVPROC)(unsigned int id, unsigned int pname, int* params);
+typedef void (__stdcall *PFNGLGETQUERYOBJECTUI64VPROC)(unsigned int id, unsigned int pname, unsigned long long* params);
 typedef void (__stdcall *PFNGLGETTEXPARAMETERIVPROC)(unsigned int target, unsigned int pname, int* params);
 typedef unsigned int (__stdcall *PFNGLGETERRORPROC)(void);
 typedef void (__stdcall *PFNGLPIXELSTOREIPROC)(unsigned int pname, int param);
@@ -118,6 +122,13 @@ struct GlComputeApi {
     PFNGLGETERRORPROC glGetError = nullptr;
     PFNGLPIXELSTOREIPROC glPixelStorei = nullptr;
     PFNGLREADPIXELSPROC glReadPixels = nullptr;
+
+    // Optional (debugStats only, see perf_stats.h): resolved without affecting `loaded`, so a
+    // driver missing timer queries still runs every effect. Null when unavailable.
+    PFNGLGENQUERIESPROC glGenQueries = nullptr;
+    PFNGLQUERYCOUNTERPROC glQueryCounter = nullptr;
+    PFNGLGETQUERYOBJECTIVPROC glGetQueryObjectiv = nullptr;
+    PFNGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v = nullptr;
 
     bool loaded = false;
 };

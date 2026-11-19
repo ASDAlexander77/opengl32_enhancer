@@ -230,6 +230,11 @@ struct AnaxConfig {
     // job is to catch the case where you forgot to check whether it's working.
     bool fxIndicator = true;
 
+    // Measures where frame time goes - GPU time per pipeline stage, CPU time, swap wait,
+    // texture uploads - and reports it every two seconds to the log and the window title.
+    // See perf_stats.h. Off by default; costs nothing measurable when off.
+    bool debugStats = false;
+
     // Runs small GL_RGBA/GL_UNSIGNED_BYTE texture uploads in place (same dimensions - no
     // resize) at load time through a single stage (see texture_effect.h). `sharpen`/`cas` use
     // the `sharpness` value above; `invert` is a debug/demo aid for spotting which draws touch

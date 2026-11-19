@@ -218,6 +218,7 @@ def emit_cpp(funcs):
     lines.append('#include "taa_jitter.h"')
     lines.append('#include "window_override.h"')
     lines.append('#include "render_target.h"')
+    lines.append('#include "perf_stats.h"')
     lines.append("")
     lines.append(TYPEDEFS)
     lines.append("static void* g_real = nullptr;")
@@ -295,6 +296,9 @@ def emit_cpp(funcs):
             # the viewport hook and the capture path read the same latched answer all frame.
             lines.append("    NotifyFrameBoundary();")
             lines.append("    ArmSupersampleForFrame(EnsureRenderTarget());")
+            # See perf_stats.h: everything up to here is this frame's work; the real swap's
+            # blocking time is measured between these two.
+            lines.append(f"    PerfFrameEnd({params_call});")
         if name == "wglCreateContext":
             # See window_override.h: resizes the game's window to config.h's
             # windowWidth/windowHeight (if set) using the HDC the game is about to get a GL
@@ -368,6 +372,7 @@ def emit_cpp(funcs):
         # actually uses; the two array entry points are here so a modern caller is covered too.
         if name in ("glBegin", "glDrawArrays", "glDrawElements"):
             lines.append("    ApplyAutoMipmapForDraw();")
+            lines.append("    PerfCountDraw();")
         if name == "glTexImage2D":
             # See texture_effect.h: decides whether to run this upload through the configured
             # texture effect and calls cache_var itself (with either the original pixels or
@@ -388,6 +393,7 @@ def emit_cpp(funcs):
             # below - it needs the real call's result held long enough to bind afterward.
             lines.append(f"    BOOL __swapResult = {cache_var}({params_call});")
             lines.append("    BindRenderTarget();")
+            lines.append("    PerfFrameBegin();")
             lines.append("    return __swapResult;")
         elif name == "glTexSubImage2D":
             # See texture_mipmap.h: must run AFTER the real call, since it rebuilds a chain we

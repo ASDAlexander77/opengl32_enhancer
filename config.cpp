@@ -589,6 +589,8 @@ AnaxConfig ParseConfigFile(const char* path) {
                                                        "cameraLogInterval");
         } else if (strcmp(key, "fxIndicator") == 0) {
             config.fxIndicator = ParseBool(value, config.fxIndicator, "fxIndicator");
+        } else if (strcmp(key, "debugStats") == 0) {
+            config.debugStats = ParseBool(value, config.debugStats, "debugStats");
         } else if (strcmp(key, "anisotropy") == 0) {
             config.anisotropy = ParseClampedFloat(value, 0.0f, 16.0f, config.anisotropy, "anisotropy");
         } else if (strcmp(key, "autoMipmap") == 0) {

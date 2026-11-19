@@ -147,6 +147,16 @@ bool LoadGlComputeApi(GlComputeApi& api) {
     ok &= ResolveLegacy("glPixelStorei", api.glPixelStorei);
     ok &= ResolveLegacy("glReadPixels", api.glReadPixels);
 
+    {
+        PFNWGLGETPROCADDRESSPROC getProc = GetRealWglGetProcAddress();
+        if (getProc != nullptr) {
+            api.glGenQueries = reinterpret_cast<PFNGLGENQUERIESPROC>(getProc("glGenQueries"));
+            api.glQueryCounter = reinterpret_cast<PFNGLQUERYCOUNTERPROC>(getProc("glQueryCounter"));
+            api.glGetQueryObjectiv = reinterpret_cast<PFNGLGETQUERYOBJECTIVPROC>(getProc("glGetQueryObjectiv"));
+            api.glGetQueryObjectui64v = reinterpret_cast<PFNGLGETQUERYOBJECTUI64VPROC>(getProc("glGetQueryObjectui64v"));
+        }
+    }
+
     api.loaded = ok;
     if (ok) {
         printf("[opengl32_enh_cpp] gl_loader: all GL entry points resolved OK\n");

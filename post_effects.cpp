@@ -17,6 +17,7 @@
 #include <cstdlib>
 
 #include "post_effects.h"
+#include "perf_stats.h"
 #include "config.h"
 #include "render_target.h"
 #include "debug_log.h"
@@ -589,6 +590,9 @@ void ApplySelectedEffect(void* hdc) {
         return;
     }
 
+    // Everything the GPU did since the previous swap belongs to the game - see perf_stats.h.
+    PerfGpuMark("game");
+
     // Drain anything the app left pending before any stage of ours checks glGetError(). The
     // flag is global and carries no notion of who set it, so without this the first stage to
     // look reports the GAME's error as its own - see texture_effect.cpp, where exactly that
@@ -747,9 +751,17 @@ void ApplySelectedEffect(void* hdc) {
 
     int savedActiveTexture = 0;
     gl.glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActiveTexture);
-    gl.glActiveTexture(GL_TEXTURE0);
-    int savedTextureBinding = 0;
-    gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
+    // Every unit any stage binds on (0..4 - nis_effect's coefficient tables are the highest),
+    // not just unit 0. id Tech 2-era engines cache their per-unit bindings and skip a
+    // glBindTexture they think is redundant, so a unit left pointing at one of our pipeline
+    // textures is sampled by the game's next multitextured draw - see texture_effect.cpp,
+    // where the same mistake drew menu art as solid white quads.
+    const int kPipelineUnits = 5;
+    int savedUnitBinding[kPipelineUnits] = {};
+    for (int unit = kPipelineUnits - 1; unit >= 0; --unit) {
+        gl.glActiveTexture(GL_TEXTURE0 + unit);
+        gl.glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedUnitBinding[unit]);
+    }
     int savedProgram = 0;
     gl.glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
     int savedReadFbo = 0;
@@ -775,7 +787,10 @@ void ApplySelectedEffect(void* hdc) {
         gl.glUseProgram((unsigned int)savedProgram);
         gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, (unsigned int)savedUniformBuffer);
         gl.glBindBuffer(GL_UNIFORM_BUFFER, (unsigned int)savedUniformBuffer);
-        gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedTextureBinding);
+        for (int unit = kPipelineUnits - 1; unit >= 0; --unit) {
+            gl.glActiveTexture(GL_TEXTURE0 + unit);
+            gl.glBindTexture(GL_TEXTURE_2D, (unsigned int)savedUnitBinding[unit]);
+        }
         gl.glActiveTexture((unsigned int)savedActiveTexture);
     };
 
@@ -873,6 +888,8 @@ void ApplySelectedEffect(void* hdc) {
         }
     }
 
+    PerfGpuMark("capture");
+
     // Scene state for this frame - see IsSceneSpaceStage() and DetectSceneCut() above.
     // worldThisFrame is only allowed to veto when a camera has ever been seen: the config editor
     // never captures one, and its loaded-frame view may not set a frustum at all.
@@ -952,6 +969,8 @@ void ApplySelectedEffect(void* hdc) {
         // choice, not merely the cheap one. The pipeline image those stages actually filter
         // arrives separately, through currentTex/colorTex, and that one IS linear.
     }
+
+    PerfGpuMark("srgb decode");
 
     for (int i = 0; i < config.stageCount; ++i) {
         EffectKind stage = config.stages[i];
@@ -1340,6 +1359,7 @@ void ApplySelectedEffect(void* hdc) {
             stage != EffectKind::MotionBlur && dstW == nativeWidth && dstH == nativeHeight) {
             ApplyHudRestore(src, dst, hudWorldTex, g_pipeline.captureTex, dstW, dstH);
         }
+        PerfGpuMark(EffectNameFor(stage));
 
         if (wrote) {
             if (doRealUpscale) {
@@ -1497,6 +1517,7 @@ void ApplySelectedEffect(void* hdc) {
     if (err != GL_NO_ERROR) {
         printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X after present\n", err);
     }
+    PerfGpuMark("present");
 
     restoreState();
 }

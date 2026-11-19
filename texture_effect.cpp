@@ -11,6 +11,7 @@
 #include "nis_effect.h"
 #include "pixel_invert.h"
 #include "cas.h"
+#include "perf_stats.h"
 
 // Same no-<windows.h> discipline as config.cpp - see the comment there.
 extern "C" __declspec(dllimport) unsigned long long __stdcall GetTickCount64(void);
@@ -166,6 +167,14 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
                                void* pixels) {
     const AnaxConfig& config = GetAnaxConfig();
 
+    // Counts every upload for debugStats; `processed` flips once this one is run through the
+    // effect, so its CPU time (dominated by the readback stall) is attributed to textureEffect.
+    struct UploadStat {
+        double start = PerfNowMs();
+        bool processed = false;
+        ~UploadStat() { PerfCountUpload(processed, processed ? PerfNowMs() - start : 0.0); }
+    } uploadStat;
+
     if (config.textureEffect == EffectKind::None) {
         realFn(target, level, internalformat, width, height, border, format, type, pixels);
         return;
@@ -230,6 +239,7 @@ void ApplyTextureEffectUpload(RealTexImage2DFn realFn, unsigned int target, int 
     }
 
     NoteProcessedUpload(width, height);
+    uploadStat.processed = true;
 
     unsigned int srcTex = MakeTexture(gl, GL_RGBA8, width, height);
     gl.glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, pixels);

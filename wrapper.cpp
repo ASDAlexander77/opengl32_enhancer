@@ -21,6 +21,7 @@
 #include "taa_jitter.h"
 #include "window_override.h"
 #include "render_target.h"
+#include "perf_stats.h"
 
 // Same-size stand-ins for the Windows/GL typedefs this file needs, defined by hand so we
 // never #include <windows.h> (it drags in <wingdi.h>, which declares these wgl*/gl*
@@ -185,6 +186,7 @@ extern "C" __declspec(dllexport) void __stdcall glBegin(GLenum mode) {
         }
     }
     ApplyAutoMipmapForDraw();
+    PerfCountDraw();
     __proc_glBegin(mode);
 }
 
@@ -1164,6 +1166,7 @@ extern "C" __declspec(dllexport) void __stdcall glDrawArrays(GLenum mode, GLint 
         }
     }
     ApplyAutoMipmapForDraw();
+    PerfCountDraw();
     __proc_glDrawArrays(mode, first, count);
 }
 
@@ -1197,6 +1200,7 @@ extern "C" __declspec(dllexport) void __stdcall glDrawElements(GLenum mode, GLsi
         }
     }
     ApplyAutoMipmapForDraw();
+    PerfCountDraw();
     __proc_glDrawElements(mode, count, type, indices);
 }
 
@@ -5905,8 +5909,10 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     InvalidateWorldFrame();
     NotifyFrameBoundary();
     ArmSupersampleForFrame(EnsureRenderTarget());
+    PerfFrameEnd(p0);
     BOOL __swapResult = __proc_wglSwapBuffers(p0);
     BindRenderTarget();
+    PerfFrameBegin();
     return __swapResult;
 }
 
