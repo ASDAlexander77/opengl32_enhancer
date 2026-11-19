@@ -9,6 +9,7 @@
 
 #include "bloom.h"
 #include "gl_loader.h"
+#include "perf_stats.h"
 
 namespace {
 
@@ -309,6 +310,7 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
     gl.glBindImageTexture(1, g_state.brightTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("bloom extract");
 
     // Pass 2: horizontal blur, brightTexture -> blurTempTexture.
     UploadConfig(gl, 1.0f);
@@ -318,6 +320,7 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
     gl.glBindImageTexture(1, g_state.blurTempTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("bloom blur h");
 
     // Pass 3: vertical blur, blurTempTexture -> blurFinalTexture.
     UploadConfig(gl, 0.0f);
@@ -327,6 +330,7 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
     gl.glBindImageTexture(1, g_state.blurFinalTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(groupsX, groupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("bloom blur v");
 
     // Pass 4: composite - srcTexture + blurFinalTexture * intensity -> dstTexture, at full
     // resolution; the blur result is sampled bilinearly, which is what upsamples it.

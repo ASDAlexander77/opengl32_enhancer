@@ -177,7 +177,7 @@ target_link_libraries(lut_grading_test opengl32 gdi32 user32)
 # pipeline (extract -> blur x2 -> composite -> blit) at intensity=0 (must reproduce the input
 # exactly, no bloom contribution) and a nonzero intensity (must run with no GL error) - see
 # bloom_test.cpp.
-add_executable(bloom_test bloom_test.cpp bloom.cpp gl_loader.cpp)
+add_executable(bloom_test bloom_test.cpp bloom.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
 target_link_libraries(bloom_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyDither()'s GPU pipeline

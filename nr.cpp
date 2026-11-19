@@ -51,8 +51,8 @@ const unsigned int GL_NO_ERROR                  = 0;
 // `intensity` on the C++ side - see ApplyNr.
 // The filter, with the combine folded into its last pass.
 //
-// Each 16x16 workgroup loads its tile plus a 2-texel border into shared memory once, with luma
-// precomputed - 400 fetches per tile instead of 25 per pixel (6400), which is what made this
+// Each 32x8 workgroup loads its tile plus a 2-texel border into shared memory once, with luma
+// precomputed - 432 fetches per tile instead of 25 per pixel (6400), which is what made this
 // stage cost ~2 ms on a 4000x3200 supersampled frame (measured with debugStats). The arithmetic
 // is unchanged, so the output is the same as the old per-pixel version. On the last pass the
 // combine (see the file comment above) runs right here on the filtered value instead of in a
@@ -60,7 +60,7 @@ const unsigned int GL_NO_ERROR                  = 0;
 // filtered colour for the next pass as before.
 const char* kFilterShaderSource =
     "#version 430\n"
-    "layout(local_size_x = 16, local_size_y = 16) in;\n"
+    "layout(local_size_x = 32, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D srcTex;\n"
     "layout(binding = 2) uniform sampler2D origTex;\n"
     "layout(rgba16f, binding = 1) uniform writeonly image2D dstImage;\n"
@@ -68,13 +68,13 @@ const char* kFilterShaderSource =
     "    vec4 params;\n"
     "    vec4 combine;\n"
     "};\n"
-    "shared vec4 tile[20 * 20];\n"
+    "shared vec4 tile[36 * 12];\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(dstImage);\n"
     "    ivec2 maxCoord = outSize - ivec2(1);\n"
-    "    ivec2 origin = ivec2(gl_WorkGroupID.xy) * 16 - ivec2(2);\n"
-    "    for (uint i = gl_LocalInvocationIndex; i < 400u; i += 256u) {\n"
-    "        ivec2 t = ivec2(int(i % 20u), int(i / 20u));\n"
+    "    ivec2 origin = ivec2(gl_WorkGroupID.xy) * ivec2(32, 8) - ivec2(2);\n"
+    "    for (uint i = gl_LocalInvocationIndex; i < 432u; i += 256u) {\n"
+    "        ivec2 t = ivec2(int(i % 36u), int(i / 36u));\n"
     "        vec3 c = texelFetch(srcTex, clamp(origin + t, ivec2(0), maxCoord), 0).rgb;\n"
     "        tile[i] = vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)));\n"
     "    }\n"
@@ -82,14 +82,14 @@ const char* kFilterShaderSource =
     "    ivec2 sp = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (sp.x >= outSize.x || sp.y >= outSize.y) { return; }\n"
     "    ivec2 lp = ivec2(gl_LocalInvocationID.xy) + ivec2(2);\n"
-    "    float centerLuma = tile[lp.y * 20 + lp.x].a;\n"
+    "    float centerLuma = tile[lp.y * 36 + lp.x].a;\n"
     "    float rangeSigma = max(params.x, 0.001);\n"
     "    float rangeDenom = 2.0 * rangeSigma * rangeSigma;\n"
     "    vec3 sum = vec3(0.0);\n"
     "    float weightSum = 0.0;\n"
     "    for (int dy = -2; dy <= 2; ++dy) {\n"
     "        for (int dx = -2; dx <= 2; ++dx) {\n"
-    "            vec4 tap = tile[(lp.y + dy) * 20 + lp.x + dx];\n"
+    "            vec4 tap = tile[(lp.y + dy) * 36 + lp.x + dx];\n"
     "            float spatialWeight = exp(-float(dx * dx + dy * dy) / 4.5);\n"
     "            float rangeDist = tap.a - centerLuma;\n"
     "            float rangeWeight = exp(-(rangeDist * rangeDist) / rangeDenom);\n"
@@ -221,10 +221,6 @@ void EnsureUbos(const GlComputeApi& gl) {
     }
 }
 
-unsigned int GroupCount(int extent) {
-    return (unsigned int)((extent + 15) / 16);
-}
-
 }  // namespace
 
 bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
@@ -272,8 +268,9 @@ bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int he
     EnsureTextures(gl, width, height);
     EnsureUbos(gl);
 
-    unsigned int groupsX = GroupCount(width);
-    unsigned int groupsY = GroupCount(height);
+    // One workgroup per 32x8 tile - 32 wide so each warp's tile loads are one contiguous row.
+    unsigned int groupsX = (unsigned int)((width + 31) / 32);
+    unsigned int groupsY = (unsigned int)((height + 7) / 8);
 
     // rangeSigma grows with `intensity`: near 0 it is small enough that only near-exact-luma
     // neighbors (or the center tap itself) get meaningful weight, so the filter is an
