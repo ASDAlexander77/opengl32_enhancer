@@ -901,7 +901,9 @@ void ApplySelectedEffect(void* hdc) {
         ResetTaaHistory();
     }
 
-    // The world-only frame and the pristine capture, for the HUD mask after scene stages.
+    // The world-only frame and the pristine capture, for the HUD mask after scene stages. The
+    // mask is rebuilt from them once this frame, on the first restore - see hud_mask.h.
+    InvalidateHudMask();
     unsigned int hudWorldTex = 0;
     int hudWorldW = 0, hudWorldH = 0;
     bool hudMaskAvailable = needCapture && g_pipeline.captureTex != 0 &&

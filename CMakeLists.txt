@@ -231,14 +231,14 @@ target_link_libraries(fog_test opengl32 gdi32 user32)
 # Creates a real GL context, renders a bright square OFF-CENTRE on black, and checks
 # ApplyLightShafts()'s detect pass finds it and the shaft pass radiates from there rather than
 # from the middle of the frame - see light_shafts_test.cpp.
-add_executable(light_shafts_test light_shafts_test.cpp light_shafts.cpp gl_loader.cpp)
+add_executable(light_shafts_test light_shafts_test.cpp light_shafts.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
 target_link_libraries(light_shafts_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a dark floor with a bright wall standing on it under a real
 # glFrustum projection, and checks ApplySsr() reflects the wall in the floor - and, the check
 # that actually matters, that raising upThreshold alone gates that same pixel back to bit-exact
 # - see ssr_test.cpp.
-add_executable(ssr_test ssr_test.cpp ssr.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp config.cpp debug_log.cpp)
+add_executable(ssr_test ssr_test.cpp ssr.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp config.cpp debug_log.cpp perf_stats.cpp)
 target_link_libraries(ssr_test opengl32 gdi32 user32)
 
 # Creates a real GL context and drives the glFrustum/glOrtho sequence a Quake II-family engine

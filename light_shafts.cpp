@@ -6,6 +6,7 @@
 
 #include "gl_loader.h"
 #include "light_shafts.h"
+#include "perf_stats.h"
 
 namespace {
 
@@ -377,6 +378,7 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     // The shaft pass reads what the detect pass just wrote, so the barrier between them is not
     // optional - without it the centroid it reads is whatever happened to have landed.
     gl.glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    PerfGpuMark("lightshafts detect");
 
     ShaftConfigData shaftData{};
     shaftData.intensity = intensity;
@@ -408,12 +410,14 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     gl.glBindImageTexture(0, g_state.brightTex, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(lowGroupsX, lowGroupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("lightshafts bright");
 
     gl.glUseProgram(g_state.marchProgram);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.brightTex);
     gl.glBindImageTexture(0, g_state.shaftTex, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     gl.glDispatchCompute(lowGroupsX, lowGroupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("lightshafts march");
 
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE1);

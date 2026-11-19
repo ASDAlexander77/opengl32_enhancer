@@ -7,6 +7,7 @@
 
 #include "ssr.h"
 #include "gl_loader.h"
+#include "perf_stats.h"
 
 namespace {
 
@@ -23,6 +24,14 @@ const unsigned int GL_FRAMEBUFFER_BARRIER_BIT   = 0x00000400;
 const unsigned int GL_UNIFORM_BUFFER            = 0x8A11;
 const unsigned int GL_DYNAMIC_DRAW              = 0x88E8;
 const unsigned int GL_NO_ERROR                  = 0;
+const unsigned int GL_RGBA32F                   = 0x8814;
+const unsigned int GL_TEXTURE2                  = 0x84C2;
+const unsigned int GL_TEXTURE_MIN_FILTER        = 0x2801;
+const unsigned int GL_TEXTURE_MAG_FILTER        = 0x2800;
+const unsigned int GL_NEAREST                   = 0x2600;
+
+// Same threshold ssao.cpp uses: above this many pixels the trace runs at half resolution.
+const long long kHalfResTraceAbovePixels = 2500000;
 
 // Every numeric constant inside the shader is spelled out as a GLSL literal rather than pasted
 // in from a C++ constant - a name that only exists on the host side compiles to nothing here and
@@ -36,11 +45,11 @@ const char* kSsrShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D colorTex;\n"
     "layout(binding = 1) uniform sampler2D depthTex;\n"
-    "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
+    "layout(rgba32f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform SsrConfigBlock {\n"
     "    vec4 frustum;\n"   // left, right, bottom, top
     "    vec4 params;\n"    // zNear, zFar, maxDistance, thickness
-    "    vec4 params2;\n"   // intensity, upThreshold, unused, unused
+    "    vec4 params2;\n"   // intensity, upThreshold, scale (trace grid step), unused
     "    vec4 upVector;\n"  // xyz = world up in view space, w = 1 when a camera was captured
     "};\n"
     "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
@@ -69,9 +78,12 @@ const char* kSsrShaderSource =
     "    return ViewPosFor(uv, LinearEyeDistance(raw, zNear, zFar), zNear);\n"
     "}\n"
     "void main() {\n"
-    "    ivec2 size = imageSize(outputImage);\n"
-    "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
-    "    if (outCoord.x >= size.x || outCoord.y >= size.y) { return; }\n"
+    "    ivec2 traceSize = imageSize(outputImage);\n"
+    "    ivec2 traceCoord = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (traceCoord.x >= traceSize.x || traceCoord.y >= traceSize.y) { return; }\n"
+    "    ivec2 size = textureSize(depthTex, 0);\n"
+    "    int scale = int(params2.z);\n"
+    "    ivec2 outCoord = min(traceCoord * scale + ivec2(scale / 2), size - ivec2(1));\n"
     "    float zNear = params.x;\n"
     "    float zFar = params.y;\n"
     "    float maxDistance = params.z;\n"
@@ -81,12 +93,11 @@ const char* kSsrShaderSource =
     // texelFetch, not texture(): every early-out below hands this value straight back, and a
     // filtered fetch would return something a hair off the source. A stage that found nothing
     // should be indistinguishable from one that never ran.
-    "    vec4 color = texelFetch(colorTex, outCoord, 0);\n"
     "    float rawDepth = texelFetch(depthTex, outCoord, 0).r;\n"
     // Nothing was drawn here (cleared depth / sky): there is no surface to reflect in, and
     // unprojecting the far plane would put the ray's origin kilometres away.
     "    if (rawDepth >= 1.0) {\n"
-    "        imageStore(outputImage, outCoord, color);\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
     "    float eyeDist = LinearEyeDistance(rawDepth, zNear, zFar);\n"
@@ -106,7 +117,7 @@ const char* kSsrShaderSource =
     // Degenerate cross product: the neighbours were collinear, or the surface is exactly
     // edge-on. There is no usable orientation, so there is nothing to decide reflectivity with.
     "    if (nLen < 1e-8) {\n"
-    "        imageStore(outputImage, outCoord, color);\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
     "    N /= nLen;\n"
@@ -124,7 +135,7 @@ const char* kSsrShaderSource =
     // reassociate, and ssr_test.cpp asserts exactly that equality.
     "    float facing = (upVector.w > 0.5) ? dot(N, upVector.xyz) : N.y;\n"
     "    if (facing <= upThreshold) {\n"
-    "        imageStore(outputImage, outCoord, color);\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
     // PLANARITY - the second half of the gate. Facing up is not enough on its own: the tops of
@@ -147,7 +158,7 @@ const char* kSsrShaderSource =
     "    }\n"
     "    float planarity = 1.0 - smoothstep(0.04, 0.15, worstOff);\n"
     "    if (planarity <= 0.0) {\n"
-    "        imageStore(outputImage, outCoord, color);\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
     "    vec3 R = reflect(normalize(P), N);\n"
@@ -180,7 +191,7 @@ const char* kSsrShaderSource =
     "        }\n"
     "    }\n"
     "    if (!hit) {\n"
-    "        imageStore(outputImage, outCoord, color);\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
     // Two fades, both hiding the same thing: that this is screen-space, not a real trace. The
@@ -191,12 +202,66 @@ const char* kSsrShaderSource =
     "    vec2 edgeOut = smoothstep(vec2(0.0), vec2(0.1), vec2(1.0) - hitUv);\n"
     "    float fade = edgeIn.x * edgeIn.y * edgeOut.x * edgeOut.y *\n"
     "                  (1.0 - travelled / maxDistance);\n"
-    "    vec3 reflected = texture(colorTex, hitUv).rgb;\n"
     // At a blend of 0 mix() returns color.rgb bit-exact, which is what makes intensity=0 an
     // exact no-op rather than a near-miss.
     "    float blend = clamp(intensity * fade * planarity, 0.0, 1.0);\n"
-    "    if (any(isnan(reflected)) || any(isinf(reflected))) { blend = 0.0; reflected = color.rgb; }\n"
-    "    imageStore(outputImage, outCoord, vec4(mix(color.rgb, reflected, blend), color.a));\n"
+    "    imageStore(outputImage, traceCoord, vec4(hitUv - uv, blend, 0.0));\n"
+    "}\n";
+
+// The reflection is applied here, per full-resolution pixel, from the trace the pass above
+// wrote. On large targets the trace runs on a grid `scale` texels apart - it costs the same per
+// texel at any size, and on a 4000x3200 supersampled frame a full-resolution trace was ~2 ms
+// for what the downsample to the window cannot show anyway (measured with debugStats). The
+// trace stores where the ray landed RELATIVE to its texel, so each pixel adds that offset to
+// its own position: for the planar floors this stage reflects, that keeps the reflected image
+// at full resolution instead of blocky. A pixel whose depth disagrees with the traced texel's
+// (a wall pixel beside a floor texel) is left alone rather than handed the floor's
+// reflection. At scale 1 this is exactly the old single pass.
+const char* kSsrCompositeShaderSource =
+    "#version 430\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(binding = 0) uniform sampler2D colorTex;\n"
+    "layout(binding = 1) uniform sampler2D depthTex;\n"
+    "layout(binding = 2) uniform sampler2D traceTex;\n"
+    "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
+    "layout(std140, binding = 0) uniform SsrConfigBlock {\n"
+    "    vec4 frustum;\n"
+    "    vec4 params;\n"
+    "    vec4 params2;\n"
+    "    vec4 upVector;\n"
+    "};\n"
+    "float LinearEyeDistance(float rawDepth, float zNear, float zFar) {\n"
+    "    float ndc = rawDepth * 2.0 - 1.0;\n"
+    "    return (2.0 * zNear * zFar) / (zFar + zNear - ndc * (zFar - zNear));\n"
+    "}\n"
+    "void main() {\n"
+    "    ivec2 size = imageSize(outputImage);\n"
+    "    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (p.x >= size.x || p.y >= size.y) { return; }\n"
+    "    vec4 color = texelFetch(colorTex, p, 0);\n"
+    "    int scale = int(params2.z);\n"
+    "    ivec2 t = min(p / scale, textureSize(traceTex, 0) - ivec2(1));\n"
+    "    vec4 trace = texelFetch(traceTex, t, 0);\n"
+    "    float blend = trace.z;\n"
+    "    if (blend <= 0.0) {\n"
+    "        imageStore(outputImage, p, color);\n"
+    "        return;\n"
+    "    }\n"
+    "    if (scale > 1) {\n"
+    "        ivec2 c = min(t * scale + ivec2(scale / 2), size - ivec2(1));\n"
+    "        float zNear = params.x;\n"
+    "        float zFar = params.y;\n"
+    "        float dp = LinearEyeDistance(texelFetch(depthTex, p, 0).r, zNear, zFar);\n"
+    "        float dc = LinearEyeDistance(texelFetch(depthTex, c, 0).r, zNear, zFar);\n"
+    "        if (abs(dp - dc) > 0.02 * dc) {\n"
+    "            imageStore(outputImage, p, color);\n"
+    "            return;\n"
+    "        }\n"
+    "    }\n"
+    "    vec2 uv = (vec2(p) + vec2(0.5)) / vec2(size);\n"
+    "    vec3 reflected = texture(colorTex, uv + trace.xy).rgb;\n"
+    "    if (any(isnan(reflected)) || any(isinf(reflected))) { reflected = color.rgb; blend = 0.0; }\n"
+    "    imageStore(outputImage, p, vec4(mix(color.rgb, reflected, blend), color.a));\n"
     "}\n";
 
 struct SsrConfigData {
@@ -212,14 +277,18 @@ struct PipelineState {
     // The GL context these cached objects belong to - see GetGlContextGeneration().
     unsigned int generation = 0;
     unsigned int program = 0;
+    unsigned int compositeProgram = 0;
     unsigned int configUbo = 0;
+    unsigned int traceTex = 0;
+    int traceWidth = 0;
+    int traceHeight = 0;
 };
 
 PipelineState g_state;
 
-bool CompileAndLink(const GlComputeApi& gl, unsigned int& outProgram) {
+bool CompileAndLink(const GlComputeApi& gl, const char* source, unsigned int& outProgram) {
     unsigned int shader = gl.glCreateShader(GL_COMPUTE_SHADER);
-    gl.glShaderSource(shader, 1, &kSsrShaderSource, nullptr);
+    gl.glShaderSource(shader, 1, &source, nullptr);
     gl.glCompileShader(shader);
 
     int compiled = 0;
@@ -326,7 +395,8 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
 
     if (!g_state.initTried) {
         g_state.initTried = true;
-        g_state.initOk = CompileAndLink(gl, g_state.program);
+        g_state.initOk = CompileAndLink(gl, kSsrShaderSource, g_state.program) &&
+                         CompileAndLink(gl, kSsrCompositeShaderSource, g_state.compositeProgram);
         if (!g_state.initOk) {
             printf("[opengl32_enh_cpp] ssr: shader init failed, effect disabled until the GL "
                    "context changes\n");
@@ -352,6 +422,8 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     configData.params[3] = thickness;
     configData.params2[0] = intensity;
     configData.params2[1] = upThreshold;
+    int scale = ((long long)width * height > kHalfResTraceAbovePixels) ? 2 : 1;
+    configData.params2[2] = (float)scale;
     if (viewSpaceWorldUp != nullptr) {
         configData.upVector[0] = viewSpaceWorldUp[0];
         configData.upVector[1] = viewSpaceWorldUp[1];
@@ -363,15 +435,38 @@ bool ApplySsr(unsigned int srcTexture, unsigned int dstTexture, unsigned int dep
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(SsrConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
 
+    int traceWidth = (width + scale - 1) / scale;
+    int traceHeight = (height + scale - 1) / scale;
+    if (g_state.traceWidth != traceWidth || g_state.traceHeight != traceHeight) {
+        if (g_state.traceTex != 0) {
+            gl.glDeleteTextures(1, &g_state.traceTex);
+        }
+        gl.glGenTextures(1, &g_state.traceTex);
+        gl.glBindTexture(GL_TEXTURE_2D, g_state.traceTex);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA32F, traceWidth, traceHeight);
+        g_state.traceWidth = traceWidth;
+        g_state.traceHeight = traceHeight;
+    }
+
     gl.glUseProgram(g_state.program);
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
+    gl.glBindImageTexture(0, g_state.traceTex, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    gl.glDispatchCompute((unsigned int)((traceWidth + 7) / 8),
+                         (unsigned int)((traceHeight + 7) / 8), 1);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    PerfGpuMark("ssr trace");
+
+    gl.glUseProgram(g_state.compositeProgram);
+    gl.glActiveTexture(GL_TEXTURE2);
+    gl.glBindTexture(GL_TEXTURE_2D, g_state.traceTex);
+    gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    unsigned int groupsX = (unsigned int)((width + 7) / 8);
-    unsigned int groupsY = (unsigned int)((height + 7) / 8);
-    gl.glDispatchCompute(groupsX, groupsY, 1);
+    gl.glDispatchCompute((unsigned int)((width + 7) / 8), (unsigned int)((height + 7) / 8), 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
 
     unsigned int err = gl.glGetError();

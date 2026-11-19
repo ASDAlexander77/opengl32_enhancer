@@ -17,5 +17,10 @@
 // `stageOutput` is modified in place (image load/store). `stageInput` is what the stage read.
 // All four textures must be width x height. Returns false, leaving stageOutput as the stage
 // wrote it, when GL 4.3 compute is unavailable or the shader failed to build.
+// The mask is computed once per frame and reused by every ApplyHudRestore that frame. Call this
+// once at the start of each frame's pipeline, before the first restore: a mask built from the
+// previous frame's capture must not be reused even when the texture names are unchanged.
+void InvalidateHudMask();
+
 bool ApplyHudRestore(unsigned int stageInput, unsigned int stageOutput, unsigned int worldTex,
                      unsigned int captureTex, int width, int height);
