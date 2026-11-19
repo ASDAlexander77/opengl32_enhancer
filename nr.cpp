@@ -65,10 +65,17 @@ const char* kFilterShaderSource =
     "layout(binding = 2) uniform sampler2D origTex;\n"
     "layout(rgba16f, binding = 1) uniform writeonly image2D dstImage;\n"
     "layout(std140, binding = 0) uniform NrFilterConfigBlock {\n"
-    "    vec4 params;\n"
+    "    vec4 params;\n"     // .x = rangeSigma, .y = 1 on the fused final pass, .z/.w = decode src/orig
     "    vec4 combine;\n"
     "};\n"
     "shared vec4 tile[36 * 12];\n"
+    "vec3 Decode(vec3 s) {\n"
+    "    if (any(isnan(s)) || any(isinf(s))) { s = vec3(0.0); }\n"
+    "    s = max(s, vec3(0.0));\n"
+    "    vec3 lo = s / 12.92;\n"
+    "    vec3 hi = pow((s + 0.055) / 1.055, vec3(2.4));\n"
+    "    return mix(hi, lo, lessThanEqual(s, vec3(0.04045)));\n"
+    "}\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(dstImage);\n"
     "    ivec2 maxCoord = outSize - ivec2(1);\n"
@@ -76,6 +83,7 @@ const char* kFilterShaderSource =
     "    for (uint i = gl_LocalInvocationIndex; i < 432u; i += 256u) {\n"
     "        ivec2 t = ivec2(int(i % 36u), int(i / 36u));\n"
     "        vec3 c = texelFetch(srcTex, clamp(origin + t, ivec2(0), maxCoord), 0).rgb;\n"
+    "        if (params.z > 0.5) { c = Decode(c); }\n"
     "        tile[i] = vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)));\n"
     "    }\n"
     "    barrier();\n"
@@ -104,6 +112,7 @@ const char* kFilterShaderSource =
     "        return;\n"
     "    }\n"
     "    vec4 orig = texelFetch(origTex, sp, 0);\n"
+    "    if (params.w > 0.5) { orig.rgb = Decode(orig.rgb); }\n"
     "    vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);\n"
     "    float lumaOrig = dot(orig.rgb, lumaWeights);\n"
     "    float lumaFilt = dot(filtered, lumaWeights);\n"
@@ -123,7 +132,8 @@ const char* kFilterShaderSource =
 struct NrFilterConfigData {
     float rangeSigma;
     float isFinalPass;
-    float pad[2];
+    float decodeSource;     // this pass's srcTex is sRGB-encoded (first pass, decodeSrgbFirst)
+    float decodeOriginal;   // origTex is sRGB-encoded (decodeSrgbFirst)
     float colorStrength;
     float tonePreservation;
     float grainPreservation;
@@ -225,7 +235,7 @@ void EnsureUbos(const GlComputeApi& gl) {
 
 bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
              float intensity, int passes, float colorStrength, float tonePreservation,
-             float grainPreservation) {
+             float grainPreservation, bool decodeSrgbFirst) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -296,6 +306,8 @@ bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int he
     for (int i = 0; i < passes; ++i) {
         bool last = (i == passes - 1);
         filterData.isFinalPass = last ? 1.0f : 0.0f;
+        filterData.decodeSource = (decodeSrgbFirst && i == 0) ? 1.0f : 0.0f;
+        filterData.decodeOriginal = decodeSrgbFirst ? 1.0f : 0.0f;
         gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.filterUbo);
         gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NrFilterConfigData), &filterData, GL_DYNAMIC_DRAW);
         gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.filterUbo);

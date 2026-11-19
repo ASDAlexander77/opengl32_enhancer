@@ -41,6 +41,11 @@
 // Returns true if dstTexture was actually written (the caller must only treat dstTexture as
 // the pipeline's new source when this returns true); returns false if GL 4.3 compute support
 // is unavailable or shader init failed.
+// decodeSrgbFirst: srcTexture is sRGB-ENCODED (the game's frame, before the srgbCorrect bracket
+// has opened), and the filter decodes it to linear light as it loads its tile - the exact
+// srgb_convert.h decode, guard included - so the output is linear, the same as decode-then-nr.
+// post_effects.cpp uses it when nr is the first stage, which spares the separate full-frame
+// decode pass (~0.4 ms on a 4000x3200 frame, measured with debugStats).
 bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int height,
              float intensity, int passes, float colorStrength, float tonePreservation,
-             float grainPreservation);
+             float grainPreservation, bool decodeSrgbFirst = false);

@@ -943,7 +943,10 @@ void ApplySelectedEffect(void* hdc) {
     // cur/curWidth/curHeight are what it advances and they do not exist any earlier; nothing
     // between the capture and this point touches colour.
     ColorSpace space = ColorSpace::Display;
-    if (config.srgbCorrect) {
+    // ...unless the first stage is nr, which decodes as it loads its tile - see nr.h. The
+    // conversion check inside the loop below hands it the encoded frame instead.
+    bool firstStageDecodes = config.stageCount > 0 && config.stages[0] == EffectKind::Nr;
+    if (config.srgbCorrect && !firstStageDecodes) {
         if (ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)) {
             cur = 1 - cur;
             space = ColorSpace::Linear;
@@ -1070,7 +1073,10 @@ void ApplySelectedEffect(void* hdc) {
         // Dither can do the sRGB encode itself, in the same pass - see dither.h.
         bool ditherEncodes = config.srgbCorrect && stage == EffectKind::Dither &&
                              space == ColorSpace::Linear;
-        if (config.srgbCorrect && ColorSpaceFor(stage) != space && !ditherEncodes) {
+        // nr can do the opening decode itself, likewise - see nr.h.
+        bool nrDecodes = config.srgbCorrect && stage == EffectKind::Nr &&
+                         space == ColorSpace::Display;
+        if (config.srgbCorrect && ColorSpaceFor(stage) != space && !ditherEncodes && !nrDecodes) {
             bool converted = (space == ColorSpace::Display)
                                  ? ApplySrgbDecode(pair[cur], pair[1 - cur], curWidth, curHeight)
                                  : ApplySrgbEncode(pair[cur], pair[1 - cur], curWidth, curHeight);
@@ -1241,7 +1247,10 @@ void ApplySelectedEffect(void* hdc) {
             case EffectKind::Nr:
                 wrote = ApplyNr(src, dst, dstW, dstH, config.nrIntensity, config.nrPasses,
                                  config.nrColorStrength, config.nrTonePreservation,
-                                 config.nrGrainPreservation);
+                                 config.nrGrainPreservation, nrDecodes);
+                if (wrote && nrDecodes) {
+                    space = ColorSpace::Linear;
+                }
                 break;
             case EffectKind::LocalContrast:
                 wrote = ApplyLocalContrast(src, dst, dstW, dstH, config.localStructureStrength,
