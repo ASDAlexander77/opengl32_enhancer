@@ -1092,6 +1092,9 @@ void ApplySelectedEffect(void* hdc) {
         }
 
         bool wrote = false;
+        // Set by a scene stage that already left HUD pixels untouched in its own pass, so the
+        // separate restore below is not run on top of it.
+        bool hudRestoredByStage = false;
         switch (stage) {
             case EffectKind::None:
                 break;
@@ -1234,11 +1237,19 @@ void ApplySelectedEffect(void* hdc) {
                 wrote = ApplyLocalContrast(src, dst, dstW, dstH, config.localStructureStrength,
                                             config.localToneStrength);
                 break;
-            case EffectKind::DepthVignette:
+            case EffectKind::DepthVignette: {
+                // Restores the HUD itself, in its own pass - see depth_vignette.h.
+                unsigned int dvMask = 0;
+                if (hudMaskAvailable && atNativeRes && dstW == nativeWidth &&
+                    dstH == nativeHeight) {
+                    dvMask = GetHudMaskTexture(hudWorldTex, g_pipeline.captureTex, dstW, dstH);
+                }
                 wrote = depthCaptured && ApplyDepthVignette(src, dst, g_pipeline.depthTex, dstW, dstH,
                                                               config.depthVignetteIntensity,
-                                                              config.depthVignetteThreshold);
+                                                              config.depthVignetteThreshold, dvMask);
+                hudRestoredByStage = wrote && dvMask != 0;
                 break;
+            }
             case EffectKind::LightShafts:
                 // No depth and no projection: the light is found in the colour buffer itself,
                 // so this is the one late-era stage with no scene-geometry prerequisites.
@@ -1363,8 +1374,9 @@ void ApplySelectedEffect(void* hdc) {
         // Undo the stage's change wherever the game drew HUD over the world - see hud_mask.h.
         // motionblur already skips HUD pixels itself. Only at native resolution, which is the
         // only resolution the world-only frame and the pristine capture exist at.
-        if (wrote && hudMaskAvailable && atNativeRes && IsSceneSpaceStage(stage) &&
-            stage != EffectKind::MotionBlur && dstW == nativeWidth && dstH == nativeHeight) {
+        if (wrote && !hudRestoredByStage && hudMaskAvailable && atNativeRes &&
+            IsSceneSpaceStage(stage) && stage != EffectKind::MotionBlur &&
+            dstW == nativeWidth && dstH == nativeHeight) {
             ApplyHudRestore(src, dst, hudWorldTex, g_pipeline.captureTex, dstW, dstH);
         }
         PerfGpuMark(EffectNameFor(stage));

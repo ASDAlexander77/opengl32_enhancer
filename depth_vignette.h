@@ -27,5 +27,10 @@
 // pipeline's new source when this returns true); returns false if GL 4.3 compute support is
 // unavailable, shader init failed, or the caller could not supply a valid depthTexture this
 // frame (e.g. the default framebuffer has no depth attachment).
+//
+// hudMaskTexture: this frame's HUD mask (hud_mask.h's GetHudMaskTexture), or 0. When given, HUD
+// pixels are written through unchanged in this same pass - exactly what the separate
+// ApplyHudRestore pass would have done afterwards, without its extra full-frame dispatch.
 bool ApplyDepthVignette(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
-                         int width, int height, float intensity, float threshold);
+                         int width, int height, float intensity, float threshold,
+                         unsigned int hudMaskTexture = 0);

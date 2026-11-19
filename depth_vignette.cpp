@@ -33,10 +33,12 @@ const char* kDepthVignetteShaderSource =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D inputTex;\n"
     "layout(binding = 1) uniform sampler2D depthTex;\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "layout(rgba16f, binding = 0) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform DepthVignetteConfigBlock {\n"
     "    float intensity;\n"
     "    float threshold;\n"
+    "    float useHudMask;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outputImage);\n"
@@ -44,6 +46,10 @@ const char* kDepthVignetteShaderSource =
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
     "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
     "    vec4 color = texture(inputTex, uv);\n"
+    "    if (useHudMask > 0.5 && texelFetch(hudMask, outCoord, 0).r > 0.5) {\n"
+    "        imageStore(outputImage, outCoord, color);\n"
+    "        return;\n"
+    "    }\n"
     "    float depth = texture(depthTex, uv).r;\n"
     // smoothstep is 0 below `threshold` (nearby geometry left bit-exact) and ramps to 1 at
     // depth=1.0 (the far plane). At intensity=0 the scale is always exactly 1.0, making
@@ -56,7 +62,8 @@ const char* kDepthVignetteShaderSource =
 struct DepthVignetteConfigData {
     float intensity;
     float threshold;
-    float pad[2];
+    float useHudMask;
+    float pad[1];
 };
 
 struct PipelineState {
@@ -118,7 +125,8 @@ void EnsureUbo(const GlComputeApi& gl) {
 }  // namespace
 
 bool ApplyDepthVignette(unsigned int srcTexture, unsigned int dstTexture, unsigned int depthTexture,
-                         int width, int height, float intensity, float threshold) {
+                         int width, int height, float intensity, float threshold,
+                         unsigned int hudMaskTexture) {
     const GlComputeApi& gl = GetGlComputeApi();
     if (!gl.loaded) {
         static bool warned = false;
@@ -162,6 +170,7 @@ bool ApplyDepthVignette(unsigned int srcTexture, unsigned int dstTexture, unsign
 
     DepthVignetteConfigData configData{};
     configData.intensity = intensity;
+    configData.useHudMask = hudMaskTexture != 0 ? 1.0f : 0.0f;
     // smoothstep()'s result is undefined when edge0 >= edge1, so keep threshold strictly below
     // the 1.0 far-plane edge even if the caller passes exactly 1.0 (the config clamp's upper
     // bound, which would otherwise be a legal value that produces garbage).
@@ -175,6 +184,10 @@ bool ApplyDepthVignette(unsigned int srcTexture, unsigned int dstTexture, unsign
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, depthTexture);
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE1 + 1);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
     unsigned int groupsX = (unsigned int)((width + 7) / 8);
     unsigned int groupsY = (unsigned int)((height + 7) / 8);
