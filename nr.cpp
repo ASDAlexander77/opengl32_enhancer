@@ -1,5 +1,5 @@
-// See nr.h. Two compute programs: a 5x5 bilateral filter (dispatched `passes` times in a row,
-// ping-ponging between two owned work textures) and a combine pass.
+// See nr.h. One compute program: a 5x5 bilateral filter, dispatched `passes` times in a row
+// (ping-ponging between two owned work textures), whose last pass also does the combine.
 //
 // The combine pass is why this isn't just "run a bilateral filter and call it done": a plain
 // bilateral filter smooths luma and chroma by the same amount, but chroma (color) noise reads
@@ -49,85 +49,86 @@ const unsigned int GL_NO_ERROR                  = 0;
 // FSR's 12-tap EASU or NIS's much larger neighborhood) times a range weight from the luma
 // difference between the center texel and each tap. params.x (rangeSigma) is derived from
 // `intensity` on the C++ side - see ApplyNr.
+// The filter, with the combine folded into its last pass.
+//
+// Each 16x16 workgroup loads its tile plus a 2-texel border into shared memory once, with luma
+// precomputed - 400 fetches per tile instead of 25 per pixel (6400), which is what made this
+// stage cost ~2 ms on a 4000x3200 supersampled frame (measured with debugStats). The arithmetic
+// is unchanged, so the output is the same as the old per-pixel version. On the last pass the
+// combine (see the file comment above) runs right here on the filtered value instead of in a
+// separate dispatch, saving a full-frame write and read; with params.y = 0 the pass stores the
+// filtered colour for the next pass as before.
 const char* kFilterShaderSource =
     "#version 430\n"
-    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(local_size_x = 16, local_size_y = 16) in;\n"
     "layout(binding = 0) uniform sampler2D srcTex;\n"
+    "layout(binding = 2) uniform sampler2D origTex;\n"
     "layout(rgba16f, binding = 1) uniform writeonly image2D dstImage;\n"
     "layout(std140, binding = 0) uniform NrFilterConfigBlock {\n"
-    "    vec4 params;\n"   // .x = rangeSigma, .yzw unused (std140 padding)
+    "    vec4 params;\n"
+    "    vec4 combine;\n"
     "};\n"
-    "vec3 nrLoadRgb(ivec2 p, ivec2 maxCoord) {\n"
-    "    return texelFetch(srcTex, clamp(p, ivec2(0), maxCoord), 0).rgb;\n"
-    "}\n"
+    "shared vec4 tile[20 * 20];\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(dstImage);\n"
+    "    ivec2 maxCoord = outSize - ivec2(1);\n"
+    "    ivec2 origin = ivec2(gl_WorkGroupID.xy) * 16 - ivec2(2);\n"
+    "    for (uint i = gl_LocalInvocationIndex; i < 400u; i += 256u) {\n"
+    "        ivec2 t = ivec2(int(i % 20u), int(i / 20u));\n"
+    "        vec3 c = texelFetch(srcTex, clamp(origin + t, ivec2(0), maxCoord), 0).rgb;\n"
+    "        tile[i] = vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)));\n"
+    "    }\n"
+    "    barrier();\n"
     "    ivec2 sp = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (sp.x >= outSize.x || sp.y >= outSize.y) { return; }\n"
-    "    ivec2 maxCoord = outSize - ivec2(1);\n"
-    "    vec4 center = texelFetch(srcTex, clamp(sp, ivec2(0), maxCoord), 0);\n"
-    "    float centerLuma = dot(center.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
+    "    ivec2 lp = ivec2(gl_LocalInvocationID.xy) + ivec2(2);\n"
+    "    float centerLuma = tile[lp.y * 20 + lp.x].a;\n"
     "    float rangeSigma = max(params.x, 0.001);\n"
     "    float rangeDenom = 2.0 * rangeSigma * rangeSigma;\n"
     "    vec3 sum = vec3(0.0);\n"
     "    float weightSum = 0.0;\n"
     "    for (int dy = -2; dy <= 2; ++dy) {\n"
     "        for (int dx = -2; dx <= 2; ++dx) {\n"
-    "            vec3 tapColor = nrLoadRgb(sp + ivec2(dx, dy), maxCoord);\n"
-    "            float tapLuma = dot(tapColor, vec3(0.2126, 0.7152, 0.0722));\n"
+    "            vec4 tap = tile[(lp.y + dy) * 20 + lp.x + dx];\n"
     "            float spatialWeight = exp(-float(dx * dx + dy * dy) / 4.5);\n"
-    "            float rangeDist = tapLuma - centerLuma;\n"
+    "            float rangeDist = tap.a - centerLuma;\n"
     "            float rangeWeight = exp(-(rangeDist * rangeDist) / rangeDenom);\n"
     "            float w = spatialWeight * rangeWeight;\n"
-    "            sum += tapColor * w;\n"
+    "            sum += tap.rgb * w;\n"
     "            weightSum += w;\n"
     "        }\n"
     "    }\n"
     "    vec3 filtered = sum / max(weightSum, 0.0001);\n"
-    "    imageStore(dstImage, sp, vec4(filtered, center.a));\n"
-    "}\n";
-
-const char* kCombineShaderSource =
-    "#version 430\n"
-    "layout(local_size_x = 8, local_size_y = 8) in;\n"
-    "layout(binding = 0) uniform sampler2D origTex;\n"
-    "layout(binding = 1) uniform sampler2D filteredTex;\n"
-    "layout(rgba16f, binding = 2) uniform writeonly image2D outputImage;\n"
-    "layout(std140, binding = 0) uniform NrCombineConfigBlock {\n"
-    "    vec4 params;\n"  // .x = colorStrength, .y = tonePreservation, .z = grainPreservation
-    "};\n"
-    "void main() {\n"
-    "    ivec2 outSize = imageSize(outputImage);\n"
-    "    ivec2 sp = ivec2(gl_GlobalInvocationID.xy);\n"
-    "    if (sp.x >= outSize.x || sp.y >= outSize.y) { return; }\n"
+    "    float alpha = texelFetch(srcTex, sp, 0).a;\n"
+    "    if (params.y < 0.5) {\n"
+    "        imageStore(dstImage, sp, vec4(filtered, alpha));\n"
+    "        return;\n"
+    "    }\n"
     "    vec4 orig = texelFetch(origTex, sp, 0);\n"
-    "    vec4 filtered = texelFetch(filteredTex, sp, 0);\n"
     "    vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);\n"
     "    float lumaOrig = dot(orig.rgb, lumaWeights);\n"
-    "    float lumaFilt = dot(filtered.rgb, lumaWeights);\n"
+    "    float lumaFilt = dot(filtered, lumaWeights);\n"
     "    vec3 chromaOrig = orig.rgb - lumaOrig;\n"
-    "    vec3 chromaFilt = filtered.rgb - lumaFilt;\n"
-    "    float colorStrength = clamp(params.x, 0.0, 1.0);\n"
-    "    float tonePreservation = clamp(params.y, 0.0, 1.0);\n"
-    "    float grainPreservation = clamp(params.z, 0.0, 1.0);\n"
+    "    vec3 chromaFilt = filtered - lumaFilt;\n"
+    "    float colorStrength = clamp(combine.x, 0.0, 1.0);\n"
+    "    float tonePreservation = clamp(combine.y, 0.0, 1.0);\n"
+    "    float grainPreservation = clamp(combine.z, 0.0, 1.0);\n"
     "    float newLuma = mix(lumaOrig, lumaFilt, 1.0 - tonePreservation);\n"
     "    vec3 newChroma = mix(chromaOrig, chromaFilt, colorStrength);\n"
     "    float residual = lumaOrig - lumaFilt;\n"
     "    newLuma += residual * grainPreservation;\n"
     "    vec3 result = vec3(newLuma) + newChroma;\n"
-    "    imageStore(outputImage, sp, vec4(clamp(result, 0.0, 1.0), orig.a));\n"
+    "    imageStore(dstImage, sp, vec4(clamp(result, 0.0, 1.0), orig.a));\n"
     "}\n";
 
 struct NrFilterConfigData {
     float rangeSigma;
-    float pad[3];
-};
-
-struct NrCombineConfigData {
+    float isFinalPass;
+    float pad[2];
     float colorStrength;
     float tonePreservation;
     float grainPreservation;
-    float pad;
+    float pad2;
 };
 
 struct PipelineState {
@@ -136,15 +137,12 @@ struct PipelineState {
     // The GL context these cached objects belong to - see GetGlContextGeneration().
     unsigned int generation = 0;
     unsigned int filterProgram = 0;
-    unsigned int combineProgram = 0;
     unsigned int filterUbo = 0;
-    unsigned int combineUbo = 0;
 
     bool texturesValid = false;
     int width = 0;
     int height = 0;
-    // Ping-pong pair the filter pass iterates over; whichever one holds the last pass's output
-    // is read by the combine pass alongside the untouched srcTexture.
+    // Ping-pong pair for the passes before the last; the last pass writes dstTexture directly.
     unsigned int filterTex[2] = {0, 0};
 };
 
@@ -222,15 +220,10 @@ void EnsureUbos(const GlComputeApi& gl) {
         gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.filterUbo);
         gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NrFilterConfigData), nullptr, GL_DYNAMIC_DRAW);
     }
-    if (g_state.combineUbo == 0) {
-        gl.glGenBuffers(1, &g_state.combineUbo);
-        gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.combineUbo);
-        gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NrCombineConfigData), nullptr, GL_DYNAMIC_DRAW);
-    }
 }
 
 unsigned int GroupCount(int extent) {
-    return (unsigned int)((extent + 7) / 8);
+    return (unsigned int)((extent + 15) / 16);
 }
 
 }  // namespace
@@ -261,7 +254,6 @@ bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int he
         g_state.initTried = true;
         bool ok = true;
         ok &= CompileAndLink(gl, kFilterShaderSource, "filter", g_state.filterProgram);
-        ok &= CompileAndLink(gl, kCombineShaderSource, "combine", g_state.combineProgram);
         g_state.initOk = ok;
         if (!g_state.initOk) {
             printf("[opengl32_enh_cpp] nr: shader init failed, effect disabled until the GL "
@@ -294,11 +286,20 @@ bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int he
     NrFilterConfigData filterData{};
     filterData.rangeSigma = 0.001f + clampedIntensity * 0.35f;
 
+    filterData.colorStrength = colorStrength;
+    filterData.tonePreservation = tonePreservation;
+    filterData.grainPreservation = grainPreservation;
+
     // Pass loop: filter reads srcTexture on the first iteration, then its own previous output.
-    // filterTex ping-pongs so a pass never reads and writes the same texture.
+    // filterTex ping-pongs so a pass never reads and writes the same texture. The last pass
+    // also combines with the original (srcTexture, unit 2) and writes dstTexture directly.
+    gl.glActiveTexture(GL_TEXTURE0 + 2);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     unsigned int readTex = srcTexture;
     int writeSlot = 0;
     for (int i = 0; i < passes; ++i) {
+        bool last = (i == passes - 1);
+        filterData.isFinalPass = last ? 1.0f : 0.0f;
         gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.filterUbo);
         gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NrFilterConfigData), &filterData, GL_DYNAMIC_DRAW);
         gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.filterUbo);
@@ -306,31 +307,15 @@ bool ApplyNr(unsigned int srcTexture, unsigned int dstTexture, int width, int he
         gl.glUseProgram(g_state.filterProgram);
         gl.glActiveTexture(GL_TEXTURE0);
         gl.glBindTexture(GL_TEXTURE_2D, readTex);
-        gl.glBindImageTexture(1, g_state.filterTex[writeSlot], 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        unsigned int target = last ? dstTexture : g_state.filterTex[writeSlot];
+        gl.glBindImageTexture(1, target, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
         gl.glDispatchCompute(groupsX, groupsY, 1);
-        gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+        gl.glMemoryBarrier(last ? (GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT)
+                                : GL_TEXTURE_FETCH_BARRIER_BIT);
 
         readTex = g_state.filterTex[writeSlot];
         writeSlot = 1 - writeSlot;
     }
-
-    // Combine: srcTexture (original) + the last pass's output -> dstTexture.
-    NrCombineConfigData combineData{};
-    combineData.colorStrength = colorStrength;
-    combineData.tonePreservation = tonePreservation;
-    combineData.grainPreservation = grainPreservation;
-    gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.combineUbo);
-    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(NrCombineConfigData), &combineData, GL_DYNAMIC_DRAW);
-    gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.combineUbo);
-
-    gl.glUseProgram(g_state.combineProgram);
-    gl.glActiveTexture(GL_TEXTURE0);
-    gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
-    gl.glActiveTexture(GL_TEXTURE0 + 1);
-    gl.glBindTexture(GL_TEXTURE_2D, readTex);
-    gl.glBindImageTexture(2, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    gl.glDispatchCompute(groupsX, groupsY, 1);
-    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
     gl.glActiveTexture(GL_TEXTURE0);
 
     unsigned int err = gl.glGetError();

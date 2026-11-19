@@ -43,25 +43,33 @@ const char* kExtractShaderSource =
     "layout(rgba16f, binding = 1) uniform writeonly image2D brightImage;\n"
     "layout(std140, binding = 0) uniform BloomConfigBlock {\n"
     "    float value;\n"
+    "    float scale;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(brightImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
     "    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) { return; }\n"
-    "    vec2 uv = (vec2(outCoord) + vec2(0.5)) / vec2(outSize);\n"
-    "    vec3 c = texture(inputTex, uv).rgb;\n"
+    "    ivec2 inSize = textureSize(inputTex, 0);\n"
+    "    int k = int(scale);\n"
+    "    vec3 acc = vec3(0.0);\n"
+    "    for (int j = 0; j < k; ++j) {\n"
+    "        for (int i = 0; i < k; ++i) {\n"
+    "            vec3 c = texelFetch(inputTex, min(outCoord * k + ivec2(i, j), inSize - ivec2(1)), 0).rgb;\n"
     // The bright pass is the one place a bad texel gets AMPLIFIED: whatever passes it is
     // smeared over the blur's whole footprint and added back. A NaN (from any earlier stage, or
     // a float render target the game over-blended into) became a black blot the size of the
     // kernel, and a huge HDR value a blown-out square - both of which showed up exactly on the
     // frames around a level reload, where the game draws its loading plaque with extreme
     // blending. Non-finite texels contribute nothing and the rest are capped.
-    "    if (any(isnan(c)) || any(isinf(c))) { c = vec3(0.0); }\n"
-    "    c = clamp(c, vec3(0.0), vec3(8.0));\n"
-    "    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    float knee = 0.2;\n"
-    "    float contribution = smoothstep(value - knee, value + knee, luma);\n"
-    "    imageStore(brightImage, outCoord, vec4(c * contribution, 1.0));\n"
+    "            if (any(isnan(c)) || any(isinf(c))) { c = vec3(0.0); }\n"
+    "            c = clamp(c, vec3(0.0), vec3(8.0));\n"
+    "            float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
+    "            float knee = 0.2;\n"
+    "            float contribution = smoothstep(value - knee, value + knee, luma);\n"
+    "            acc += c * contribution;\n"
+    "        }\n"
+    "    }\n"
+    "    imageStore(brightImage, outCoord, vec4(acc / float(k * k), 1.0));\n"
     "}\n";
 
 // Standard normalized 9-tap Gaussian weights (w0 + 2*(w1+w2+w3+w4) == 1.0). `value` doubles
@@ -74,6 +82,7 @@ const char* kBlurShaderSource =
     "layout(rgba16f, binding = 1) uniform writeonly image2D dstImage;\n"
     "layout(std140, binding = 0) uniform BloomConfigBlock {\n"
     "    float value;\n"
+    "    float scale;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(dstImage);\n"
@@ -85,7 +94,7 @@ const char* kBlurShaderSource =
     "    float w[5] = float[](0.2270270270, 0.1945945946, 0.1216216216, 0.0540540541, 0.0162162162);\n"
     "    vec3 sum = texture(srcTex, uv).rgb * w[0];\n"
     "    for (int i = 1; i < 5; ++i) {\n"
-    "        vec2 offset = dir * texelSize * float(i);\n"
+    "        vec2 offset = dir * texelSize * (float(i) / scale);\n"
     "        sum += texture(srcTex, uv + offset).rgb * w[i];\n"
     "        sum += texture(srcTex, uv - offset).rgb * w[i];\n"
     "    }\n"
@@ -100,6 +109,7 @@ const char* kCompositeShaderSource =
     "layout(rgba16f, binding = 2) uniform writeonly image2D outputImage;\n"
     "layout(std140, binding = 0) uniform BloomConfigBlock {\n"
     "    float value;\n"
+    "    float scale;\n"
     "};\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(outputImage);\n"
@@ -116,7 +126,8 @@ const char* kCompositeShaderSource =
 
 struct BloomConfigData {
     float value;
-    float pad[3];
+    float scale;
+    float pad[2];
 };
 
 struct PipelineState {
@@ -216,9 +227,13 @@ void EnsureUbo(const GlComputeApi& gl) {
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BloomConfigData), nullptr, GL_DYNAMIC_DRAW);
 }
 
+// The bright-pass and blur grid step: 2 on large targets, 1 otherwise. See ApplyBloom.
+int g_bloomScale = 1;
+
 void UploadConfig(const GlComputeApi& gl, float value) {
     BloomConfigData configData{};
     configData.value = value;
+    configData.scale = (float)g_bloomScale;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.configUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BloomConfigData), &configData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.configUbo);
@@ -270,11 +285,20 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
         return false;
     }
 
-    EnsureTextures(gl, width, height);
+    // On large targets the bright pass averages each 2x2 block (thresholding every texel
+    // first, so one small highlight still counts) into a half-resolution buffer, and the blur
+    // runs there with its taps half a texel apart - the same one-full-resolution-pixel spacing
+    // as before, so the glow keeps its size on screen. Two full-resolution blur passes and the
+    // full-resolution intermediates were most of this stage's ~2.4 ms on a 4000x3200
+    // supersampled frame (measured with debugStats). At scale 1 nothing changes.
+    g_bloomScale = ((long long)width * height > 2500000) ? 2 : 1;
+    int lowWidth = (width + g_bloomScale - 1) / g_bloomScale;
+    int lowHeight = (height + g_bloomScale - 1) / g_bloomScale;
+    EnsureTextures(gl, lowWidth, lowHeight);
     EnsureUbo(gl);
 
-    unsigned int groupsX = GroupCount(width);
-    unsigned int groupsY = GroupCount(height);
+    unsigned int groupsX = GroupCount(lowWidth);
+    unsigned int groupsY = GroupCount(lowHeight);
 
     // Pass 1: extract bright pixels above `threshold` (soft-kneed) from srcTexture into
     // brightTexture.
@@ -304,7 +328,10 @@ bool ApplyBloom(unsigned int srcTexture, unsigned int dstTexture, int width, int
     gl.glDispatchCompute(groupsX, groupsY, 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Pass 4: composite - srcTexture + blurFinalTexture * intensity -> dstTexture.
+    // Pass 4: composite - srcTexture + blurFinalTexture * intensity -> dstTexture, at full
+    // resolution; the blur result is sampled bilinearly, which is what upsamples it.
+    groupsX = GroupCount(width);
+    groupsY = GroupCount(height);
     UploadConfig(gl, intensity);
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE0);
