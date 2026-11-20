@@ -950,17 +950,30 @@ int main() {
     //
     // A seam-straddling pattern like the 2x case above cannot do this job: the seam is where a
     // tap and a box happen to agree, which is exactly why that case passes either way.
-    {
+    //
+    // srgbCorrect changes what the right average IS, so it is pinned rather than inherited from
+    // the shipped ini (which turned it on and made this check fail with a correct resolve):
+    // with it off the box averages the stored sRGB values (1/4 white -> 64); with it on the box
+    // averages in linear light and the result is encoded back (linear 0.25 -> sRGB 137). Both
+    // modes are run. A single bilinear tap reads only black texels and gives ~0 in either.
+    for (int srgbPass = 0; srgbPass < 2; ++srgbPass) {
+        const bool srgb = srgbPass == 1;
+        const int expectedMean = srgb ? 137 : 64;
+        const char* mode = srgb ? "srgbCorrect=1" : "srgbCorrect=0";
+        printf("4x resolve: %s\n", mode);
+
         AnaxConfig& mutableConfig = GetMutableAnaxConfig();
         int savedStageCount = mutableConfig.stageCount;
         int savedRenderWidth = mutableConfig.renderWidth;
         int savedRenderHeight = mutableConfig.renderHeight;
         int savedFrameDumpKey = mutableConfig.frameDumpKey;
+        bool savedSrgbCorrect = mutableConfig.srgbCorrect;
 
         mutableConfig.stageCount = 0;
         mutableConfig.renderWidth = width * 4;
         mutableConfig.renderHeight = height * 4;
         mutableConfig.frameDumpKey = 0;
+        mutableConfig.srgbCorrect = srgb;
 
         ResetRenderTargetState();
         NotifyFrameBoundary();
@@ -1015,13 +1028,14 @@ int main() {
             }
             int mean = (int)(total / counted);
             printf("4x resolve: middle row red channel min=%d mean=%d max=%d "
-                   "(a 4x4 box average of this pattern is 64; a single bilinear tap is 0)\n",
-                   lowest, mean, highest);
+                   "(a 4x4 box average of this pattern is %d here; a single bilinear tap is 0)\n",
+                   lowest, mean, highest, expectedMean);
 
-            // The band is wide on purpose. 64 is what an exact box gives, but the last step of
-            // the resolve is still a real GL blit and drivers round differently; what no
-            // single-tap implementation can produce is anything near a quarter-white average.
-            ok = Check(mean >= 40 && mean <= 90,
+            // The band is wide on purpose. The expected value is what an exact box gives, but
+            // the last step of the resolve is still a real GL blit and drivers round
+            // differently; what no single-tap implementation can produce is anything near a
+            // quarter-white average.
+            ok = Check(mean >= expectedMean - 24 && mean <= expectedMean + 26,
                        "4x resolve: the resolved image carries the quarter-white average of "
                        "the whole 4x4 box, not the two texels a single bilinear tap reads") && ok;
 
@@ -1038,6 +1052,7 @@ int main() {
         mutableConfig.renderWidth = savedRenderWidth;
         mutableConfig.renderHeight = savedRenderHeight;
         mutableConfig.frameDumpKey = savedFrameDumpKey;
+        mutableConfig.srgbCorrect = savedSrgbCorrect;
         ResetRenderTargetState();
         pGlViewport(0, 0, width, height);
     }
