@@ -93,9 +93,20 @@ void NotifyFrameBoundary() {
     g_expectFirstViewport = true;
 }
 
+namespace {
+// The game's last glViewport, unscaled - widescreen widens a projection only under a viewport
+// that covers the whole frame. See render_target.h.
+int g_lastViewportX = 0;
+int g_lastViewportY = 0;
+int g_lastViewportWidth = 0;
+int g_lastViewportHeight = 0;
+}  // namespace
+
 void NotifyGameViewport(int x, int y, int width, int height) {
-    (void)x;
-    (void)y;
+    g_lastViewportX = x;
+    g_lastViewportY = y;
+    g_lastViewportWidth = width;
+    g_lastViewportHeight = height;
     // Before the g_expectFirstViewport gate, not after it: a context change revokes the latch
     // whether or not this happens to be the viewport the frame takes its reference from.
     ArmedInCurrentContext();
@@ -178,7 +189,12 @@ void ReportSupersampleVerdict(bool armed, int refWidth, int refHeight) {
     // upscale case.
     double targetAspect = (double)config.renderWidth / (double)config.renderHeight;
     double gameAspect = (double)refWidth / (double)refHeight;
-    if (targetAspect - gameAspect > 0.01 || gameAspect - targetAspect > 0.01) {
+    if (config.widescreen && targetAspect > gameAspect * 1.01) {
+        printf("[opengl32_enh_cpp] render_target: widescreen - the game's view is widened %.3fx "
+               "to fill %dx%d; HUD and menus stay %dx%d-shaped in the centre\n",
+               targetAspect / gameAspect, config.renderWidth, config.renderHeight, refWidth,
+               refHeight);
+    } else if (targetAspect - gameAspect > 0.01 || gameAspect - targetAspect > 0.01) {
         printf("[opengl32_enh_cpp] render_target: %dx%d and the game's own %dx%d don't share "
                "an aspect ratio - the presented image will be stretched\n",
                config.renderWidth, config.renderHeight, refWidth, refHeight);
@@ -258,11 +274,89 @@ bool IsSupersampleActive() {
     return ArmedInCurrentContext();
 }
 
+namespace {
+
+// Widescreen's pillar: the centred rectangle of the target at the game's own aspect.
+void WidescreenPillar(int& offsetX, int& pillarWidth) {
+    const AnaxConfig& config = GetAnaxConfig();
+    pillarWidth = (int)lround((double)config.renderHeight * (double)g_armedRefWidth /
+                              (double)g_armedRefHeight);
+    offsetX = (config.renderWidth - pillarWidth) / 2;
+}
+
+bool IsFullFrameRect(int x, int y, int width, int height) {
+    return x == 0 && y == 0 && width == g_armedRefWidth && height == g_armedRefHeight;
+}
+
+}  // namespace
+
+bool IsWidescreenActive() {
+    const AnaxConfig& config = GetAnaxConfig();
+    if (!config.widescreen || g_externalActive || !ArmedInCurrentContext()) {
+        return false;
+    }
+    if (g_armedRefWidth <= 0 || g_armedRefHeight <= 0 || config.renderHeight <= 0) {
+        return false;
+    }
+    // Cross-multiplied: target wider than the game by more than 1%.
+    return (double)config.renderWidth * g_armedRefHeight >
+           1.01 * (double)g_armedRefWidth * config.renderHeight;
+}
+
+double WidescreenFactor() {
+    if (!IsWidescreenActive()) {
+        return 1.0;
+    }
+    const AnaxConfig& config = GetAnaxConfig();
+    return ((double)config.renderWidth * g_armedRefHeight) /
+           ((double)g_armedRefWidth * config.renderHeight);
+}
+
+void WidenFrustumForWidescreen(double& left, double& right) {
+    if (!IsWidescreenActive() || !IsFullFrameRect(g_lastViewportX, g_lastViewportY,
+                                                  g_lastViewportWidth, g_lastViewportHeight)) {
+        return;
+    }
+    double k = WidescreenFactor();
+    left *= k;
+    right *= k;
+}
+
+void WidenOrthoForWidescreen(double& left, double& right) {
+    if (!IsWidescreenActive() || !IsFullFrameRect(g_lastViewportX, g_lastViewportY,
+                                                  g_lastViewportWidth, g_lastViewportHeight)) {
+        return;
+    }
+    double k = WidescreenFactor();
+    double centre = 0.5 * (left + right);
+    double half = 0.5 * (right - left) * k;
+    left = centre - half;
+    right = centre + half;
+}
+
 void ScaleGameRect(int& x, int& y, int& width, int& height) {
     if (!ArmedInCurrentContext()) {
         return;
     }
     const AnaxConfig& config = GetAnaxConfig();
+    if (IsWidescreenActive()) {
+        int bottom = ScaleEdge(y, config.renderHeight, g_armedRefHeight);
+        int top = ScaleEdge(y + height, config.renderHeight, g_armedRefHeight);
+        if (IsFullFrameRect(x, y, width, height)) {
+            x = 0;
+            width = config.renderWidth;
+        } else {
+            int offsetX = 0, pillarWidth = 0;
+            WidescreenPillar(offsetX, pillarWidth);
+            int left = offsetX + ScaleEdge(x, pillarWidth, g_armedRefWidth);
+            int right = offsetX + ScaleEdge(x + width, pillarWidth, g_armedRefWidth);
+            x = left;
+            width = right - left;
+        }
+        y = bottom;
+        height = top - bottom;
+        return;
+    }
     // g_armedRef*, not g_ref*: the denominator has to be the reference this frame's arming
     // decision was validated against, not whatever the live reference has since become.
     int left = ScaleEdge(x, config.renderWidth, g_armedRefWidth);
@@ -284,6 +378,7 @@ void ResetRenderTargetState() {
     g_armedRefWidth = 0;
     g_armedRefHeight = 0;
     g_armedGeneration = 0;
+    g_lastViewportX = g_lastViewportY = g_lastViewportWidth = g_lastViewportHeight = 0;
     // Forgotten, not acted on - see render_target.h. This is a test hook and must not issue GL
     // calls; a test that cares about the binding sets it explicitly after calling this.
     ForgetRenderTargetBinding();
@@ -500,6 +595,29 @@ void BindRenderTarget() {
     }
     g_targetBound = true;
     GetGlComputeApi().glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
+}
+
+void ClearRenderTargetForWidescreen() {
+    if (!IsWidescreenActive() || !g_targetBound) {
+        return;
+    }
+    const GlComputeApi& gl = GetGlComputeApi();
+    if (gl.glClearBufferfv == nullptr || gl.glIsEnabled == nullptr || gl.glEnable == nullptr ||
+        gl.glDisable == nullptr) {
+        return;
+    }
+    // The game's scissor would clip the clear; lifted for it and put back.
+    const unsigned int GL_SCISSOR_TEST_CAP = 0x0C11;
+    const unsigned int GL_COLOR_BUFFER = 0x1800;
+    bool scissorOn = gl.glIsEnabled(GL_SCISSOR_TEST_CAP) != 0;
+    if (scissorOn) {
+        gl.glDisable(GL_SCISSOR_TEST_CAP);
+    }
+    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    gl.glClearBufferfv(GL_COLOR_BUFFER, 0, black);
+    if (scissorOn) {
+        gl.glEnable(GL_SCISSOR_TEST_CAP);
+    }
 }
 
 unsigned int GetGameFramebuffer() {

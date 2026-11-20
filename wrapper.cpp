@@ -1666,6 +1666,8 @@ extern "C" __declspec(dllexport) void __stdcall glFrustum(GLdouble left, GLdoubl
             printf("[opengl32_enh_cpp]   glFrustum: resolved OK\n");
         }
     }
+    // Widened before the jitter and the capture, so both see the projection actually used.
+    WidenFrustumForWidescreen(left, right);
     ApplyTaaJitterToFrustumFromCurrentViewport(left, right, bottom, top);
     CaptureProjectionFrustum(left, right, bottom, top, zNear, zFar);
     NotifyWorldProjection();
@@ -3168,6 +3170,7 @@ extern "C" __declspec(dllexport) void __stdcall glOrtho(GLdouble left, GLdouble 
     NotifyTwoDProjection();
     NotifyTwoDPassBegan();
     NotifyMipmapTwoDPass();
+    WidenOrthoForWidescreen(left, right);
     __proc_glOrtho(left, right, bottom, top, zNear, zFar);
 }
 
@@ -5914,6 +5917,7 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     PerfFrameEnd(p0);
     BOOL __swapResult = __proc_wglSwapBuffers(p0);
     BindRenderTarget();
+    ClearRenderTargetForWidescreen();
     PerfFrameBegin();
     return __swapResult;
 }

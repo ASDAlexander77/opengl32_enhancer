@@ -575,6 +575,8 @@ AnaxConfig ParseConfigFile(const char* path) {
                 ParseBool(value, config.borderlessFullscreen, "borderlessFullscreen");
         } else if (strcmp(key, "keepAspect") == 0) {
             config.keepAspect = ParseBool(value, config.keepAspect, "keepAspect");
+        } else if (strcmp(key, "widescreen") == 0) {
+            config.widescreen = ParseBool(value, config.widescreen, "widescreen");
         } else if (strcmp(key, "renderWidth") == 0) {
             config.renderWidth = ParseClampedInt(value, 0, 16384, config.renderWidth, "renderWidth");
         } else if (strcmp(key, "renderHeight") == 0) {

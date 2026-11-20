@@ -217,9 +217,51 @@ bool IgnoresADegenerateFirstViewport() {
                  "a degenerate first viewport does not become the reference");
 }
 
+// Widescreen: 640x480 into 3200x2000 - pillar is 2667 wide at x=266, factor 1.2.
+bool WidescreenMapsRectsAndWidensProjections() {
+    GetMutableAnaxConfig().widescreen = true;
+    ArmWithReference(3200, 2000, 640, 480);
+    bool ok = Check(IsWidescreenActive(), "widescreen is active for a wider target");
+
+    int x = 0, y = 0, w = 640, h = 480;
+    ScaleGameRect(x, y, w, h);
+    ok = Check(x == 0 && y == 0 && w == 3200 && h == 2000,
+               "widescreen: a full-frame rect fills the whole target") && ok;
+
+    x = 0; y = 0; w = 320; h = 240;
+    ScaleGameRect(x, y, w, h);
+    ok = Check(x == 266 && y == 0 && w == 1334 && h == 1000,
+               "widescreen: a sub-rect maps into the centred pillar") && ok;
+
+    NotifyGameViewport(0, 0, 640, 480);
+    double l = -4.0, r = 4.0;
+    WidenFrustumForWidescreen(l, r);
+    ok = Check(l > -4.81 && l < -4.79 && r > 4.79 && r < 4.81,
+               "widescreen: frustum under a full-frame viewport widens 1.2x") && ok;
+    l = 0.0; r = 640.0;
+    WidenOrthoForWidescreen(l, r);
+    ok = Check(l > -64.01 && l < -63.99 && r > 703.99 && r < 704.01,
+               "widescreen: ortho widens about its centre") && ok;
+
+    NotifyGameViewport(100, 100, 200, 200);
+    l = -4.0; r = 4.0;
+    WidenFrustumForWidescreen(l, r);
+    ok = Check(l == -4.0 && r == 4.0,
+               "widescreen: frustum under a smaller viewport is left alone") && ok;
+
+    GetMutableAnaxConfig().widescreen = false;
+    ArmWithReference(3200, 2000, 640, 480);
+    ok = Check(!IsWidescreenActive(), "widescreen off: not active") && ok;
+    x = 0; y = 0; w = 320; h = 240;
+    ScaleGameRect(x, y, w, h);
+    ok = Check(x == 0 && w == 1600, "widescreen off: plain per-axis scaling") && ok;
+    return ok;
+}
+
 }  // namespace
 
 int main() {
+    WidescreenMapsRectsAndWidensProjections();
     ScalesFullFrameViewportToTheConfiguredSize();
     ScalesSubViewportProportionally();
     ScalesByEdgesSoAdjacentRectsAbut();

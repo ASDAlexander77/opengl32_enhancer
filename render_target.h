@@ -165,3 +165,33 @@ void ClearExternalSourceFramebuffer();
 // Overwrites width/height with the external present size when one is set; untouched otherwise.
 void GetExternalPresentSize(int& width, int& height);
 bool IsExternalSourceActive();
+
+// ---- Widescreen (config.widescreen) ----
+//
+// For a game that only renders 4:3, with supersampling armed into a WIDER target (3200x2000
+// for a 640x480 game). Active only while armed, with the option on and the target at least 1%
+// wider than the game's own aspect. While active:
+//
+//   - A viewport or scissor covering the game's whole frame maps to the whole target; any other
+//     rectangle maps into the centred "pillar" - the largest rectangle at the game's aspect -
+//     so a small 3D view (a portrait, a model in a menu) keeps its shape and place.
+//   - glFrustum issued under a full-frame viewport is widened horizontally by the aspect
+//     ratio of the two (1.2 for 4:3 into 16:10): Hor+, more scene at the sides at the same
+//     vertical field of view. Under a smaller viewport it is left alone.
+//   - glOrtho under a full-frame viewport is widened about its centre by the same factor, so
+//     the HUD and menus land in the pillar at their own shape instead of being stretched.
+//   - The target's colour is cleared to black at the start of each frame, since a 2D-only
+//     frame (a menu) no longer covers the sides.
+//
+// The game still culls against its own 4:3 view, so geometry that only the widened sides show
+// can be missing: Quake II-family engines take `+set r_nocull 1` for the world; entities are
+// culled regardless.
+bool IsWidescreenActive();
+// The horizontal widening factor while active (target aspect / game aspect), 1 otherwise.
+double WidescreenFactor();
+// Called from the glFrustum and glOrtho hooks before they forward; no-ops unless active and
+// the last game viewport covered the whole frame.
+void WidenFrustumForWidescreen(double& left, double& right);
+void WidenOrthoForWidescreen(double& left, double& right);
+// Clears the bound target to black when active - called right after BindRenderTarget().
+void ClearRenderTargetForWidescreen();

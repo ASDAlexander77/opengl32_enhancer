@@ -814,7 +814,10 @@ void ApplySelectedEffect(void* hdc) {
     if (config.keepAspect && !IsExternalSourceActive()) {
         int contentWidth = nativeWidth;
         int contentHeight = nativeHeight;
-        if (IsSupersampleActive()) {
+        if (IsWidescreenActive()) {
+            // The game's view has been widened to fill the target - its shape IS the target's.
+            GetRenderTargetSize(contentWidth, contentHeight);
+        } else if (IsSupersampleActive()) {
             GetReferenceViewport(contentWidth, contentHeight);
         }
         FitPresentRect(contentWidth, contentHeight, windowWidth, windowHeight, presentX, presentY,

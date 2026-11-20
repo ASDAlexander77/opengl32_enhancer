@@ -221,6 +221,13 @@ struct AnaxConfig {
     // the game already matches its window. On by default; keepAspect=0 stretches to fill.
     bool keepAspect = true;
 
+    // Widescreen for a game that only renders 4:3 - see render_target.h's widescreen section.
+    // Needs supersampling (renderWidth/renderHeight) with a target WIDER than the game's own
+    // aspect, e.g. 3200x2000 for a 640x480 game: the 3D view is widened to fill the target
+    // (more scene at the sides, nothing stretched), while the HUD, menus and any smaller 3D
+    // view stay in a centred rectangle at the game's own aspect. Off by default.
+    bool widescreen = false;
+
     // Renders the game into an offscreen framebuffer of this size and downsamples it to the
     // window on present - see render_target.h. Both default to 0, meaning off; the override
     // only applies when BOTH are positive, the same both-or-nothing rule windowWidth/
