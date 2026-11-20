@@ -186,6 +186,12 @@ bool IsExternalSourceActive();
 // The game still culls against its own 4:3 view, so geometry that only the widened sides show
 // can be missing: Quake II-family engines take `+set r_nocull 1` for the world; entities are
 // culled regardless.
+//
+// The target's WIDTH follows the window: with widescreen on and the window's client size known
+// (NotifyWindowSize, from the swap hook), the target is renderHeight x (renderHeight * window
+// aspect), so the widening factor is always window aspect / game aspect - renderWidth then only
+// has to be positive. Before the first swap, or with the size unknown, renderWidth is used.
+void NotifyWindowSize(int width, int height);
 bool IsWidescreenActive();
 // The horizontal widening factor while active (target aspect / game aspect), 1 otherwise.
 double WidescreenFactor();

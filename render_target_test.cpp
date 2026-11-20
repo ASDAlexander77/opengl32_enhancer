@@ -249,6 +249,22 @@ bool WidescreenMapsRectsAndWidensProjections() {
     ok = Check(l == -4.0 && r == 4.0,
                "widescreen: frustum under a smaller viewport is left alone") && ok;
 
+    // The target width follows the window's aspect: a 1920x1080 window with renderHeight=2000
+    // gives a 3556-wide target and a 1.333x widening, whatever renderWidth says.
+    ResetRenderTargetState();
+    Configure(3200, 2000);
+    NotifyWindowSize(1920, 1080);
+    NotifyFrameBoundary();
+    NotifyGameViewport(0, 0, 640, 480);
+    ArmSupersampleForFrame(true);
+    x = 0; y = 0; w = 640; h = 480;
+    ScaleGameRect(x, y, w, h);
+    ok = Check(x == 0 && w == 3556 && h == 2000,
+               "widescreen: target width follows a 16:9 window (3556x2000)") && ok;
+    double k = WidescreenFactor();
+    ok = Check(k > 1.3332 && k < 1.3336, "widescreen: factor is window aspect / game aspect") && ok;
+    NotifyWindowSize(0, 0);
+
     GetMutableAnaxConfig().widescreen = false;
     ArmWithReference(3200, 2000, 640, 480);
     ok = Check(!IsWidescreenActive(), "widescreen off: not active") && ok;

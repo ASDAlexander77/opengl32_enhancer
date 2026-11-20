@@ -35,6 +35,23 @@ int g_armedRefHeight = 0;
 // GetGlContextGeneration() in gl_loader.h.
 unsigned int g_armedGeneration = 0;
 
+// The game window's client size, from the swap hook - see NotifyWindowSize. 0 = unknown.
+int g_windowWidth = 0;
+int g_windowHeight = 0;
+
+// The render target's width. Normally renderWidth; with widescreen on and the window's size
+// known, renderHeight times the window's aspect, so the widened view always matches the
+// window it is shown in, whatever its shape - resized, or fullscreen on any monitor.
+int TargetWidth() {
+    const AnaxConfig& config = GetAnaxConfig();
+    if (config.widescreen && g_windowWidth > 0 && g_windowHeight > 0 && config.renderWidth > 0 &&
+        config.renderHeight > 0) {
+        return (int)lround((double)config.renderHeight * (double)g_windowWidth /
+                           (double)g_windowHeight);
+    }
+    return config.renderWidth;
+}
+
 // Defined with the rest of the GL-touching state further down; declared here because
 // NotifyGameViewport revokes the latch and the binding has to go with it, and because
 // ResetRenderTargetState has to drop the record of it.
@@ -88,6 +105,11 @@ bool ArmedInCurrentContext() {
 }
 
 }  // namespace
+
+void NotifyWindowSize(int width, int height) {
+    g_windowWidth = width > 0 && height > 0 ? width : 0;
+    g_windowHeight = width > 0 && height > 0 ? height : 0;
+}
 
 void NotifyFrameBoundary() {
     g_expectFirstViewport = true;
@@ -158,12 +180,12 @@ void ReportSupersampleVerdict(bool armed, int refWidth, int refHeight) {
     static int lastConfigWidth = -1;
     static int lastConfigHeight = -1;
     if (refWidth == lastRefWidth && refHeight == lastRefHeight &&
-        config.renderWidth == lastConfigWidth && config.renderHeight == lastConfigHeight) {
+        TargetWidth() == lastConfigWidth && config.renderHeight == lastConfigHeight) {
         return;
     }
     lastRefWidth = refWidth;
     lastRefHeight = refHeight;
-    lastConfigWidth = config.renderWidth;
+    lastConfigWidth = TargetWidth();
     lastConfigHeight = config.renderHeight;
 
     if (!armed) {
@@ -173,7 +195,7 @@ void ReportSupersampleVerdict(bool armed, int refWidth, int refHeight) {
         // frame for the rest of the run without ever saying so.
         printf("[opengl32_enh_cpp] render_target: %dx%d is not above the game's own %dx%d - "
                "supersampling off, since rendering below native is not what this does\n",
-               config.renderWidth, config.renderHeight, refWidth, refHeight);
+               TargetWidth(), config.renderHeight, refWidth, refHeight);
         return;
     }
 
@@ -181,23 +203,23 @@ void ReportSupersampleVerdict(bool armed, int refWidth, int refHeight) {
     // "allocated" line cannot say this: allocating a target and using it are different events,
     // and the whole point of the refusal above is that the first can happen without the second.
     printf("[opengl32_enh_cpp] render_target: supersampling the game's %dx%d into %dx%d\n",
-           refWidth, refHeight, config.renderWidth, config.renderHeight);
+           refWidth, refHeight, TargetWidth(), config.renderHeight);
 
     // Armed, but say so when the shape is wrong: the present resolve maps the whole target onto
     // the whole window, so a target that does not share the game's aspect ratio is stretched on
     // one axis. Warned rather than refused, the same treatment post_effects.cpp gives the
     // upscale case.
-    double targetAspect = (double)config.renderWidth / (double)config.renderHeight;
+    double targetAspect = (double)TargetWidth() / (double)config.renderHeight;
     double gameAspect = (double)refWidth / (double)refHeight;
     if (config.widescreen && targetAspect > gameAspect * 1.01) {
         printf("[opengl32_enh_cpp] render_target: widescreen - the game's view is widened %.3fx "
                "to fill %dx%d; HUD and menus stay %dx%d-shaped in the centre\n",
-               targetAspect / gameAspect, config.renderWidth, config.renderHeight, refWidth,
+               targetAspect / gameAspect, TargetWidth(), config.renderHeight, refWidth,
                refHeight);
     } else if (targetAspect - gameAspect > 0.01 || gameAspect - targetAspect > 0.01) {
         printf("[opengl32_enh_cpp] render_target: %dx%d and the game's own %dx%d don't share "
                "an aspect ratio - the presented image will be stretched\n",
-               config.renderWidth, config.renderHeight, refWidth, refHeight);
+               TargetWidth(), config.renderHeight, refWidth, refHeight);
     }
 }
 
@@ -210,7 +232,7 @@ void ArmSupersampleForFrame(bool targetReady) {
     // unreachable, which is the definition of code that is not doing anything.
     g_armed = targetReady &&
               g_haveRef &&
-              config.renderWidth >= g_refWidth && config.renderHeight >= g_refHeight;
+              TargetWidth() >= g_refWidth && config.renderHeight >= g_refHeight;
     // The reference that decision was made from, frozen for the rest of the frame. Zeroed when
     // not armed so a stale snapshot can never be divided by.
     g_armedRefWidth = g_armed ? g_refWidth : 0;
@@ -223,7 +245,7 @@ void ArmSupersampleForFrame(bool targetReady) {
     // Only once both numbers are real. A frame that did not arm because the target failed to
     // allocate, or because no viewport has been recorded yet, is not a verdict about the
     // configured SIZE - and those two paths already log for themselves.
-    if (targetReady && g_haveRef && config.renderWidth > 0 && config.renderHeight > 0) {
+    if (targetReady && g_haveRef && TargetWidth() > 0 && config.renderHeight > 0) {
         ReportSupersampleVerdict(g_armed, g_refWidth, g_refHeight);
     }
 }
@@ -281,7 +303,7 @@ void WidescreenPillar(int& offsetX, int& pillarWidth) {
     const AnaxConfig& config = GetAnaxConfig();
     pillarWidth = (int)lround((double)config.renderHeight * (double)g_armedRefWidth /
                               (double)g_armedRefHeight);
-    offsetX = (config.renderWidth - pillarWidth) / 2;
+    offsetX = (TargetWidth() - pillarWidth) / 2;
 }
 
 bool IsFullFrameRect(int x, int y, int width, int height) {
@@ -299,7 +321,7 @@ bool IsWidescreenActive() {
         return false;
     }
     // Cross-multiplied: target wider than the game by more than 1%.
-    return (double)config.renderWidth * g_armedRefHeight >
+    return (double)TargetWidth() * g_armedRefHeight >
            1.01 * (double)g_armedRefWidth * config.renderHeight;
 }
 
@@ -308,7 +330,7 @@ double WidescreenFactor() {
         return 1.0;
     }
     const AnaxConfig& config = GetAnaxConfig();
-    return ((double)config.renderWidth * g_armedRefHeight) /
+    return ((double)TargetWidth() * g_armedRefHeight) /
            ((double)g_armedRefWidth * config.renderHeight);
 }
 
@@ -344,7 +366,7 @@ void ScaleGameRect(int& x, int& y, int& width, int& height) {
         int top = ScaleEdge(y + height, config.renderHeight, g_armedRefHeight);
         if (IsFullFrameRect(x, y, width, height)) {
             x = 0;
-            width = config.renderWidth;
+            width = TargetWidth();
         } else {
             int offsetX = 0, pillarWidth = 0;
             WidescreenPillar(offsetX, pillarWidth);
@@ -359,8 +381,8 @@ void ScaleGameRect(int& x, int& y, int& width, int& height) {
     }
     // g_armedRef*, not g_ref*: the denominator has to be the reference this frame's arming
     // decision was validated against, not whatever the live reference has since become.
-    int left = ScaleEdge(x, config.renderWidth, g_armedRefWidth);
-    int right = ScaleEdge(x + width, config.renderWidth, g_armedRefWidth);
+    int left = ScaleEdge(x, TargetWidth(), g_armedRefWidth);
+    int right = ScaleEdge(x + width, TargetWidth(), g_armedRefWidth);
     int bottom = ScaleEdge(y, config.renderHeight, g_armedRefHeight);
     int top = ScaleEdge(y + height, config.renderHeight, g_armedRefHeight);
     x = left;
@@ -378,6 +400,7 @@ void ResetRenderTargetState() {
     g_armedRefWidth = 0;
     g_armedRefHeight = 0;
     g_armedGeneration = 0;
+    g_windowWidth = g_windowHeight = 0;
     g_lastViewportX = g_lastViewportY = g_lastViewportWidth = g_lastViewportHeight = 0;
     // Forgotten, not acted on - see render_target.h. This is a test hook and must not issue GL
     // calls; a test that cares about the binding sets it explicitly after calling this.
@@ -472,7 +495,7 @@ void ForgetRenderTargetBinding() {
 
 bool EnsureRenderTarget() {
     const AnaxConfig& config = GetAnaxConfig();
-    if (config.renderWidth <= 0 || config.renderHeight <= 0) {
+    if (TargetWidth() <= 0 || config.renderHeight <= 0) {
         return false;
     }
     const GlComputeApi& gl = GetGlComputeApi();
@@ -494,12 +517,12 @@ bool EnsureRenderTarget() {
         g_haveFailed = false;
     }
 
-    if (g_fbo != 0 && g_targetWidth == config.renderWidth &&
+    if (g_fbo != 0 && g_targetWidth == TargetWidth() &&
         g_targetHeight == config.renderHeight && g_targetFloat == config.renderFloatBuffer) {
         return true;
     }
 
-    if (g_haveFailed && g_failedWidth == config.renderWidth &&
+    if (g_haveFailed && g_failedWidth == TargetWidth() &&
         g_failedHeight == config.renderHeight && g_failedFloat == config.renderFloatBuffer) {
         return false;
     }
@@ -513,12 +536,12 @@ bool EnsureRenderTarget() {
     int maxTextureSize = 0;
     gl.glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
     if (maxTextureSize > 0 &&
-        (config.renderWidth > maxTextureSize || config.renderHeight > maxTextureSize)) {
+        (TargetWidth() > maxTextureSize || config.renderHeight > maxTextureSize)) {
         static bool warnedSize = false;
         if (!warnedSize) {
             printf("[opengl32_enh_cpp] render_target: %dx%d exceeds this driver's maximum "
                    "texture size of %d, supersampling off\n",
-                   config.renderWidth, config.renderHeight, maxTextureSize);
+                   TargetWidth(), config.renderHeight, maxTextureSize);
             warnedSize = true;
         }
         return false;
@@ -537,14 +560,14 @@ bool EnsureRenderTarget() {
     gl.glGenTextures(1, &g_colorTex);
     gl.glBindTexture(GL_TEXTURE_2D, g_colorTex);
     gl.glTexStorage2D(GL_TEXTURE_2D, 1, config.renderFloatBuffer ? GL_RGBA16F : GL_RGBA8,
-                      config.renderWidth, config.renderHeight);
+                      TargetWidth(), config.renderHeight);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
 
     gl.glGenTextures(1, &g_depthTex);
     gl.glBindTexture(GL_TEXTURE_2D, g_depthTex);
     gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24,
-                      config.renderWidth, config.renderHeight);
+                      TargetWidth(), config.renderHeight);
 
     gl.glGenFramebuffers(1, &g_fbo);
     gl.glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
@@ -555,9 +578,9 @@ bool EnsureRenderTarget() {
     gl.glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         printf("[opengl32_enh_cpp] render_target: framebuffer incomplete (0x%04X) at %dx%d, "
-               "supersampling off\n", status, config.renderWidth, config.renderHeight);
+               "supersampling off\n", status, TargetWidth(), config.renderHeight);
         DestroyRenderTarget(gl);
-        g_failedWidth = config.renderWidth;
+        g_failedWidth = TargetWidth();
         g_failedHeight = config.renderHeight;
         g_failedFloat = config.renderFloatBuffer;
         g_haveFailed = true;
@@ -565,7 +588,7 @@ bool EnsureRenderTarget() {
         return false;
     }
 
-    g_targetWidth = config.renderWidth;
+    g_targetWidth = TargetWidth();
     g_targetHeight = config.renderHeight;
     g_targetFloat = config.renderFloatBuffer;
 

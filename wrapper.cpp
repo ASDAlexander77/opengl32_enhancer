@@ -5913,6 +5913,11 @@ extern "C" __declspec(dllexport) BOOL __stdcall wglSwapBuffers(void* p0) {
     AdvanceTaaJitter();
     InvalidateWorldFrame();
     NotifyFrameBoundary();
+    {
+        int windowWidth = 0, windowHeight = 0;
+        GetWindowClientSize(p0, windowWidth, windowHeight);
+        NotifyWindowSize(windowWidth, windowHeight);
+    }
     ArmSupersampleForFrame(EnsureRenderTarget());
     PerfFrameEnd(p0);
     BOOL __swapResult = __proc_wglSwapBuffers(p0);
