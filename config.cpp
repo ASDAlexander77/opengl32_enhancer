@@ -585,6 +585,8 @@ AnaxConfig ParseConfigFile(const char* path) {
             // A Windows virtual-key code, so the sensible way to write it in an ini is hex
             // (0x7B = F12). strtol with base 0 accepts both that and plain decimal.
             config.frameDumpKey = ParseClampedInt(value, 0, 0xFE, config.frameDumpKey, "frameDumpKey", 0);
+        } else if (strcmp(key, "screenshotKey") == 0) {
+            config.screenshotKey = ParseClampedInt(value, 0, 0xFE, config.screenshotKey, "screenshotKey", 0);
         } else if (strcmp(key, "frameDumpPath") == 0) {
             CopyStringValue(config.frameDumpPath, sizeof(config.frameDumpPath), value, "frameDumpPath");
         } else if (strcmp(key, "cameraLogInterval") == 0) {

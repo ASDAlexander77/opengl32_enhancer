@@ -160,6 +160,13 @@ struct AnaxConfig {
     int frameDumpKey = 0x7B;                   // VK_F12
     char frameDumpPath[256] = "opengl32_enhancer_frame.dump";
 
+    // Press this key (a Windows virtual-key code) to save the FINISHED frame - every stage
+    // applied, exactly what is presented - as opengl32_enhancer_shot_NNN.bmp next to the game.
+    // It is read straight off the back buffer inside the swap hook, so unlike capturing the
+    // window from outside (PrintWindow, which makes a GL window flicker grey) it never touches
+    // the window. 0 (the default) disables it and its per-frame key poll.
+    int screenshotKey = 0;
+
     // Prints the camera position and orientation that modelview_capture.h reconstructs to the
     // debug log every N frames. 0 (default) is off. This exists because the capture's heuristic
     // can only be CONFIRMED inside a real game - the unit tests show it behaves as designed,

@@ -15,8 +15,24 @@
 // file here to tune against a real frame, depth and projection included.
 #include <windows.h>
 #include <delayimp.h>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+
+#include "frame_dump.h"
+
+// GL 1.1 entry points the --render mode reads back with. Declared by hand rather than through
+// <GL/gl.h>, which conflicts with ImGui's OpenGL3 loader (see editor_scene.h).
+extern "C" {
+__declspec(dllimport) void __stdcall glFinish(void);
+__declspec(dllimport) void __stdcall glReadBuffer(unsigned int mode);
+__declspec(dllimport) void __stdcall glReadPixels(int x, int y, int width, int height,
+                                                  unsigned int format, unsigned int type, void* pixels);
+__declspec(dllimport) unsigned int __stdcall glGetError(void);
+}
+const unsigned int kGlBack = 0x0405;
+const unsigned int kGlUnsignedByte = 0x1401;
 
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
@@ -366,6 +382,132 @@ void DrawSceneControls() {
     }
 }
 
+bool WriteBmp32(const char* path, int width, int height, const unsigned char* bgra) {
+    size_t bytes = (size_t)width * (size_t)height * 4;
+    unsigned char header[54] = {};
+    auto put32 = [&](int at, unsigned int v) {
+        header[at] = (unsigned char)v; header[at + 1] = (unsigned char)(v >> 8);
+        header[at + 2] = (unsigned char)(v >> 16); header[at + 3] = (unsigned char)(v >> 24);
+    };
+    header[0] = 'B'; header[1] = 'M';
+    put32(2, (unsigned int)(54 + bytes));
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, (unsigned int)width);
+    put32(22, (unsigned int)height);   // bottom-up, as glReadPixels returns rows
+    header[26] = 1;
+    header[28] = 32;
+    put32(34, (unsigned int)bytes);
+    FILE* file = fopen(path, "wb");
+    if (file == nullptr) {
+        return false;
+    }
+    bool ok = fwrite(header, 1, sizeof(header), file) == sizeof(header) &&
+              fwrite(bgra, 1, bytes, file) == bytes;
+    return (fclose(file) == 0) && ok;
+}
+
+// Headless batch mode, for tuning settings against real frames without the game:
+//   config_editor.exe <ini> --render <dump> <out.bmp> [frames]
+// Renders the dump through the real ApplySelectedEffect() pipeline with <ini>'s settings, for
+// `frames` frames (default 8, so taa's history settles), and writes the presented result. The
+// window is a hidden, DPI-aware popup exactly the dump's size, so the output is the dump's own
+// resolution with no fitting, letterboxing or display scaling in between.
+int RunRenderMode(const char* dumpPath, const char* outPath, int frames) {
+    FrameDumpHeader header = {};
+    FILE* dump = fopen(dumpPath, "rb");
+    if (dump == nullptr || fread(&header, sizeof(header), 1, dump) != 1) {
+        printf("FAILED: cannot read dump header from '%s'\n", dumpPath);
+        if (dump) fclose(dump);
+        return 1;
+    }
+    fclose(dump);
+    const int width = header.width, height = header.height;
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
+        printf("FAILED: implausible dump size %dx%d\n", width, height);
+        return 1;
+    }
+
+    // DPI-aware first, or a DPI-unaware window this large is clamped to the scaled screen.
+    typedef BOOL (WINAPI *PfnSetCtx)(HANDLE);
+    PfnSetCtx setCtx = (PfnSetCtx)GetProcAddress(GetModuleHandleA("user32.dll"),
+                                                 "SetProcessDpiAwarenessContext");
+    if (setCtx) {
+        setCtx((HANDLE)(intptr_t)-4);
+    }
+
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = DefWindowProcA;
+    wc.hInstance = GetModuleHandleA(nullptr);
+    wc.lpszClassName = "AnaxConfigEditorRender";
+    RegisterClassA(&wc);
+    HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "render", WS_POPUP, 0, 0, width, height,
+                                nullptr, nullptr, wc.hInstance, nullptr);
+    if (hwnd == nullptr) {
+        printf("FAILED: CreateWindowExA, GetLastError=%lu\n", GetLastError());
+        return 1;
+    }
+    HDC hdc = GetDC(hwnd);
+    PIXELFORMATDESCRIPTOR pfd = {};
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    pfd.cDepthBits = 24;
+    int pixelFormat = ChoosePixelFormat(hdc, &pfd);
+    if (pixelFormat == 0 || !SetPixelFormat(hdc, pixelFormat, &pfd)) {
+        printf("FAILED: SetPixelFormat\n");
+        return 1;
+    }
+    HGLRC hglrc = wglCreateContext(hdc);
+    if (hglrc == nullptr || !wglMakeCurrent(hdc, hglrc)) {
+        printf("FAILED: wglCreateContext/wglMakeCurrent\n");
+        return 1;
+    }
+    if (!GetGlComputeApi().loaded) {
+        printf("FAILED: no GL 4.3 compute support\n");
+        return 1;
+    }
+    AnaxConfig& config = GetMutableAnaxConfig();
+    config = ParseConfigFile(g_iniPath);
+    if (!LoadFrameDump(dumpPath)) {
+        printf("FAILED: could not load dump '%s'\n", dumpPath);
+        return 1;
+    }
+
+    if (frames < 1) frames = 1;
+    for (int i = 0; i < frames; ++i) {
+        RenderLoadedFrame(width, height);
+        ApplySelectedEffect(hdc);
+        if (i + 1 < frames) {
+            SwapBuffers(hdc);
+        }
+    }
+    glFinish();
+
+    size_t bytes = (size_t)width * (size_t)height * 4;
+    unsigned char* pixels = (unsigned char*)malloc(bytes);
+    if (pixels == nullptr) {
+        printf("FAILED: out of memory\n");
+        return 1;
+    }
+    glReadBuffer(kGlBack);
+    glReadPixels(0, 0, width, height, 0x80E1 /* GL_BGRA */, kGlUnsignedByte, pixels);
+    for (size_t i = 3; i < bytes; i += 4) {
+        pixels[i] = 255;
+    }
+    bool ok = glGetError() == 0 && WriteBmp32(outPath, width, height, pixels);
+    free(pixels);
+    printf(ok ? "rendered '%s' (%dx%d)\n" : "FAILED: writing '%s' (%dx%d)\n", outPath, width, height);
+
+    wglMakeCurrent(nullptr, nullptr);
+    wglDeleteContext(hglrc);
+    ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
+    return ok ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -375,6 +517,9 @@ int main(int argc, char** argv) {
     }
     if (argc > 1) {
         snprintf(g_iniPath, sizeof(g_iniPath), "%s", argv[1]);
+    }
+    if (argc >= 5 && strcmp(argv[2], "--render") == 0) {
+        return RunRenderMode(argv[3], argv[4], argc >= 6 ? atoi(argv[5]) : 8);
     }
 
     WNDCLASSA wc = {};

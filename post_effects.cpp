@@ -280,6 +280,96 @@ bool ConsumeFrameDumpRequest(int frameDumpKey) {
     return pressed;
 }
 
+// Edge-triggered like ConsumeFrameDumpRequest, with its own held-state.
+bool ConsumeScreenshotRequest(int screenshotKey) {
+    static bool wasDown = false;
+    if (screenshotKey == 0) {
+        wasDown = false;
+        return false;
+    }
+    bool isDown = (GetAsyncKeyState(screenshotKey) & 0x8000) != 0;
+    bool pressed = isDown && !wasDown;
+    wasDown = isDown;
+    return pressed;
+}
+
+// Saves the presented frame - the default framebuffer's back buffer, right after the present
+// blit and before the game's SwapBuffers - as a 32-bit BMP. BMP because it needs no encoder
+// (see frame_dump.h on avoiding image dependencies) and because its native row order is
+// bottom-up, exactly what glReadPixels returns, so rows are written as read. The first free
+// opengl32_enhancer_shot_NNN.bmp in the working directory is used, so shots never overwrite.
+void SaveScreenshot(const GlComputeApi& gl, int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    char path[64] = "";
+    for (int i = 0; i < 1000; ++i) {
+        snprintf(path, sizeof(path), "opengl32_enhancer_shot_%03d.bmp", i);
+        FILE* probe = fopen(path, "rb");
+        if (probe == nullptr) {
+            break;
+        }
+        fclose(probe);
+        path[0] = '\0';
+    }
+    if (path[0] == '\0') {
+        printf("[opengl32_enh_cpp] screenshot: 1000 shots already saved, not writing another\n");
+        return;
+    }
+
+    size_t bytes = (size_t)width * (size_t)height * 4;
+    unsigned char* pixels = (unsigned char*)malloc(bytes);
+    if (pixels == nullptr) {
+        printf("[opengl32_enh_cpp] screenshot: out of memory for %dx%d\n", width, height);
+        return;
+    }
+    const unsigned int GL_BGRA = 0x80E1;
+    int savedReadFbo = 0;
+    gl.glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &savedReadFbo);
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl.glReadBuffer(GL_BACK);
+    gl.glReadPixels(0, 0, width, height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+    unsigned int err = gl.glGetError();
+    gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, (unsigned int)savedReadFbo);
+    if (err != GL_NO_ERROR) {
+        printf("[opengl32_enh_cpp] screenshot: glGetError() = 0x%04X reading the frame back\n", err);
+        free(pixels);
+        return;
+    }
+    for (size_t i = 3; i < bytes; i += 4) {
+        pixels[i] = 255;   // the back buffer's alpha is meaningless; viewers may honour it
+    }
+
+    // BITMAPFILEHEADER (14 bytes) + BITMAPINFOHEADER (40), little-endian, 32 bpp, BI_RGB.
+    unsigned char header[54] = {};
+    auto put32 = [&](int at, unsigned int v) {
+        header[at] = (unsigned char)v; header[at + 1] = (unsigned char)(v >> 8);
+        header[at + 2] = (unsigned char)(v >> 16); header[at + 3] = (unsigned char)(v >> 24);
+    };
+    header[0] = 'B'; header[1] = 'M';
+    put32(2, (unsigned int)(54 + bytes));
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, (unsigned int)width);
+    put32(22, (unsigned int)height);   // positive: bottom-up rows, as read
+    header[26] = 1;                    // planes
+    header[28] = 32;                   // bits per pixel
+    put32(34, (unsigned int)bytes);
+
+    FILE* file = fopen(path, "wb");
+    bool ok = file != nullptr && fwrite(header, 1, sizeof(header), file) == sizeof(header) &&
+              fwrite(pixels, 1, bytes, file) == bytes;
+    if (file != nullptr) {
+        ok = (fclose(file) == 0) && ok;
+    }
+    free(pixels);
+    if (ok) {
+        printf("[opengl32_enh_cpp] screenshot: wrote '%s' (%dx%d)\n", path, width, height);
+    } else {
+        printf("[opengl32_enh_cpp] screenshot: FAILED to write '%s'\n", path);
+    }
+}
+
 // Reads the game's finished frame straight off whatever framebuffer the game rendered into -
 // color and depth both - and writes it out for the config editor. Deliberately reads THAT
 // framebuffer rather than the pipeline's captured textures: this must be the unprocessed frame
@@ -1578,6 +1668,10 @@ void ApplySelectedEffect(void* hdc) {
         printf("[opengl32_enh_cpp] post_effects: glGetError() = 0x%04X after present\n", err);
     }
     PerfGpuMark("present");
+
+    if (ConsumeScreenshotRequest(config.screenshotKey)) {
+        SaveScreenshot(gl, presentWidth, presentHeight);
+    }
 
     restoreState();
 }
