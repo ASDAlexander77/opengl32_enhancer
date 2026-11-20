@@ -1,13 +1,20 @@
-// See local_contrast.h. One separable 9-tap Gaussian blur program (reused for both radii,
-// distinguished at dispatch time by a `radiusScale` uniform that multiplies the tap spacing -
-// so the SAME kernel weights produce a tight blur at scale 1 and a wide one at scale 4, no
-// second shader needed) plus a composite pass.
+// See local_contrast.h. One separable dense-Gaussian blur program (reused for both layers,
+// sigma set per dispatch) plus a downsample and a composite pass.
 //
-// Sequence: H-blur(src, smallScale) -> temp -> V-blur(temp, smallScale) -> structureFinal;
-// H-blur(src, largeScale) -> temp (reused) -> V-blur(temp, largeScale) -> toneFinal; composite
-// reads src + both finals. Both blurs read directly from the ORIGINAL srcTexture, not chained
-// off each other, so structureStrength and toneStrength are independent - raising one doesn't
-// change what the other measures (see local_contrast.h).
+// Sequence, per layer: downsample(luma(src)) -> final -> H-blur -> temp -> V-blur -> final, the
+// structure layer at half of each axis and the tone layer at a quarter; composite reads src +
+// both blurred lumas, upsampled bilinearly. Both layers start from the
+// ORIGINAL srcTexture, not chained off each other, so structureStrength and toneStrength are
+// independent - raising one doesn't change what the other measures (see local_contrast.h).
+//
+// Cost: the composite only ever uses the blurs' LUMA, so they carry one R16F channel instead
+// of RGBA16F (blur(luma) == luma(blur), luma being linear). And the tone layer's sigma of 13.6
+// texels at full resolution was ~43 taps per direction over every pixel - 11 ms a frame on a
+// 4000x3200 supersampled target. A blur that wide has nothing above a quarter of the sampling
+// rate, so it is built at 1/4 resolution with sigma 3.4 (the same reach) and upsampled
+// bilinearly by the composite: 1/16 of the pixels and a third of the taps. The structure
+// layer (sigma 3.4) is built the same way at 1/2 resolution. Measured with debugStats on a
+// 4000x3200 target: 11.8 ms before.
 //
 // No capture/blit/state-save of its own - see post_effects.cpp for the shared pipeline that
 // owns srcTexture/dstTexture and the app's GL state around the whole chain of stages this is
@@ -28,6 +35,7 @@ const unsigned int GL_TEXTURE_WRAP_T            = 0x2803;
 const unsigned int GL_LINEAR                    = 0x2601;
 const unsigned int GL_CLAMP_TO_EDGE             = 0x812F;
 const unsigned int GL_RGBA16F                   = 0x881A;
+const unsigned int GL_R16F                      = 0x822D;
 const unsigned int GL_WRITE_ONLY                = 0x88B9;
 const unsigned int GL_COMPUTE_SHADER            = 0x91B9;
 const unsigned int GL_COMPILE_STATUS            = 0x8B81;
@@ -44,18 +52,28 @@ const unsigned int GL_NO_ERROR                  = 0;
 // enough to separate broad midtone regions for a real "clarity" feel.
 const float kStructureRadiusScale = 2.0f;
 const float kToneRadiusScale = 8.0f;
+// Each layer is built at a fraction of each axis - see the header comment. The structure
+// layer's sigma of 3.4 texels leaves nothing above a quarter of the sampling rate, so half
+// resolution loses nothing it keeps; the tone layer's 13.6 allows a quarter.
+const int kStructureDownsample = 2;
+const int kToneDownsample = 4;
 
-// Same normalized 9-tap Gaussian weights as bloom.cpp's blur (w0 + 2*(w1+w2+w3+w4) == 1.0).
-// params.x doubles as the blur direction flag (>0.5 = horizontal, else vertical), params.y is
-// the radius scale that stretches the tap spacing - see this file's header comment.
+// params.x is the blur direction (>0.5 = horizontal, else vertical), params.y the radius scale
+// (sigma = 1.7 * scale texels), params.z > 0.5 when srcTex is the colour frame (take its luma)
+// rather than an already-luma R16F texture.
 const char* kBlurShaderSource =
     "#version 430\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(binding = 0) uniform sampler2D srcTex;\n"
-    "layout(rgba16f, binding = 1) uniform writeonly image2D dstImage;\n"
+    "layout(r16f, binding = 1) uniform writeonly image2D dstImage;\n"
     "layout(std140, binding = 0) uniform LocalContrastBlurBlock {\n"
-    "    vec4 params;\n"  // .x = direction, .y = radiusScale, .zw unused
+    "    vec4 params;\n"  // .x = direction, .y = radiusScale, .z = source is colour
     "};\n"
+    "float Luma(vec2 uv) {\n"
+    "    vec4 c = texture(srcTex, uv);\n"
+    "    float l = params.z > 0.5 ? dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)) : c.r;\n"
+    "    return (isnan(l) || isinf(l)) ? 0.0 : l;\n"
+    "}\n"
     "void main() {\n"
     "    ivec2 outSize = imageSize(dstImage);\n"
     "    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -74,9 +92,7 @@ const char* kBlurShaderSource =
     "    float sigma = 1.7 * max(params.y, 0.5);\n"
     "    int radius = min(int(ceil(3.0 * sigma)), 48);\n"
     "    float twoSigmaSq = 2.0 * sigma * sigma;\n"
-    "    vec3 c0 = texture(srcTex, uv).rgb;\n"
-    "    if (any(isnan(c0)) || any(isinf(c0))) { c0 = vec3(0.0); }\n"
-    "    vec3 sum = c0;\n"
+    "    float sum = Luma(uv);\n"
     "    float total = 1.0;\n"
     "    for (int i = 1; i <= radius; i += 2) {\n"
     "        float w1 = exp(-float(i * i) / twoSigmaSq);\n"
@@ -84,14 +100,43 @@ const char* kBlurShaderSource =
     "        float w = w1 + w2;\n"
     "        float o = (float(i) * w1 + float(i + 1) * w2) / w;\n"
     "        vec2 offset = dir * texelSize * o;\n"
-    "        vec3 a = texture(srcTex, uv + offset).rgb;\n"
-    "        vec3 b = texture(srcTex, uv - offset).rgb;\n"
-    "        if (any(isnan(a)) || any(isinf(a))) { a = c0; }\n"
-    "        if (any(isnan(b)) || any(isinf(b))) { b = c0; }\n"
-    "        sum += (a + b) * w;\n"
+    "        sum += (Luma(uv + offset) + Luma(uv - offset)) * w;\n"
     "        total += 2.0 * w;\n"
     "    }\n"
-    "    imageStore(dstImage, outCoord, vec4(sum / total, 1.0));\n"
+    "    imageStore(dstImage, outCoord, vec4(sum / total));\n"
+    "}\n";
+
+// Luma of each factor x factor block of the colour frame (factor = params.w, 2 or 4), as
+// bilinear taps that each land on the shared corner of a 2x2 group and so average it - one tap
+// for a 2x2 block, four for a 4x4 one: the whole block exactly.
+const char* kDownsampleShaderSource =
+    "#version 430\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(binding = 0) uniform sampler2D srcTex;\n"
+    "layout(r16f, binding = 1) uniform writeonly image2D dstImage;\n"
+    "layout(std140, binding = 0) uniform LocalContrastBlurBlock {\n"
+    "    vec4 params;\n"  // .w = downsample factor
+    "};\n"
+    "float Luma(vec2 p, vec2 srcSize) {\n"
+    "    float l = dot(texture(srcTex, p / srcSize).rgb, vec3(0.2126, 0.7152, 0.0722));\n"
+    "    return (isnan(l) || isinf(l)) ? 0.0 : l;\n"
+    "}\n"
+    "void main() {\n"
+    "    ivec2 outSize = imageSize(dstImage);\n"
+    "    ivec2 q = ivec2(gl_GlobalInvocationID.xy);\n"
+    "    if (q.x >= outSize.x || q.y >= outSize.y) { return; }\n"
+    "    vec2 srcSize = vec2(textureSize(srcTex, 0));\n"
+    "    int factor = int(params.w);\n"
+    "    vec2 base = vec2(q) * float(factor);\n"
+    "    float l = 0.0;\n"
+    "    int n = 0;\n"
+    "    for (int y = 1; y < factor; y += 2) {\n"
+    "        for (int x = 1; x < factor; x += 2) {\n"
+    "            l += Luma(base + vec2(float(x), float(y)), srcSize);\n"
+    "            n++;\n"
+    "        }\n"
+    "    }\n"
+    "    imageStore(dstImage, q, vec4(l / float(max(n, 1))));\n"
     "}\n";
 
 const char* kCompositeShaderSource =
@@ -112,8 +157,12 @@ const char* kCompositeShaderSource =
     "    vec4 orig = texture(origTex, uv);\n"
     "    vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);\n"
     "    float lumaOrig = dot(orig.rgb, lumaWeights);\n"
-    "    float lumaStructureBlur = dot(texture(structureBlurTex, uv).rgb, lumaWeights);\n"
-    "    float lumaToneBlur = dot(texture(toneBlurTex, uv).rgb, lumaWeights);\n"
+    "    if (isnan(lumaOrig) || isinf(lumaOrig)) { lumaOrig = 0.0; }\n"
+    // The layers are 1/2 and 1/4 size, rounded up, so map by the factor rather than stretching
+    // each over the frame: texel k of a layer covers full-res texels [k*f, (k+1)*f).
+    "    vec2 p = vec2(outCoord) + vec2(0.5);\n"
+    "    float lumaStructureBlur = texture(structureBlurTex, p / (2.0 * vec2(textureSize(structureBlurTex, 0)))).r;\n"
+    "    float lumaToneBlur = texture(toneBlurTex, p / (4.0 * vec2(textureSize(toneBlurTex, 0)))).r;\n"
     "    float structureDetail = lumaOrig - lumaStructureBlur;\n"
     "    float toneDetail = lumaOrig - lumaToneBlur;\n"
     "    float delta = structureDetail * params.x + toneDetail * params.y;\n"
@@ -124,7 +173,8 @@ const char* kCompositeShaderSource =
 struct BlurConfigData {
     float direction;
     float radiusScale;
-    float pad[2];
+    float sourceIsColour;
+    float downsampleFactor;   // read by the downsample pass only
 };
 
 struct CompositeConfigData {
@@ -139,6 +189,7 @@ struct PipelineState {
     // The GL context these cached objects belong to - see GetGlContextGeneration().
     unsigned int generation = 0;
     unsigned int blurProgram = 0;
+    unsigned int downsampleProgram = 0;
     unsigned int compositeProgram = 0;
     unsigned int blurUbo = 0;
     unsigned int compositeUbo = 0;
@@ -146,9 +197,14 @@ struct PipelineState {
     bool texturesValid = false;
     int width = 0;
     int height = 0;
-    unsigned int blurTempTexture = 0;
-    unsigned int structureFinalTexture = 0;
-    unsigned int toneFinalTexture = 0;
+    int structureWidth = 0;
+    int structureHeight = 0;
+    int smallWidth = 0;
+    int smallHeight = 0;
+    unsigned int blurTempTexture = 0;        // 1/kStructureDownsample res, R16F
+    unsigned int structureFinalTexture = 0;  // 1/kStructureDownsample res, R16F
+    unsigned int toneTempTexture = 0;        // 1/kToneDownsample res, R16F
+    unsigned int toneFinalTexture = 0;       // 1/kToneDownsample res, R16F
 };
 
 PipelineState g_state;
@@ -197,7 +253,7 @@ unsigned int CreateWorkTexture(const GlComputeApi& gl, int width, int height) {
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA16F, width, height);
+    gl.glTexStorage2D(GL_TEXTURE_2D, 1, GL_R16F, width, height);
     return texture;
 }
 
@@ -207,14 +263,20 @@ void EnsureTextures(const GlComputeApi& gl, int width, int height) {
     }
 
     if (g_state.texturesValid) {
-        unsigned int textures[3] = {g_state.blurTempTexture, g_state.structureFinalTexture, g_state.toneFinalTexture};
-        gl.glDeleteTextures(3, textures);
+        unsigned int textures[4] = {g_state.blurTempTexture, g_state.structureFinalTexture,
+                                    g_state.toneTempTexture, g_state.toneFinalTexture};
+        gl.glDeleteTextures(4, textures);
         g_state.texturesValid = false;
     }
 
-    g_state.blurTempTexture = CreateWorkTexture(gl, width, height);
-    g_state.structureFinalTexture = CreateWorkTexture(gl, width, height);
-    g_state.toneFinalTexture = CreateWorkTexture(gl, width, height);
+    g_state.structureWidth = (width + kStructureDownsample - 1) / kStructureDownsample;
+    g_state.structureHeight = (height + kStructureDownsample - 1) / kStructureDownsample;
+    g_state.smallWidth = (width + kToneDownsample - 1) / kToneDownsample;
+    g_state.smallHeight = (height + kToneDownsample - 1) / kToneDownsample;
+    g_state.blurTempTexture = CreateWorkTexture(gl, g_state.structureWidth, g_state.structureHeight);
+    g_state.structureFinalTexture = CreateWorkTexture(gl, g_state.structureWidth, g_state.structureHeight);
+    g_state.toneTempTexture = CreateWorkTexture(gl, g_state.smallWidth, g_state.smallHeight);
+    g_state.toneFinalTexture = CreateWorkTexture(gl, g_state.smallWidth, g_state.smallHeight);
 
     g_state.width = width;
     g_state.height = height;
@@ -239,10 +301,11 @@ unsigned int GroupCount(int extent) {
 }
 
 void RunBlurPass(const GlComputeApi& gl, unsigned int srcTex, unsigned int dstTex,
-                  float direction, float radiusScale, unsigned int groupsX, unsigned int groupsY) {
+                  float direction, float radiusScale, bool sourceIsColour, int width, int height) {
     BlurConfigData data{};
     data.direction = direction;
     data.radiusScale = radiusScale;
+    data.sourceIsColour = sourceIsColour ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.blurUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BlurConfigData), &data, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.blurUbo);
@@ -250,8 +313,24 @@ void RunBlurPass(const GlComputeApi& gl, unsigned int srcTex, unsigned int dstTe
     gl.glUseProgram(g_state.blurProgram);
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTex);
-    gl.glBindImageTexture(1, dstTex, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);
-    gl.glDispatchCompute(groupsX, groupsY, 1);
+    gl.glBindImageTexture(1, dstTex, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
+    gl.glDispatchCompute(GroupCount(width), GroupCount(height), 1);
+    gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+}
+
+void RunDownsamplePass(const GlComputeApi& gl, unsigned int srcTex, unsigned int dstTex,
+                       int factor, int dstWidth, int dstHeight) {
+    BlurConfigData data{};
+    data.downsampleFactor = (float)factor;
+    gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.blurUbo);
+    gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(BlurConfigData), &data, GL_DYNAMIC_DRAW);
+    gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.blurUbo);
+
+    gl.glUseProgram(g_state.downsampleProgram);
+    gl.glActiveTexture(GL_TEXTURE0);
+    gl.glBindTexture(GL_TEXTURE_2D, srcTex);
+    gl.glBindImageTexture(1, dstTex, 0, 0, 0, GL_WRITE_ONLY, GL_R16F);
+    gl.glDispatchCompute(GroupCount(dstWidth), GroupCount(dstHeight), 1);
     gl.glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 
@@ -282,6 +361,7 @@ bool ApplyLocalContrast(unsigned int srcTexture, unsigned int dstTexture, int wi
         g_state.initTried = true;
         bool ok = true;
         ok &= CompileAndLink(gl, kBlurShaderSource, "blur", g_state.blurProgram);
+        ok &= CompileAndLink(gl, kDownsampleShaderSource, "downsample", g_state.downsampleProgram);
         ok &= CompileAndLink(gl, kCompositeShaderSource, "composite", g_state.compositeProgram);
         g_state.initOk = ok;
         if (!g_state.initOk) {
@@ -303,15 +383,24 @@ bool ApplyLocalContrast(unsigned int srcTexture, unsigned int dstTexture, int wi
     unsigned int groupsX = GroupCount(width);
     unsigned int groupsY = GroupCount(height);
 
-    // Structure layer: small-radius blur of the ORIGINAL srcTexture, both directions.
-    RunBlurPass(gl, srcTexture, g_state.blurTempTexture, 1.0f, kStructureRadiusScale, groupsX, groupsY);
-    RunBlurPass(gl, g_state.blurTempTexture, g_state.structureFinalTexture, 0.0f, kStructureRadiusScale, groupsX, groupsY);
+    // Each layer: the ORIGINAL srcTexture's luma (the two are not chained off each other),
+    // box-downsampled, then blurred at that size with the sigma scaled down by the same factor -
+    // the same reach in full-resolution texels.
+    RunDownsamplePass(gl, srcTexture, g_state.structureFinalTexture, kStructureDownsample,
+                      g_state.structureWidth, g_state.structureHeight);
+    const float structureSmallScale = kStructureRadiusScale / (float)kStructureDownsample;
+    RunBlurPass(gl, g_state.structureFinalTexture, g_state.blurTempTexture, 1.0f, structureSmallScale,
+                false, g_state.structureWidth, g_state.structureHeight);
+    RunBlurPass(gl, g_state.blurTempTexture, g_state.structureFinalTexture, 0.0f, structureSmallScale,
+                false, g_state.structureWidth, g_state.structureHeight);
 
-    // Tone layer: large-radius blur of the ORIGINAL srcTexture (not chained off the structure
-    // blur above), both directions. blurTempTexture is safely reused - the structure pass's
-    // vertical dispatch already finished reading it before this overwrites it.
-    RunBlurPass(gl, srcTexture, g_state.blurTempTexture, 1.0f, kToneRadiusScale, groupsX, groupsY);
-    RunBlurPass(gl, g_state.blurTempTexture, g_state.toneFinalTexture, 0.0f, kToneRadiusScale, groupsX, groupsY);
+    RunDownsamplePass(gl, srcTexture, g_state.toneFinalTexture, kToneDownsample,
+                      g_state.smallWidth, g_state.smallHeight);
+    const float toneSmallScale = kToneRadiusScale / (float)kToneDownsample;
+    RunBlurPass(gl, g_state.toneFinalTexture, g_state.toneTempTexture, 1.0f, toneSmallScale, false,
+                g_state.smallWidth, g_state.smallHeight);
+    RunBlurPass(gl, g_state.toneTempTexture, g_state.toneFinalTexture, 0.0f, toneSmallScale, false,
+                g_state.smallWidth, g_state.smallHeight);
 
     // Composite: srcTexture + both detail layers * their strengths -> dstTexture.
     CompositeConfigData compositeData{};
