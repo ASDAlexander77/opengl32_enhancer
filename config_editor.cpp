@@ -14,6 +14,7 @@
 // exists to fix. Press the dump hotkey in-game (frameDumpKey, F12 by default), then load the
 // file here to tune against a real frame, depth and projection included.
 #include <windows.h>
+#include <delayimp.h>
 #include <cstdio>
 #include <cstring>
 
@@ -28,6 +29,35 @@
 #include "post_effects.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// The editor is meant to sit in the game folder, next to the proxy opengl32.dll - and Windows
+// looks in an exe's own folder before System32. Imported normally, opengl32 would then BE the
+// proxy: it forces windowWidth/windowHeight on this window, supersamples it at renderWidth, and
+// runs the whole effect chain a second time over every SwapBuffers, ImGui UI included - the UI
+// shrinks to unreadable, and the second pass makes slider changes and loaded frames look wrong.
+// So opengl32 is delay-loaded (CMakeLists.txt) and pinned here to the system copy, loaded by
+// full path before anything (GDI's ChoosePixelFormat included) can load it by bare name.
+HMODULE LoadSystemOpenGl() {
+    static HMODULE module = nullptr;
+    if (module == nullptr) {
+        char path[MAX_PATH];
+        UINT len = GetSystemDirectoryA(path, MAX_PATH);
+        if (len > 0 && len + 14 < MAX_PATH) {
+            strcat_s(path, "\\opengl32.dll");
+            module = LoadLibraryA(path);
+        }
+    }
+    return module;
+}
+
+FARPROC WINAPI DelayLoadHook(unsigned notify, PDelayLoadInfo info) {
+    if (notify == dliNotePreLoadLibrary && _stricmp(info->szDll, "opengl32.dll") == 0) {
+        return (FARPROC)LoadSystemOpenGl();
+    }
+    return nullptr;
+}
+
+extern "C" const PfnDliHook __pfnDliNotifyHook2 = DelayLoadHook;
 
 namespace {
 
@@ -339,6 +369,10 @@ void DrawSceneControls() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (LoadSystemOpenGl() == nullptr) {
+        printf("FAILED: could not load the system opengl32.dll, GetLastError=%lu\n", GetLastError());
+        return 1;
+    }
     if (argc > 1) {
         snprintf(g_iniPath, sizeof(g_iniPath), "%s", argv[1]);
     }

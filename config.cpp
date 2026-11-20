@@ -570,6 +570,9 @@ AnaxConfig ParseConfigFile(const char* path) {
             config.windowHeight = ParseClampedInt(value, 0, 16384, config.windowHeight, "windowHeight");
         } else if (strcmp(key, "dpiAware") == 0) {
             config.dpiAware = ParseBool(value, config.dpiAware, "dpiAware");
+        } else if (strcmp(key, "borderlessFullscreen") == 0) {
+            config.borderlessFullscreen =
+                ParseBool(value, config.borderlessFullscreen, "borderlessFullscreen");
         } else if (strcmp(key, "renderWidth") == 0) {
             config.renderWidth = ParseClampedInt(value, 0, 16384, config.renderWidth, "renderWidth");
         } else if (strcmp(key, "renderHeight") == 0) {

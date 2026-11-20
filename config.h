@@ -198,6 +198,15 @@ struct AnaxConfig {
     // On by default; set dpiAware=0 to keep Windows' own scaling.
     bool dpiAware = true;
 
+    // Fullscreen without a display-mode switch. id Tech 2-era renderers go fullscreen by calling
+    // ChangeDisplaySettings to one of their own fixed modes (Anachronox: 640x480 .. 1600x1200,
+    // all 4:3) - on a modern 16:9 panel the monitor then stretches that low, wrong-aspect mode
+    // across the screen, which is the "zoomed" fullscreen. With this on, the DLL answers that
+    // call with success without changing the mode, and the game's fullscreen window is sized to
+    // cover the whole monitor at its native resolution instead. Windowed games are unaffected.
+    // On by default; set borderlessFullscreen=0 for the game's own mode switch.
+    bool borderlessFullscreen = true;
+
     // Renders the game into an offscreen framebuffer of this size and downsamples it to the
     // window on present - see render_target.h. Both default to 0, meaning off; the override
     // only applies when BOTH are positive, the same both-or-nothing rule windowWidth/

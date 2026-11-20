@@ -33,6 +33,17 @@ bool GetWindowClientSize(void* hdc, int& outWidth, int& outHeight);
 // creates its window, which is what makes that early enough. Idempotent; logs what it did.
 void EnsureProcessDpiAware();
 
+// When config.borderlessFullscreen is set, patches the import of ChangeDisplaySettingsA in the
+// game's renderer (ref_gl.dll, the first module of a Quake II-family game to call it) and in the
+// main exe, so a request to switch to a fullscreen display mode returns success without
+// changing the mode; ApplyWindowSizeOverride then sizes the fullscreen window to the whole
+// monitor. Called from dll_init.cpp: the renderer that LoadLibrary'd this DLL is fully loaded by
+// then and has not yet set its mode. Idempotent; logs what it patched.
+void InstallBorderlessFullscreen();
+
+// True once InstallBorderlessFullscreen has swallowed at least one fullscreen mode switch.
+bool WasDisplayModeSwitchSuppressed();
+
 // Pure helper behind ApplyWindowSizeOverride's fullscreen handling, exposed for the tests: fits
 // a requested client size inside a monitor of the given size, preserving the requested aspect
 // ratio. Returns the request unchanged when it already fits.

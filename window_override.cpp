@@ -1,6 +1,7 @@
 // See window_override.h.
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "config.h"
 #include "debug_log.h"
@@ -42,6 +43,7 @@ extern "C" {
     __declspec(dllimport) BOOL __stdcall SetProcessDPIAware(void);
     __declspec(dllimport) HMODULE __stdcall GetModuleHandleA(const char* lpModuleName);
     __declspec(dllimport) void* __stdcall GetProcAddress(HMODULE hModule, const char* lpProcName);
+    __declspec(dllimport) BOOL __stdcall VirtualProtect(void* lpAddress, size_t dwSize, DWORD flNewProtect, DWORD* lpflOldProtect);
 }
 
 namespace {
@@ -54,8 +56,113 @@ const UINT SWP_NOACTIVATE = 0x0010;
 const DWORD WS_CAPTION = 0x00C00000;
 const DWORD WS_POPUP = 0x80000000;
 const DWORD MONITOR_DEFAULTTONEAREST = 0x00000002;
+const DWORD PAGE_READWRITE = 0x04;
+const DWORD CDS_FULLSCREEN = 0x00000004;
+const LONG DISP_CHANGE_SUCCESSFUL = 0;
+
+typedef LONG (__stdcall *PfnChangeDisplaySettingsA)(void* devMode, DWORD flags);
+PfnChangeDisplaySettingsA g_realChangeDisplaySettings = nullptr;
+bool g_modeSwitchSuppressed = false;
+
+// devMode == NULL is "restore the registry mode", which the game sends on shutdown and on
+// vid_restart; with no mode ever changed there is nothing to restore, so that is swallowed too.
+LONG __stdcall HookedChangeDisplaySettingsA(void* devMode, DWORD flags) {
+    if (devMode == nullptr || (flags & CDS_FULLSCREEN) != 0) {
+        if (devMode != nullptr && !g_modeSwitchSuppressed) {
+            printf("[opengl32_enh_cpp] borderlessFullscreen: kept the desktop resolution instead "
+                   "of the game's fullscreen mode switch\n");
+            g_modeSwitchSuppressed = true;
+        }
+        return DISP_CHANGE_SUCCESSFUL;
+    }
+    return g_realChangeDisplaySettings ? g_realChangeDisplaySettings(devMode, flags) : -1;
+}
+
+// Rewrites `module`'s import address table entry for user32!ChangeDisplaySettingsA. Walks the PE
+// import directory by hand (no <windows.h> here, see the header comment). Matches by name through
+// the import lookup table, falling back to the resolved address for a module bound without one.
+bool PatchChangeDisplaySettingsImport(HMODULE module, void* realFn) {
+    if (module == nullptr) {
+        return false;
+    }
+    unsigned char* base = (unsigned char*)module;
+    if (base[0] != 'M' || base[1] != 'Z') {
+        return false;
+    }
+    unsigned char* nt = base + *(int32_t*)(base + 0x3C);
+    if (nt[0] != 'P' || nt[1] != 'E') {
+        return false;
+    }
+    unsigned char* optional = nt + 4 + 20;
+    uint16_t magic = *(uint16_t*)optional;
+    // The data directory follows the fixed part of the optional header: 96 bytes in PE32,
+    // 112 in PE32+. Entry 1 is the import directory.
+    unsigned char* dataDirectory = optional + (magic == 0x20B ? 112 : 96);
+    uint32_t importRva = *(uint32_t*)(dataDirectory + 8);
+    if (importRva == 0) {
+        return false;
+    }
+    bool patched = false;
+    for (uint32_t* desc = (uint32_t*)(base + importRva); desc[3] != 0; desc += 5) {
+        const char* dllName = (const char*)(base + desc[3]);
+        if (_stricmp(dllName, "user32.dll") != 0) {
+            continue;
+        }
+        uintptr_t* iat = (uintptr_t*)(base + desc[4]);
+        uintptr_t* lookup = desc[0] != 0 ? (uintptr_t*)(base + desc[0]) : nullptr;
+        for (size_t i = 0; iat[i] != 0; ++i) {
+            bool match = iat[i] == (uintptr_t)realFn;
+            if (!match && lookup != nullptr) {
+                uintptr_t entry = lookup[i];
+                bool byOrdinal = (entry >> (sizeof(uintptr_t) * 8 - 1)) != 0;
+                if (!byOrdinal) {
+                    const char* fnName = (const char*)(base + (uint32_t)entry + 2);
+                    match = strcmp(fnName, "ChangeDisplaySettingsA") == 0;
+                }
+            }
+            if (!match) {
+                continue;
+            }
+            DWORD oldProtect = 0;
+            if (VirtualProtect(&iat[i], sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+                iat[i] = (uintptr_t)&HookedChangeDisplaySettingsA;
+                VirtualProtect(&iat[i], sizeof(uintptr_t), oldProtect, &oldProtect);
+                patched = true;
+            }
+        }
+    }
+    return patched;
+}
 
 }  // namespace
+
+void InstallBorderlessFullscreen() {
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    done = true;
+    if (!GetAnaxConfig().borderlessFullscreen) {
+        return;
+    }
+    HMODULE user32 = GetModuleHandleA("user32.dll");
+    void* real = user32 ? GetProcAddress(user32, "ChangeDisplaySettingsA") : nullptr;
+    if (real == nullptr) {
+        return;
+    }
+    g_realChangeDisplaySettings = (PfnChangeDisplaySettingsA)real;
+    const char* names[] = {"ref_gl.dll", nullptr};   // nullptr = the main exe
+    for (const char* name : names) {
+        if (PatchChangeDisplaySettingsImport(GetModuleHandleA(name), real)) {
+            printf("[opengl32_enh_cpp] borderlessFullscreen: hooked ChangeDisplaySettingsA in %s\n",
+                   name ? name : "the game exe");
+        }
+    }
+}
+
+bool WasDisplayModeSwitchSuppressed() {
+    return g_modeSwitchSuppressed;
+}
 
 void FitClientSizeToMonitor(int requestedWidth, int requestedHeight, int monitorWidth,
                             int monitorHeight, int& outWidth, int& outHeight) {
@@ -122,7 +229,8 @@ void ApplyWindowSizeOverride(void* hdcRaw) {
     RedirectStdoutToDebugLog();
 
     const AnaxConfig& config = GetAnaxConfig();
-    if (config.windowWidth <= 0 || config.windowHeight <= 0) {
+    bool sizeRequested = config.windowWidth > 0 && config.windowHeight > 0;
+    if (!sizeRequested && !WasDisplayModeSwitchSuppressed()) {
         return;
     }
 
@@ -135,6 +243,36 @@ void ApplyWindowSizeOverride(void* hdcRaw) {
 
     DWORD style = (DWORD)GetWindowLongA(hwnd, GWL_STYLE);
     DWORD exStyle = (DWORD)GetWindowLongA(hwnd, GWL_EXSTYLE);
+
+    // Borderless fullscreen: the game asked for a display mode we did not switch to, so the
+    // monitor is still at the desktop resolution and the game's popup is only as big as the mode
+    // it wanted. Cover the whole monitor - that IS the fullscreen picture now, at native pixels.
+    if (WasDisplayModeSwitchSuppressed() && (style & WS_POPUP) != 0 &&
+        (style & WS_CAPTION) != WS_CAPTION) {
+        MONITORINFO info = {};
+        info.cbSize = sizeof(info);
+        HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor != nullptr && GetMonitorInfoA(monitor, &info)) {
+            int w = (int)(info.rcMonitor.right - info.rcMonitor.left);
+            int h = (int)(info.rcMonitor.bottom - info.rcMonitor.top);
+            RECT rect = {0, 0, (LONG)w, (LONG)h};
+            AdjustWindowRectEx(&rect, style, 0, exStyle);
+            if (SetWindowPos(hwnd, nullptr, (int)info.rcMonitor.left + (int)rect.left,
+                             (int)info.rcMonitor.top + (int)rect.top,
+                             (int)(rect.right - rect.left), (int)(rect.bottom - rect.top),
+                             SWP_NOZORDER | SWP_NOACTIVATE)) {
+                printf("[opengl32_enh_cpp] windowSize: borderless fullscreen, window covers the "
+                       "%dx%d monitor\n", w, h);
+            } else {
+                printf("[opengl32_enh_cpp] windowSize: SetWindowPos FAILED, GetLastError=%lu\n",
+                       GetLastError());
+            }
+            return;
+        }
+    }
+    if (!sizeRequested) {
+        return;
+    }
 
     int clientWidth = config.windowWidth;
     int clientHeight = config.windowHeight;

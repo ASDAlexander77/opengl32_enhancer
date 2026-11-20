@@ -61,10 +61,15 @@ const char* kDetectShaderSource =
     "    int step;\n"
     "    int srcWidth;\n"
     "    int srcHeight;\n"
+    "    float useHudMask;\n"
     "};\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "void main() {\n"
     "    ivec2 coord = ivec2(gl_GlobalInvocationID.xy) * step;\n"
     "    if (coord.x >= srcWidth || coord.y >= srcHeight) { return; }\n"
+    // A bright HUD element (a white menu or the PAUSE banner) is not a light in the scene: let it
+    // in and the detected light jumps onto the overlay and shafts fan out from it.
+    "    if (useHudMask > 0.5 && texelFetch(hudMask, coord, 0).r > 0.5) { return; }\n"
     "    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(srcWidth, srcHeight);\n"
     "    vec3 c = texture(srcTex, uv).rgb;\n"
     "    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
@@ -103,7 +108,9 @@ const char* kBrightShaderSource =
     "    float density;\n"
     "    float decay;\n"
     "    float threshold;\n"
+    "    float useHudMask;\n"
     "};\n"
+    "layout(binding = 2) uniform sampler2D hudMask;\n"
     "vec3 Contrib(vec3 c) {\n"
     "    c = min(c, vec3(4.0));\n"
     "    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
@@ -120,6 +127,8 @@ const char* kBrightShaderSource =
     "    for (int j = 0; j < 2; ++j) {\n"
     "        for (int i = 0; i < 2; ++i) {\n"
     "            vec2 p = (vec2(q) + vec2(0.25 + 0.5 * float(i), 0.25 + 0.5 * float(j))) * block;\n"
+    // HUD pixels are occluders, not light sources (see the detect pass).
+    "            if (useHudMask > 0.5 && texelFetch(hudMask, ivec2(p), 0).r > 0.5) { continue; }\n"
     "            sum += Contrib(texture(srcTex, p / srcSize).rgb);\n"
     "        }\n"
     "    }\n"
@@ -228,6 +237,8 @@ struct DetectConfigData {
     int step;
     int srcWidth;
     int srcHeight;
+    float useHudMask;
+    float pad[3];
 };
 
 struct ShaftConfigData {
@@ -235,7 +246,7 @@ struct ShaftConfigData {
     float density;
     float decay;
     float threshold;
-    float useHudMask;   // read by the composite pass only
+    float useHudMask;   // bright and composite passes skip HUD pixels
     float pad[3];
 };
 
@@ -373,10 +384,16 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     detectData.step = kDetectStep;
     detectData.srcWidth = width;
     detectData.srcHeight = height;
+    detectData.useHudMask = hudMaskTexture != 0 ? 1.0f : 0.0f;
     gl.glBindBuffer(GL_UNIFORM_BUFFER, g_state.detectUbo);
     gl.glBufferData(GL_UNIFORM_BUFFER, sizeof(detectData), &detectData, GL_DYNAMIC_DRAW);
     gl.glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_state.detectUbo);
 
+    // Unit 2 holds the HUD mask for every pass (detect, bright, composite).
+    if (hudMaskTexture != 0) {
+        gl.glActiveTexture(GL_TEXTURE0 + 2);
+        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
+    }
     gl.glUseProgram(g_state.detectProgram);
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
@@ -432,10 +449,6 @@ bool ApplyLightShafts(unsigned int srcTexture, unsigned int dstTexture, int widt
     gl.glUseProgram(g_state.compositeProgram);
     gl.glActiveTexture(GL_TEXTURE1);
     gl.glBindTexture(GL_TEXTURE_2D, g_state.shaftTex);
-    if (hudMaskTexture != 0) {
-        gl.glActiveTexture(GL_TEXTURE1 + 1);
-        gl.glBindTexture(GL_TEXTURE_2D, hudMaskTexture);
-    }
     gl.glActiveTexture(GL_TEXTURE0);
     gl.glBindTexture(GL_TEXTURE_2D, srcTexture);
     gl.glBindImageTexture(0, dstTexture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA16F);

@@ -18,6 +18,7 @@ struct DllInit {
     DllInit() {
         RedirectStdoutToDebugLog();
         EnsureProcessDpiAware();
+        InstallBorderlessFullscreen();
     }
 };
 

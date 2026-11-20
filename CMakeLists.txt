@@ -413,7 +413,10 @@ add_executable(config_editor WIN32
     third_party/imgui/backends/imgui_impl_win32.cpp
     third_party/imgui/backends/imgui_impl_opengl3.cpp)
 target_include_directories(config_editor PRIVATE third_party/imgui)
-target_link_libraries(config_editor opengl32 gdi32 user32 dwmapi imm32)
+target_link_libraries(config_editor opengl32 gdi32 user32 dwmapi imm32 delayimp)
+# Delay-loaded so config_editor.cpp can pin it to System32's copy: next to the game, the bare
+# name would otherwise resolve to the proxy DLL itself (see LoadSystemOpenGl there).
+target_link_options(config_editor PRIVATE /DELAYLOAD:opengl32.dll)
 # WIN32 above makes this a GUI app (no console window of its own), but the whole codebase
 # reports through printf - so give it a console back. Without this, every diagnostic from the
 # config parser, the GL loader and the stages themselves would go nowhere.

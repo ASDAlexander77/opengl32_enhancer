@@ -264,6 +264,15 @@ const char* kSsrCompositeShaderSource =
     "        }\n"
     "    }\n"
     "    vec2 uv = (vec2(p) + vec2(0.5)) / vec2(size);\n"
+    // A ray that lands on a HUD pixel would mirror the overlay (the PAUSE banner, a menu) into the
+    // floor below it. The overlay is not in the scene, so that ray reflects nothing.
+    "    if (params2.w > 0.5) {\n"
+    "        ivec2 hit = clamp(ivec2((uv + trace.xy) * vec2(size)), ivec2(0), size - ivec2(1));\n"
+    "        if (texelFetch(hudMask, hit, 0).r > 0.5) {\n"
+    "            imageStore(outputImage, p, color);\n"
+    "            return;\n"
+    "        }\n"
+    "    }\n"
     "    vec3 reflected = texture(colorTex, uv + trace.xy).rgb;\n"
     "    if (any(isnan(reflected)) || any(isinf(reflected))) { reflected = color.rgb; blend = 0.0; }\n"
     "    imageStore(outputImage, p, vec4(mix(color.rgb, reflected, blend), color.a));\n"
