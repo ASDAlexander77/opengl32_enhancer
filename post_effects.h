@@ -117,3 +117,9 @@ bool ShouldSkipAllWork(int stageCount, int frameDumpKey, bool windowSizeOverride
 // frame with supersampling off - so the unsupersampled present is bit-for-bit the blit it has
 // always been.
 int ResolveHalvingSteps(int srcWidth, int srcHeight, int dstWidth, int dstHeight);
+
+// keepAspect's present rectangle: the largest rectangle with the content's aspect ratio that
+// fits the window, centred. A mismatch under 1% fills the whole window, so rounding never leaves
+// a one-pixel bar. Degenerate input also fills the whole window.
+void FitPresentRect(int contentWidth, int contentHeight, int windowWidth, int windowHeight,
+                    int& outX, int& outY, int& outWidth, int& outHeight);

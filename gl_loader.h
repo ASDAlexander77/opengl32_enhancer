@@ -75,6 +75,10 @@ typedef void (__stdcall *PFNGLPIXELSTOREIPROC)(unsigned int pname, int param);
 typedef void (__stdcall *PFNGLREADPIXELSPROC)(int x, int y, int width, int height,
     unsigned int format, unsigned int type, void* pixels);
 
+typedef void (__stdcall *PFNGLCLEARBUFFERFVPROC)(unsigned int buffer, int drawbuffer, const float* value);
+typedef unsigned char (__stdcall *PFNGLISENABLEDPROC)(unsigned int cap);
+typedef void (__stdcall *PFNGLCAPPROC)(unsigned int cap);
+
 struct GlComputeApi {
     PFNGLBINDIMAGETEXTUREPROC glBindImageTexture = nullptr;
     PFNGLDISPATCHCOMPUTEPROC glDispatchCompute = nullptr;
@@ -129,6 +133,13 @@ struct GlComputeApi {
     PFNGLQUERYCOUNTERPROC glQueryCounter = nullptr;
     PFNGLGETQUERYOBJECTIVPROC glGetQueryObjectiv = nullptr;
     PFNGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v = nullptr;
+
+    // Optional (keepAspect's black bars only, see post_effects.cpp): resolved without affecting
+    // `loaded`; the bars are simply not cleared when any of these is missing.
+    PFNGLCLEARBUFFERFVPROC glClearBufferfv = nullptr;
+    PFNGLISENABLEDPROC glIsEnabled = nullptr;
+    PFNGLCAPPROC glEnable = nullptr;
+    PFNGLCAPPROC glDisable = nullptr;
 
     bool loaded = false;
 };

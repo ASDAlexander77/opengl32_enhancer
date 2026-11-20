@@ -449,6 +449,32 @@ bool CheckResolveHalvingSteps() {
     return ok;
 }
 
+// keepAspect's present rectangle - see FitPresentRect in post_effects.h.
+bool CheckFitPresentRect() {
+    struct Row {
+        int cw, ch, ww, wh, x, y, w, h;
+        const char* why;
+    };
+    const Row rows[] = {
+        {640, 480, 3200, 2000, 266, 0, 2667, 2000, "4:3 game in a 16:10 window: pillarbox"},
+        {640, 480, 1920, 1080, 240, 0, 1440, 1080, "4:3 game in a 16:9 window: pillarbox"},
+        {1920, 1080, 1600, 1200, 0, 150, 1600, 900, "16:9 content in a 4:3 window: letterbox"},
+        {640, 480, 1280, 960, 0, 0, 1280, 960, "same aspect: whole window"},
+        {1280, 720, 1280, 727, 0, 0, 1280, 727, "under 1% off: whole window, no 1px bars"},
+        {0, 480, 800, 600, 0, 0, 800, 600, "degenerate content: whole window"},
+    };
+    bool ok = true;
+    for (const Row& r : rows) {
+        int x = -1, y = -1, w = -1, h = -1;
+        FitPresentRect(r.cw, r.ch, r.ww, r.wh, x, y, w, h);
+        char what[256];
+        snprintf(what, sizeof(what), "fit %dx%d into %dx%d -> %d,%d %dx%d (got %d,%d %dx%d) (%s)",
+                 r.cw, r.ch, r.ww, r.wh, r.x, r.y, r.w, r.h, x, y, w, h, r.why);
+        ok = Check(x == r.x && y == r.y && w == r.w && h == r.h, what) && ok;
+    }
+    return ok;
+}
+
 // The colour space each stage wants to be handed - see ColorSpaceFor in post_effects.h.
 // Every one of the twenty-five EffectKind values is listed, not just the three interesting
 // ones: a stage added later without a considered space is exactly the failure this catches,
@@ -599,6 +625,7 @@ int main() {
     ok = CheckShouldSkipEffectChain() && ok;
     ok = CheckShouldSkipAllWork() && ok;
     ok = CheckResolveHalvingSteps() && ok;
+    ok = CheckFitPresentRect() && ok;
     ok = CheckColorSpaceFor() && ok;
     const GlComputeApi& gl = GetGlComputeApi();
     ok = Check(gl.loaded, "GL 4.3 compute support available on this context") && ok;

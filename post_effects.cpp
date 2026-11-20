@@ -647,6 +647,38 @@ int ResolveHalvingSteps(int srcWidth, int srcHeight, int dstWidth, int dstHeight
     return steps;
 }
 
+// See post_effects.h.
+void FitPresentRect(int contentWidth, int contentHeight, int windowWidth, int windowHeight,
+                    int& outX, int& outY, int& outWidth, int& outHeight) {
+    outX = 0;
+    outY = 0;
+    outWidth = windowWidth;
+    outHeight = windowHeight;
+    if (contentWidth <= 0 || contentHeight <= 0 || windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+    // Cross-multiplied in 64 bits: which side is wider, without a division.
+    long long contentByWindow = (long long)contentWidth * windowHeight;
+    long long windowByContent = (long long)windowWidth * contentHeight;
+    if (contentByWindow < windowByContent) {
+        // Window is wider than the content: full height, bars left and right.
+        int w = (int)((contentByWindow + contentHeight / 2) / contentHeight);
+        if (w * 100 >= windowWidth * 99) {
+            return;
+        }
+        outWidth = w;
+        outX = (windowWidth - w) / 2;
+    } else if (contentByWindow > windowByContent) {
+        // Window is taller than the content: full width, bars top and bottom.
+        int h = (int)((windowByContent + contentWidth / 2) / contentWidth);
+        if (h * 100 >= windowHeight * 99) {
+            return;
+        }
+        outHeight = h;
+        outY = (windowHeight - h) / 2;
+    }
+}
+
 void ApplySelectedEffect(void* hdc) {
     // Idempotent, and cheap after the first call. Also covers the case where a game somehow
     // reaches a swap without ApplyWindowSizeOverride having run first.
@@ -767,6 +799,28 @@ void ApplySelectedEffect(void* hdc) {
     // The config editor presenting a loaded frame dump into a sub-rectangle of its window - see
     // SetExternalSourceFramebuffer in render_target.h. No-op in a game.
     GetExternalPresentSize(dstWidth, dstHeight);
+
+    // keepAspect: from here on dstWidth/dstHeight is the centred rectangle inside the window
+    // that keeps the game's aspect ratio, so every stage, upscale and resolve below works at the
+    // size the image is really shown at; only the final blit offsets it, and the bars around it
+    // are cleared to black there. The game's aspect is its own viewport - with supersampling
+    // armed, the reference viewport the target was armed against, since the target's own size
+    // is whatever renderWidth/renderHeight says. Not applied to the config editor's external
+    // present, which already fits its frame to the preview area.
+    int windowWidth = dstWidth;
+    int windowHeight = dstHeight;
+    int presentX = 0;
+    int presentY = 0;
+    if (config.keepAspect && !IsExternalSourceActive()) {
+        int contentWidth = nativeWidth;
+        int contentHeight = nativeHeight;
+        if (IsSupersampleActive()) {
+            GetReferenceViewport(contentWidth, contentHeight);
+        }
+        FitPresentRect(contentWidth, contentHeight, windowWidth, windowHeight, presentX, presentY,
+                       dstWidth, dstHeight);
+    }
+    bool hasBars = dstWidth != windowWidth || dstHeight != windowHeight;
 
     // Deliberately strict about what counts as "the game is rendering smaller than its window":
     //
@@ -1659,9 +1713,29 @@ void ApplySelectedEffect(void* hdc) {
     // rounding. Everything that is still shrinking - the non-power-of-two remainders - gets
     // GL_LINEAR, exactly as before. With supersampling off this is 1:1 and therefore GL_NEAREST,
     // which is the filter that path has always used.
+    // keepAspect's bars. Cleared every frame: without supersampling the game drew its own
+    // (stretched) frame across the whole back buffer, and either way the back buffer's contents
+    // outside the image are otherwise undefined after a swap. The game's scissor test would clip
+    // the clear, so it is lifted for the clear and put back.
+    if (hasBars && gl.glClearBufferfv != nullptr && gl.glIsEnabled != nullptr &&
+        gl.glEnable != nullptr && gl.glDisable != nullptr) {
+        const unsigned int GL_SCISSOR_TEST_CAP = 0x0C11;
+        const unsigned int GL_COLOR_BUFFER = 0x1800;
+        bool scissorOn = gl.glIsEnabled(GL_SCISSOR_TEST_CAP) != 0;
+        if (scissorOn) {
+            gl.glDisable(GL_SCISSOR_TEST_CAP);
+        }
+        const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        gl.glClearBufferfv(GL_COLOR_BUFFER, 0, black);
+        if (scissorOn) {
+            gl.glEnable(GL_SCISSOR_TEST_CAP);
+        }
+    }
+
     bool exactSize = (curWidth == presentWidth && curHeight == presentHeight);
-    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, 0, 0, presentWidth, presentHeight,
-                         GL_COLOR_BUFFER_BIT, exactSize ? GL_NEAREST : GL_LINEAR);
+    gl.glBlitFramebuffer(0, 0, curWidth, curHeight, presentX, presentY, presentX + presentWidth,
+                         presentY + presentHeight, GL_COLOR_BUFFER_BIT,
+                         exactSize ? GL_NEAREST : GL_LINEAR);
 
     unsigned int err = gl.glGetError();
     if (err != GL_NO_ERROR) {
@@ -1670,7 +1744,8 @@ void ApplySelectedEffect(void* hdc) {
     PerfGpuMark("present");
 
     if (ConsumeScreenshotRequest(config.screenshotKey)) {
-        SaveScreenshot(gl, presentWidth, presentHeight);
+        SaveScreenshot(gl, hasBars ? windowWidth : presentWidth,
+                       hasBars ? windowHeight : presentHeight);
     }
 
     restoreState();

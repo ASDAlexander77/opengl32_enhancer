@@ -164,3 +164,4 @@ void SetExternalSourceFramebuffer(unsigned int fbo, int width, int height, int p
 void ClearExternalSourceFramebuffer();
 // Overwrites width/height with the external present size when one is set; untouched otherwise.
 void GetExternalPresentSize(int& width, int& height);
+bool IsExternalSourceActive();

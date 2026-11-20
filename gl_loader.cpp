@@ -186,6 +186,13 @@ bool LoadGlComputeApi(GlComputeApi& api) {
             api.glQueryCounter = reinterpret_cast<PFNGLQUERYCOUNTERPROC>(getProc("glQueryCounter"));
             api.glGetQueryObjectiv = reinterpret_cast<PFNGLGETQUERYOBJECTIVPROC>(getProc("glGetQueryObjectiv"));
             api.glGetQueryObjectui64v = reinterpret_cast<PFNGLGETQUERYOBJECTUI64VPROC>(getProc("glGetQueryObjectui64v"));
+            api.glClearBufferfv = reinterpret_cast<PFNGLCLEARBUFFERFVPROC>(getProc("glClearBufferfv"));
+        }
+        HMODULE real = GetRealOpenGL32Module();
+        if (real != nullptr) {
+            api.glIsEnabled = reinterpret_cast<PFNGLISENABLEDPROC>(GetProcAddress(real, "glIsEnabled"));
+            api.glEnable = reinterpret_cast<PFNGLCAPPROC>(GetProcAddress(real, "glEnable"));
+            api.glDisable = reinterpret_cast<PFNGLCAPPROC>(GetProcAddress(real, "glDisable"));
         }
     }
 

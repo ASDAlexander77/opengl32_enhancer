@@ -247,6 +247,10 @@ void GetExternalPresentSize(int& width, int& height) {
     height = g_externalPresentHeight;
 }
 
+bool IsExternalSourceActive() {
+    return g_externalActive;
+}
+
 bool IsSupersampleActive() {
     if (g_externalActive) {
         return true;

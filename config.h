@@ -214,6 +214,13 @@ struct AnaxConfig {
     // On by default; set borderlessFullscreen=0 for the game's own mode switch.
     bool borderlessFullscreen = true;
 
+    // Presents the frame at the game's own aspect ratio, centred, with black bars filling the
+    // rest of the window - pillarboxing a 4:3 game in a 16:10 or 16:9 window instead of
+    // stretching it. The aspect is the game's own viewport (with supersampling armed, the
+    // reference viewport it was armed against - see render_target.h), so it is a no-op whenever
+    // the game already matches its window. On by default; keepAspect=0 stretches to fill.
+    bool keepAspect = true;
+
     // Renders the game into an offscreen framebuffer of this size and downsamples it to the
     // window on present - see render_target.h. Both default to 0, meaning off; the override
     // only applies when BOTH are positive, the same both-or-nothing rule windowWidth/
