@@ -1,4 +1,4 @@
-# OpenGL32 Enhancer — ReShade-style post-processing for OpenGL games
+# OpenGL32 Enhancer — ReShade-style post-processing and real widescreen for OpenGL games
 
 [![Build](https://github.com/ASDAlexander77/opengl32_enhancer/actions/workflows/build.yml/badge.svg)](https://github.com/ASDAlexander77/opengl32_enhancer/actions/workflows/build.yml)
 
@@ -6,6 +6,12 @@
 reduction, local contrast, bloom, ACES tone mapping and LUT color grading to
 old OpenGL games — by dropping one DLL into the game folder. No source code,
 no patching, no launcher.**
+
+> **🖥️ Real widescreen for 4:3-only games.** The game's 3D view is widened
+> to fill a 16:10 or 16:9 screen — more scene at the sides, nothing stretched —
+> while the HUD and menus keep their own shape in the centre. On by default,
+> matched to your window's shape automatically. See
+> [Display](#display-widescreen-black-bars-and-fullscreen).
 
 It is a drop-in `opengl32.dll` proxy: the DLL exports every function the real
 `opengl32.dll` does and forwards each call to the system OpenGL library, while
