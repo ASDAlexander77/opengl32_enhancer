@@ -64,7 +64,7 @@ fullscreen at the desktop resolution, and supersampling (see
 ## Quick start
 
 1. Download `opengl32.dll`, `opengl32_enhancer.ini`, `cyberpunk.cube` and
-   `config_editor.exe` from the [latest build artifact](../../releases), or
+   `config_editor.exe` from the [latest build artifact(file opengl32_enhancer.zip)](../../releases), or
    [build them yourself](#building-from-source).
 2. Copy all four files into the game's folder — the same directory as the
    game's `.exe`. **Not** `system32`.
