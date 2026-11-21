@@ -74,7 +74,7 @@ fullscreen at the desktop resolution, and supersampling (see
    [the config editor](#tuning-settings-the-config-editor)).
 4. Launch the game normally.
 
-**Playing Anachronox?** The [Anachronox Steam guide](docs/steam-guide/README.md)
+**Playing Anachronox?** The [Anachronox guide](docs/steam-guide/guide.md)
 walks through install, widescreen, tuning and troubleshooting step by step,
 with before/after screenshots.
 

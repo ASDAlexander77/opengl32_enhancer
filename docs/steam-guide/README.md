@@ -3,6 +3,12 @@
 A ready-to-publish Steam guide that shows Anachronox players how to install,
 use and tune `opengl32.dll`.
 
+**Just want to read it?** Open [guide.md](guide.md).
+
+- [guide.md](guide.md): the same guide in Markdown, for reading on GitHub.
+  It is generated from `guide.bbcode` by [bbcode_to_md.py](bbcode_to_md.py), so edit the
+  BBCode and run `python bbcode_to_md.py guide.bbcode guide.md` here rather
+  than editing guide.md by hand.
 - [guide.bbcode](guide.bbcode): the guide text, split into 11 sections and
   written in Steam's BBCode (`[h2]`, `[b]`, `[list]`, `[table]`, `[code]`...).
 - [images/](images): the pictures. Each `{{IMAGE: name.jpg}}` marker in the
