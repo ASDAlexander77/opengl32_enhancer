@@ -4,8 +4,8 @@
 
 *Install one DLL and Anachronox fills a 16:9 / 16:10 screen properly, with SMAA/TAA, sharpening, bloom, ambient occlusion, reflections and colour grading. Step-by-step setup, tuning and troubleshooting.*
 
-> This is the readable copy of the Steam Community guide. The Steam version is
-> [guide.bbcode](guide.bbcode); [README.md](README.md) explains how to publish it.
+> This is the readable copy of the [Steam Community guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3843494655).
+> Its source is [guide.bbcode](guide.bbcode); [README.md](README.md) explains how to publish it.
 
 ## Contents
 

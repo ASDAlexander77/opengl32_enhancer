@@ -86,8 +86,8 @@ title = re.search(r'Title:\s*(.*)', text).group(1).strip()
 desc = ' '.join(l.strip() for l in re.search(r'Description:\s*(.*?)\n\s*Preview image', text, re.S).group(1).split('\n'))
 anchor = lambda s: re.sub(r'[^a-z0-9 -]', '', s.lower()).replace(' ', '-')
 res = [f'# {title}', '', '![OpenGL32 Enhancer for Anachronox](images/cover.jpg)', '', f'*{desc}*', '',
-       '> This is the readable copy of the Steam Community guide. The Steam version is',
-       '> [guide.bbcode](guide.bbcode); [README.md](README.md) explains how to publish it.', '',
+       '> This is the readable copy of the [Steam Community guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3843494655).',
+       '> Its source is [guide.bbcode](guide.bbcode); [README.md](README.md) explains how to publish it.', '',
        '## Contents', ''] + [f'{k+1}. [{s[0]}](#{anchor(s[0])})' for k, s in enumerate(sections)] + ['']
 for t, b in sections: res += [f'## {t}', '', bold_lines_to_headings(body(b)), '']
 open(dst, 'w', encoding='utf-8', newline='\n').write('\n'.join(res).rstrip('\n') + '\n')
