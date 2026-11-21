@@ -334,7 +334,136 @@ double WidescreenFactor() {
            ((double)g_armedRefWidth * config.renderHeight);
 }
 
+namespace {
+
+// The ortho the game asked for and the widened one we forwarded, while it is current.
+bool g_orthoWidened = false;
+double g_orthoLeft = 0.0, g_orthoRight = 0.0;
+double g_orthoWideLeft = 0.0, g_orthoWideRight = 0.0;
+
+// Per-primitive fill watch (see NotifyPrimitiveBegin).
+bool g_fillWatch = false;
+bool g_fillQuads = false;   // GL_QUADS: a new quad every 4 vertices
+int g_fillIndex = 0;        // vertex index within the current quad / primitive
+bool g_fillHeld = false;
+float g_fillHeldVertex[3] = {0.0f, 0.0f, 0.0f};
+bool g_fillStretch = false;
+int g_stretchedFills = 0;
+
+const double kFillEdgeEpsilon = 0.5;
+
+bool OnOrthoLeft(float x) { return x <= g_orthoLeft + kFillEdgeEpsilon; }
+bool OnOrthoRight(float x) { return x >= g_orthoRight - kFillEdgeEpsilon; }
+
+float StretchFillX(float x) {
+    if (OnOrthoLeft(x)) {
+        return (float)g_orthoWideLeft;
+    }
+    if (OnOrthoRight(x)) {
+        return (float)g_orthoWideRight;
+    }
+    return x;
+}
+
+void EndFillWatch() {
+    g_fillWatch = false;
+    g_fillHeld = false;
+    g_fillStretch = false;
+    g_fillIndex = 0;
+}
+
+}  // namespace
+
+void BeginFillPrimitiveForTest(unsigned int mode, bool textured) {
+    const unsigned int GL_TRIANGLE_FAN_MODE = 0x0006;
+    const unsigned int GL_QUADS_MODE = 0x0007;
+    const unsigned int GL_POLYGON_MODE = 0x0009;
+    EndFillWatch();
+    if (!g_orthoWidened || textured) {
+        return;
+    }
+    if (mode != GL_QUADS_MODE && mode != GL_TRIANGLE_FAN_MODE && mode != GL_POLYGON_MODE) {
+        return;
+    }
+    g_fillWatch = true;
+    g_fillQuads = mode == GL_QUADS_MODE;
+}
+
+void NotifyPrimitiveBegin(unsigned int mode) {
+    if (!g_orthoWidened) {
+        g_fillWatch = false;
+        return;
+    }
+    const unsigned int GL_TEXTURE_2D_CAP = 0x0DE1;
+    const GlComputeApi& gl = GetGlComputeApi();
+    bool textured = gl.glIsEnabled == nullptr || gl.glIsEnabled(GL_TEXTURE_2D_CAP) != 0;
+    BeginFillPrimitiveForTest(mode, textured);
+}
+
+bool IsFillWatchActive() {
+    return g_fillWatch;
+}
+
+int FilterFillVertex(float x, float y, float z, float out[6]) {
+    int index = g_fillIndex++;
+    if (g_fillQuads && g_fillIndex == 4) {
+        g_fillIndex = 0;
+    }
+    if (index == 0) {
+        g_fillStretch = false;
+        if (OnOrthoLeft(x) || OnOrthoRight(x)) {
+            g_fillHeld = true;
+            g_fillHeldVertex[0] = x;
+            g_fillHeldVertex[1] = y;
+            g_fillHeldVertex[2] = z;
+            return 0;
+        }
+    } else if (index == 1 && g_fillHeld) {
+        g_fillHeld = false;
+        float heldX = g_fillHeldVertex[0];
+        g_fillStretch = (OnOrthoLeft(heldX) && OnOrthoRight(x)) ||
+                        (OnOrthoRight(heldX) && OnOrthoLeft(x));
+        if (g_fillStretch) {
+            ++g_stretchedFills;
+            if (g_stretchedFills == 1) {
+                printf("[opengl32_enh_cpp] widescreen: stretching a full-width 2D fill "
+                       "(%.0f..%.0f -> %.0f..%.0f) to the whole target\n",
+                       g_orthoLeft, g_orthoRight, g_orthoWideLeft, g_orthoWideRight);
+            }
+        }
+        out[0] = g_fillStretch ? StretchFillX(heldX) : heldX;
+        out[1] = g_fillHeldVertex[1];
+        out[2] = g_fillHeldVertex[2];
+        out[3] = g_fillStretch ? StretchFillX(x) : x;
+        out[4] = y;
+        out[5] = z;
+        return 2;
+    }
+    out[0] = g_fillStretch ? StretchFillX(x) : x;
+    out[1] = y;
+    out[2] = z;
+    return 1;
+}
+
+int FlushFillVertex(float out[3]) {
+    int count = 0;
+    if (g_fillWatch && g_fillHeld) {
+        out[0] = g_fillHeldVertex[0];
+        out[1] = g_fillHeldVertex[1];
+        out[2] = g_fillHeldVertex[2];
+        count = 1;
+    }
+    EndFillWatch();
+    return count;
+}
+
+int GetStretchedFillCount() {
+    return g_stretchedFills;
+}
+
 void WidenFrustumForWidescreen(double& left, double& right) {
+    // A perspective projection replaces whatever 2D ortho was current.
+    g_orthoWidened = false;
     if (!IsWidescreenActive() || !IsFullFrameRect(g_lastViewportX, g_lastViewportY,
                                                   g_lastViewportWidth, g_lastViewportHeight)) {
         return;
@@ -345,6 +474,7 @@ void WidenFrustumForWidescreen(double& left, double& right) {
 }
 
 void WidenOrthoForWidescreen(double& left, double& right) {
+    g_orthoWidened = false;
     if (!IsWidescreenActive() || !IsFullFrameRect(g_lastViewportX, g_lastViewportY,
                                                   g_lastViewportWidth, g_lastViewportHeight)) {
         return;
@@ -352,8 +482,13 @@ void WidenOrthoForWidescreen(double& left, double& right) {
     double k = WidescreenFactor();
     double centre = 0.5 * (left + right);
     double half = 0.5 * (right - left) * k;
+    g_orthoWidened = right > left;
+    g_orthoLeft = left;
+    g_orthoRight = right;
     left = centre - half;
     right = centre + half;
+    g_orthoWideLeft = left;
+    g_orthoWideRight = right;
 }
 
 void ScaleGameRect(int& x, int& y, int& width, int& height) {
@@ -402,6 +537,9 @@ void ResetRenderTargetState() {
     g_armedGeneration = 0;
     g_windowWidth = g_windowHeight = 0;
     g_lastViewportX = g_lastViewportY = g_lastViewportWidth = g_lastViewportHeight = 0;
+    g_orthoWidened = false;
+    g_stretchedFills = 0;
+    EndFillWatch();
     // Forgotten, not acted on - see render_target.h. This is a test hook and must not issue GL
     // calls; a test that cares about the binding sets it explicitly after calling this.
     ForgetRenderTargetBinding();

@@ -108,6 +108,27 @@ static void* EnsureRealOpenGL32() {
     return g_real;
 }
 
+// Widescreen full-width fills (render_target.h, NotifyPrimitiveBegin): while a watched 2D
+// primitive is open, the vertex hooks hand their vertex to FilterFillVertex and forward what it
+// returns (0-2 vertices) through the real glVertex3f instead of their own arguments.
+typedef void (__stdcall *__pfn_fillVertex3f)(GLfloat, GLfloat, GLfloat);
+static __pfn_fillVertex3f g_fillVertex3f = nullptr;
+
+static void EmitFillVertices(const float* v, int count) {
+    if (g_fillVertex3f == nullptr) {
+        g_fillVertex3f = (__pfn_fillVertex3f)GetProcAddress(EnsureRealOpenGL32(), "glVertex3f");
+    }
+    for (int i = 0; i < count; ++i) {
+        g_fillVertex3f(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    }
+}
+
+static void FillVertex(float x, float y, float z) {
+    float out[6];
+    int count = FilterFillVertex(x, y, z, out);
+    EmitFillVertices(out, count);
+}
+
 typedef void (__stdcall *__pfn_glAccum)(GLenum, GLfloat);
 static __pfn_glAccum __proc_glAccum = nullptr;
 
@@ -187,6 +208,7 @@ extern "C" __declspec(dllexport) void __stdcall glBegin(GLenum mode) {
     }
     ApplyAutoMipmapForDraw();
     PerfCountDraw();
+    NotifyPrimitiveBegin(mode);  // before glBegin: it may query GL state
     __proc_glBegin(mode);
 }
 
@@ -1313,6 +1335,10 @@ extern "C" __declspec(dllexport) void __stdcall glEnd(void) {
         } else {
             printf("[opengl32_enh_cpp]   glEnd: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        float held[3];
+        EmitFillVertices(held, FlushFillVertex(held));
     }
     __proc_glEnd();
 }
@@ -5119,6 +5145,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2d(GLdouble x, GLdouble 
             printf("[opengl32_enh_cpp]   glVertex2d: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, 0.0f);
+        return;
+    }
     __proc_glVertex2d(x, y);
 }
 
@@ -5134,6 +5164,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2dv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex2dv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLdouble* p = (const GLdouble*)v;
+        FillVertex((float)p[0], (float)p[1], (float)0.0f);
+        return;
     }
     __proc_glVertex2dv(v);
 }
@@ -5151,6 +5186,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2f(GLfloat x, GLfloat y)
             printf("[opengl32_enh_cpp]   glVertex2f: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, 0.0f);
+        return;
+    }
     __proc_glVertex2f(x, y);
 }
 
@@ -5166,6 +5205,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2fv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex2fv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLfloat* p = (const GLfloat*)v;
+        FillVertex((float)p[0], (float)p[1], (float)0.0f);
+        return;
     }
     __proc_glVertex2fv(v);
 }
@@ -5183,6 +5227,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2i(GLint x, GLint y) {
             printf("[opengl32_enh_cpp]   glVertex2i: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, 0.0f);
+        return;
+    }
     __proc_glVertex2i(x, y);
 }
 
@@ -5198,6 +5246,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2iv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex2iv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLint* p = (const GLint*)v;
+        FillVertex((float)p[0], (float)p[1], (float)0.0f);
+        return;
     }
     __proc_glVertex2iv(v);
 }
@@ -5215,6 +5268,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2s(GLshort x, GLshort y)
             printf("[opengl32_enh_cpp]   glVertex2s: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, 0.0f);
+        return;
+    }
     __proc_glVertex2s(x, y);
 }
 
@@ -5230,6 +5287,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex2sv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex2sv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLshort* p = (const GLshort*)v;
+        FillVertex((float)p[0], (float)p[1], (float)0.0f);
+        return;
     }
     __proc_glVertex2sv(v);
 }
@@ -5247,6 +5309,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3d(GLdouble x, GLdouble 
             printf("[opengl32_enh_cpp]   glVertex3d: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, (float)z);
+        return;
+    }
     __proc_glVertex3d(x, y, z);
 }
 
@@ -5262,6 +5328,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3dv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex3dv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLdouble* p = (const GLdouble*)v;
+        FillVertex((float)p[0], (float)p[1], (float)p[2]);
+        return;
     }
     __proc_glVertex3dv(v);
 }
@@ -5279,6 +5350,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3f(GLfloat x, GLfloat y,
             printf("[opengl32_enh_cpp]   glVertex3f: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, (float)z);
+        return;
+    }
     __proc_glVertex3f(x, y, z);
 }
 
@@ -5294,6 +5369,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3fv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex3fv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLfloat* p = (const GLfloat*)v;
+        FillVertex((float)p[0], (float)p[1], (float)p[2]);
+        return;
     }
     __proc_glVertex3fv(v);
 }
@@ -5311,6 +5391,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3i(GLint x, GLint y, GLi
             printf("[opengl32_enh_cpp]   glVertex3i: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, (float)z);
+        return;
+    }
     __proc_glVertex3i(x, y, z);
 }
 
@@ -5326,6 +5410,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3iv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex3iv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLint* p = (const GLint*)v;
+        FillVertex((float)p[0], (float)p[1], (float)p[2]);
+        return;
     }
     __proc_glVertex3iv(v);
 }
@@ -5343,6 +5432,10 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3s(GLshort x, GLshort y,
             printf("[opengl32_enh_cpp]   glVertex3s: resolved OK\n");
         }
     }
+    if (IsFillWatchActive()) {
+        FillVertex((float)x, (float)y, (float)z);
+        return;
+    }
     __proc_glVertex3s(x, y, z);
 }
 
@@ -5358,6 +5451,11 @@ extern "C" __declspec(dllexport) void __stdcall glVertex3sv(void* v) {
         } else {
             printf("[opengl32_enh_cpp]   glVertex3sv: resolved OK\n");
         }
+    }
+    if (IsFillWatchActive()) {
+        const GLshort* p = (const GLshort*)v;
+        FillVertex((float)p[0], (float)p[1], (float)p[2]);
+        return;
     }
     __proc_glVertex3sv(v);
 }

@@ -274,10 +274,92 @@ bool WidescreenMapsRectsAndWidensProjections() {
     return ok;
 }
 
+// Feeds one primitive's vertices through the fill filter and returns what would be forwarded.
+int RunFill(unsigned int mode, bool textured, const float (*in)[2], int count, float* out) {
+    BeginFillPrimitiveForTest(mode, textured);
+    int total = 0;
+    for (int i = 0; i < count; ++i) {
+        if (!IsFillWatchActive()) {
+            out[total * 3] = in[i][0];
+            out[total * 3 + 1] = in[i][1];
+            out[total * 3 + 2] = 0.0f;
+            ++total;
+            continue;
+        }
+        total += FilterFillVertex(in[i][0], in[i][1], 0.0f, out + total * 3);
+    }
+    if (IsFillWatchActive()) {
+        total += FlushFillVertex(out + total * 3);
+    }
+    return total;
+}
+
+bool WidescreenStretchesFullWidthFills() {
+    const unsigned int QUADS = 0x0007;
+    const unsigned int TRIANGLES = 0x0004;
+    GetMutableAnaxConfig().widescreen = true;
+    ArmWithReference(3200, 2000, 640, 480);
+    NotifyGameViewport(0, 0, 640, 480);
+    double l = 0.0, r = 640.0;
+    WidenOrthoForWidescreen(l, r);  // 0..640 -> -64..704
+
+    const float fade[4][2] = {{0, 0}, {640, 0}, {640, 480}, {0, 480}};
+    float out[3 * 8];
+    int n = RunFill(QUADS, false, fade, 4, out);
+    bool ok = Check(n == 4 && out[0] == -64.0f && out[3] == 704.0f && out[6] == 704.0f &&
+                        out[9] == -64.0f && out[1] == 0.0f && out[10] == 480.0f,
+                    "fill: an untextured full-screen quad stretches to the widened edges");
+
+    // A letterbox bar: full width, partial height - stretched too.
+    const float bar[4][2] = {{0, 0}, {640, 0}, {640, 60}, {0, 60}};
+    n = RunFill(QUADS, false, bar, 4, out);
+    ok = Check(n == 4 && out[0] == -64.0f && out[3] == 704.0f && out[7] == 60.0f,
+               "fill: a full-width letterbox bar stretches") && ok;
+
+    // A box touching the left edge but not spanning the screen keeps its coordinates and order.
+    const float box[4][2] = {{0, 10}, {100, 10}, {100, 40}, {0, 40}};
+    n = RunFill(QUADS, false, box, 4, out);
+    ok = Check(n == 4 && out[0] == 0.0f && out[1] == 10.0f && out[3] == 100.0f &&
+                   out[9] == 0.0f,
+               "fill: a box on the left edge is untouched") && ok;
+
+    // Two quads in one glBegin: only the full-width one stretches.
+    const float two[8][2] = {{0, 0}, {640, 0}, {640, 20}, {0, 20},
+                             {0, 100}, {50, 100}, {50, 120}, {0, 120}};
+    n = RunFill(QUADS, false, two, 8, out);
+    ok = Check(n == 8 && out[0] == -64.0f && out[3] == 704.0f && out[12] == 0.0f &&
+                   out[15] == 50.0f && out[21] == 0.0f,
+               "fill: per-quad decision within one glBegin") && ok;
+
+    // Textured quads and non-quad modes pass straight through.
+    n = RunFill(QUADS, true, fade, 4, out);
+    ok = Check(n == 4 && out[0] == 0.0f && out[3] == 640.0f,
+               "fill: a textured full-screen quad keeps its shape") && ok;
+    n = RunFill(TRIANGLES, false, fade, 3, out);
+    ok = Check(n == 3 && out[0] == 0.0f && out[3] == 640.0f,
+               "fill: GL_TRIANGLES is not watched") && ok;
+
+    // A lone held vertex is flushed at glEnd rather than lost.
+    const float lone[1][2] = {{0, 5}};
+    n = RunFill(QUADS, false, lone, 1, out);
+    ok = Check(n == 1 && out[0] == 0.0f && out[1] == 5.0f, "fill: a held vertex is flushed") && ok;
+
+    // After a glFrustum the ortho is no longer current: nothing is watched.
+    l = -4.0; r = 4.0;
+    WidenFrustumForWidescreen(l, r);
+    n = RunFill(QUADS, false, fade, 4, out);
+    ok = Check(n == 4 && out[0] == 0.0f && out[3] == 640.0f,
+               "fill: not watched once a frustum replaced the ortho") && ok;
+
+    GetMutableAnaxConfig().widescreen = false;
+    return ok;
+}
+
 }  // namespace
 
 int main() {
     WidescreenMapsRectsAndWidensProjections();
+    WidescreenStretchesFullWidthFills();
     ScalesFullFrameViewportToTheConfiguredSize();
     ScalesSubViewportProportionally();
     ScalesByEdgesSoAdjacentRectsAbut();

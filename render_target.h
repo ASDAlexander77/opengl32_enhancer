@@ -201,3 +201,28 @@ void WidenFrustumForWidescreen(double& left, double& right);
 void WidenOrthoForWidescreen(double& left, double& right);
 // Clears the bound target to black when active - called right after BindRenderTarget().
 void ClearRenderTargetForWidescreen();
+
+// Full-width fills under the widened ortho. A 2D fill the game means to cover the whole
+// screen - a fade (Draw_FadeScreen), cinematic letterbox bars, a black backdrop - spans exactly
+// the game's ortho edges (0..640), so after widening it would only cover the centre pillar and
+// leave the sides showing. While the widened ortho is current, an untextured quad / fan /
+// polygon whose first two vertices sit on the ortho's left and right edges has its edge
+// vertices pushed out to the widened edges; anything else (text, pictures, boxes that do not
+// span the screen) passes through untouched. Textured quads are never stretched, so a
+// full-screen picture keeps its shape.
+//
+// The first vertex of a watched primitive has to be held back until the second one shows
+// whether the pair spans the screen, so the vertex hooks forward what these return instead of
+// their own arguments:
+//   NotifyPrimitiveBegin(mode)      from glBegin (queries GL_TEXTURE_2D only when it matters)
+//   FilterFillVertex(x, y, z, out)  from every glVertex2*/3* hook while IsFillWatchActive();
+//                                   writes 0-2 vertices (x,y,z triples) to out, returns count
+//   FlushFillVertex(out)            from glEnd: a still-held vertex (0 or 1) to emit
+void NotifyPrimitiveBegin(unsigned int mode);
+bool IsFillWatchActive();
+int FilterFillVertex(float x, float y, float z, float out[6]);
+int FlushFillVertex(float out[3]);
+// Test hook: NotifyPrimitiveBegin with the texture state supplied instead of queried.
+void BeginFillPrimitiveForTest(unsigned int mode, bool textured);
+// Number of fills stretched so far (for the log and tests).
+int GetStretchedFillCount();
