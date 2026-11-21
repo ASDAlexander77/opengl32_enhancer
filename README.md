@@ -13,6 +13,11 @@ hooking `wglSwapBuffers` to run a configurable chain of GPU post-process
 effects on each frame just before it is presented. Same idea as ReShade or
 ENB, built specifically for 32-bit OpenGL titles.
 
+It can also fix how an old game fills a modern screen: real widescreen for
+games that only render 4:3, black bars instead of stretching, borderless
+fullscreen at the desktop resolution, and supersampling (see
+[Display](#display-widescreen-black-bars-and-fullscreen)).
+
 | Before — original game output | After — bloom, tone mapping, grading and sharpening |
 | --- | --- |
 | ![Original OpenGL game render with no post-processing applied](docs/imgs/enh_off.jpg) | ![The same scene with the OpenGL32 Enhancer post-processing pipeline enabled](docs/imgs/enh_on.jpg) |
@@ -36,10 +41,13 @@ ENB, built specifically for 32-bit OpenGL titles.
   - [Local contrast: localcontrast](#local-contrast-localcontrast)
   - [Gamma and brightness: gamma](#gamma-and-brightness-gamma)
   - [Example configurations](#example-configurations)
+- [Display: widescreen, black bars and fullscreen](#display-widescreen-black-bars-and-fullscreen)
 - [Texture effects](#texture-effects)
 - [Anisotropic filtering](#anisotropic-filtering)
+- [Screenshots and performance stats](#screenshots-and-performance-stats)
 - [Tuning settings: the config editor](#tuning-settings-the-config-editor)
   - [Tuning against a real game frame](#tuning-against-a-real-game-frame)
+  - [Rendering frames from the command line](#rendering-frames-from-the-command-line)
 - [How it works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
 - [Building from source](#building-from-source)
@@ -381,6 +389,18 @@ geometry: `ssrUpThreshold` is a minimum upward tilt, and only surfaces above it 
 reasoning that floors, water and polished tables are what a player expects a reflection in.
 "Upward" means upward *in the world* — see `ssrWorldUpAxis` below.
 
+Facing up is not enough on its own: the tops of heads, crates and every upward facet of a
+low-poly model face up too. So a surface must also stay **flat for a good distance** —
+positions 4, 12 and 24 pixels away in eight directions must lie on its own plane, or the
+reflection fades out. Eight directions rather than four matters on floor gratings: with only
+up/down/left/right, the crossing of two bars passed as floor while everything around it failed,
+and every crossing became a bright speck. And a ray that ends behind a surface facing the same
+way it travels did not reflect off it, it passed underneath. That is what the floor of a recess
+does (the lower floor under a grating): its rays are treated as blocked, so they reflect nothing
+instead of a random mix of bar and wall light. Pixels the game drew its HUD on are left alone,
+and a ray landing on the HUD reflects nothing, so menus and banners are never mirrored into the
+floor.
+
 | Setting | What it does |
 | --- | --- |
 | `ssrIntensity` | `0`..`1`, how strongly a reflection is blended over the surface. `0` is an exact no-op and is the default |
@@ -606,7 +626,12 @@ depth texture the depth-consuming stages read is 24. The trade is more colour
 samples for less depth precision; flickering along coplanar surfaces that
 appears only with this on is this, and turning it off is the fix.
 
-**Status: runs cleanly in Anachronox, not validated by eye.** A 1280x960 render
+**Status: in daily use in Anachronox.** The shipped ini renders at 2560x1600
+over the game's 640x480, and that is what [widescreen](#display-widescreen-black-bars-and-fullscreen)
+is built on. Frames were checked by eye on six maps at 60 fps. The history
+below is from the first run.
+
+A 1280x960 render
 over a 640x480 game was run with the full twelve-stage chain: the target
 allocates, the world pass runs, sixteen auto-mipmap chains generate, and there
 are no GL errors in steady state. One frame goes wrong when the game creates
@@ -616,8 +641,8 @@ context change renders unscaled into the new context's back buffer instead of
 scaling its viewports against a framebuffer that no longer exists. What that
 run saw as "a dropped frame" was the resulting `GL_INVALID_OPERATION`.
 
-What has NOT been checked is whether the resulting image actually looks right:
-no screenshot comparison was made and no human has confirmed it. The resolve is
+At the time, whether the image looked right was not checked by eye; it has been
+since, as above. The resolve is also
 covered by GPU assertions - at 4x, a periodic pattern is asserted to come back
 carrying the average of the whole 4x4 box rather than the two pixels a single
 bilinear tap reads, and the presented frame is asserted to fill the window
@@ -725,6 +750,63 @@ effect=none
 textureEffect=none
 ```
 
+## Display: widescreen, black bars and fullscreen
+
+Games from this era assume a 4:3 monitor. Shown on a 16:10 or 16:9 screen they
+come out stretched wide, and their fullscreen modes switch the monitor to an old
+4:3 resolution it then stretches itself. Four settings fix that. They are
+separate from `effect=`, and work with `effect=none` too.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `widescreen` | `1` | Real widescreen for a game that only renders 4:3. The 3D view is widened to the window's shape (Hor+: more scene at the sides, the same vertical view, nothing stretched), while the HUD, menus and any small 3D view stay at their own 4:3 shape in the centre. Needs supersampling (`renderWidth`/`renderHeight`) |
+| `keepAspect` | `1` | Shows the game at its own aspect ratio with black bars filling the rest of the window, instead of stretching it. With `widescreen` on there is nothing left to fill, so this only matters with `widescreen=0` |
+| `borderlessFullscreen` | `1` | In fullscreen, keeps the desktop resolution and covers the monitor with the game's window, instead of switching the monitor to the game's old 4:3 mode |
+| `windowWidth`/`windowHeight` | `0` (game decides) | Forces the window's size, e.g. a resolution the game's own menu doesn't offer. Both must be set |
+
+**How widescreen works.** The game keeps rendering at its own 4:3 resolution,
+into a supersampled target as wide as the window. `glViewport`/`glScissor`
+calls covering the whole frame are mapped to the whole target, and any smaller
+rectangle to a centred 4:3 area. The game's `glFrustum` is widened horizontally
+by the window's aspect divided by the game's (1.2 for 16:10, 1.33 for 16:9), and
+its 2D `glOrtho` is widened about its centre, so the HUD lands in the middle at
+its own shape. Plain-colour 2D fills meant to cover the whole screen (fades,
+cinematic letterbox bars, black backdrops) are stretched to the full width, so
+the sides don't stay visible through them. Full-screen pictures keep their 4:3
+shape.
+
+The target's width follows the window's actual shape: `renderHeight` sets the
+quality, and the width becomes `renderHeight` x the window's aspect (2560x1600
+in a 16:10 window, 2844x1600 in a 16:9 one). It follows resizes and works in
+fullscreen on any monitor. When the window already has the game's shape, nothing
+is widened.
+
+**The limit, plainly: the game still decides what to draw from its own 4:3
+view.** Something just beyond the old view's edge can be missing at the far
+sides, or appear a moment late as it comes into view. In Quake II-engine games,
+launching with `+set r_nocull 1` stops this for the world. Characters and other
+models are culled by the game regardless.
+
+The shipped ini is set up for this: 2560x1600 window and render target,
+widescreen on.
+
+```ini
+windowWidth=2560
+windowHeight=1600
+renderWidth=2560
+renderHeight=1600
+widescreen=1
+```
+
+Set `windowWidth`/`windowHeight` to your monitor's resolution or less, and
+`renderHeight` to the vertical resolution you want the game rendered at.
+
+**Status: confirmed in Anachronox.** Widescreen was checked on six maps, the
+main menu and the options screen at 2560x1600 (16:10) and 2560x1440 (16:9):
+correct proportions, at 60 fps. Black-bar mode was checked on the intro and the
+main menu. Not yet checked: dialogue, the battle screen, and a fade caught
+halfway through.
+
 ## Texture effects
 
 Separately from the `effect=` pipeline — which only ever touches the final
@@ -786,6 +868,32 @@ the hardware maximum (usually 16): the visual cost of *not* using anisotropic
 filtering is far more noticeable than its performance cost on anything made
 in the last decade-plus.
 
+## Screenshots and performance stats
+
+**Screenshots.** Set `screenshotKey` to a virtual-key code (e.g. `0x7A` for
+F11) and press it in-game to save the finished frame, every effect applied,
+as `opengl32_enhancer_shot_000.bmp`, `_001.bmp`, ... next to the game's `.exe`.
+It is read straight off the back buffer before the frame is shown, at the
+window's full size, so it never disturbs the window. (Capturing a GL window
+from outside, e.g. with `PrintWindow`, can make it flicker grey.) `0`, the
+default, turns it off. For the unprocessed frame plus depth, to tune with, use
+`frameDumpKey` instead (see
+[Tuning against a real game frame](#tuning-against-a-real-game-frame)).
+
+**Performance stats.** `debugStats=1` reports where the frame time goes every
+two seconds, in `opengl32_enhancer.log` and in the game's window title:
+
+- fps;
+- CPU time: the game's own, the effects', and how long `SwapBuffers` waited
+  (a big wait means the GPU is the bottleneck);
+- GPU milliseconds for each `effect=` stage;
+- draw calls and texture uploads.
+
+Use it to find which stage to drop or tune. With vsync on, fps sits at the
+refresh rate whenever the frame fits, so compare GPU milliseconds rather than
+fps. For reference, the full shipped chain of 16 stages runs at 6–9 ms of GPU
+time per frame at 2560x1600 in Anachronox.
+
 ## Tuning settings: the config editor
 
 Getting `effect=` and its parameters right by editing the ini, relaunching the game, loading a
@@ -838,6 +946,20 @@ reports that span in the game's world units — the unit `ssaoRadius` is denomin
 so loudly if the depth is flat, which means the dump was taken somewhere with no 3D view and
 nothing depth-based can be tuned against it.
 
+### Rendering frames from the command line
+
+For A/B comparisons there is also a headless mode, with no window and no clicking:
+
+```sh
+config_editor.exe <ini> --render <dump> <out.bmp> [frames]
+```
+
+It renders the frame dump through the real pipeline with that ini's settings and writes the
+result as a BMP at the dump's own resolution. `frames` (default 8) is how many frames to run
+first, so `taa`'s history settles. Run it from the game's folder, since `lutPath` is relative.
+Rendering the same dump with two inis gives two images made from identical input, which is the
+fairest way to compare settings without restarting the game.
+
 ## How it works
 
 1. Windows resolves `opengl32.dll` next to the game's `.exe` before the copy
@@ -855,9 +977,14 @@ nothing depth-based can be tuned against it.
    for [anisotropic filtering](#anisotropic-filtering).
 5. The matrix calls — `glFrustum`, `glOrtho`, `glMatrixMode`,
    `glPushMatrix`/`glPopMatrix` and the calls that modify the current matrix —
-   are watched without being changed, to work out where the camera is and which
-   way it points. Depth-based stages need that to relate a pixel to a point in
-   the world. Nothing uses it yet; it is groundwork.
+   are watched to work out where the camera is and which way it points.
+   `ssr`, `taa` and `motionblur` need that to relate a pixel to a point in the
+   world.
+6. With supersampling, `glViewport`/`glScissor` are rescaled into the larger
+   target. With [widescreen](#display-widescreen-black-bars-and-fullscreen),
+   `glFrustum`/`glOrtho` are widened too, and the `glBegin`/`glVertex2*`/`glEnd`
+   of full-screen 2D fills are stretched to the full width. These are the only
+   calls whose arguments the proxy changes.
 
 Exports are emitted under their true undecorated names through a `.def` file,
 since `__declspec(dllexport)` alone would apply `__stdcall`'s `@N` decoration
@@ -884,13 +1011,24 @@ their renderer through the `gl_driver` cvar rather than linking `opengl32.dll`
 directly. Set `gl_driver` to the proxy, or leave it at its default of
 `opengl32` and make sure the proxy is the `opengl32.dll` in the game folder.
 
+**The game is stretched, or doesn't fill the screen.** Widescreen needs
+supersampling: check that `renderWidth` and `renderHeight` are both set. With
+`widescreen=0`, `keepAspect=1` gives black bars at the sides; `keepAspect=0`
+stretches. The log line starting `render_target:` says which mode is active and
+by how much the view is widened.
+
+**Things pop in at the far sides in widescreen.** The game decides what to draw
+from its own 4:3 view, so it can skip something only the widened sides show. In
+Quake II-engine games, `+set r_nocull 1` on the command line fixes this for the
+world; characters and other models are culled by the game regardless.
+
 **Effects are disabled with a message about GL 4.3.** The GPU or driver does
 not expose the compute-shader support the effects need. This is expected on
 very old hardware, and on software renderers.
 
 **Checking the camera capture.** This proxy works out where the camera is by
 watching the game's matrix calls — a heuristic about how the engine draws, not
-something the game tells it. No effect uses this yet; it is groundwork. To check
+something the game tells it, and `ssr`, `taa` and `motionblur` depend on it. To check
 it works in your game, set `cameraLogInterval=60` in the ini, play for a few
 seconds, and read `opengl32_enhancer.log`: the logged position should slide as
 you walk and hold still as you turn. If it jumps around while you stand still,
