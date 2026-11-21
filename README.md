@@ -74,6 +74,10 @@ fullscreen at the desktop resolution, and supersampling (see
    [the config editor](#tuning-settings-the-config-editor)).
 4. Launch the game normally.
 
+**Playing Anachronox?** The [Anachronox Steam guide](docs/steam-guide/README.md)
+walks through install, widescreen, tuning and troubleshooting step by step,
+with before/after screenshots.
+
 Windows loads the `opengl32.dll` sitting next to the game's executable in
 preference to the system one, so no installer or injector is involved. To
 uninstall, delete the files.
