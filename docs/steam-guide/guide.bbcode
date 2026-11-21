@@ -1,0 +1,311 @@
+============================================================================
+STEAM GUIDE: paste-ready BBCode
+============================================================================
+How to use this file:
+  * Everything between two "=== SECTION" lines is one guide section. In the
+    Steam guide editor, click "Add Section", paste the section title into the
+    title box and the section body into the text box.
+  * Each {{IMAGE: name.jpg}} marker is a picture from docs/steam-guide/images.
+    Upload that picture to the section (the editor's image panel), put the
+    cursor where the marker is, delete the marker and click the uploaded
+    picture's insert button. Steam writes its own [previewimg] tag there.
+  * Guide settings (not sections):
+      Title:        OpenGL32 Enhancer: real widescreen and modern graphics for Anachronox
+      Description:  Install one DLL and Anachronox fills a 16:9 / 16:10 screen
+                    properly, with SMAA/TAA, sharpening, bloom, ambient occlusion,
+                    reflections and colour grading. Step-by-step setup, tuning
+                    and troubleshooting.
+      Preview image: images/cover.jpg
+      Category:     Modding (or "Tweaks / Settings" if offered)
+      Language:     English
+============================================================================
+
+
+=== SECTION 1 TITLE: Overview
+=== SECTION 1 BODY:
+
+[b]OpenGL32 Enhancer[/b] is a free, open-source add-on that drops into the Anachronox folder and makes the 2001 game look at home on a modern monitor. No patching, no launcher, no installer: Windows simply loads it in place of the system OpenGL library.
+
+{{IMAGE: compare-bricksc.jpg}}
+
+[h2]What you get[/h2]
+[list]
+[*][b]Real widescreen.[/b] The 3D view fills a 16:10 or 16:9 screen: you see more of the scene at the sides, nothing is stretched, and menus and the HUD keep their original shape in the centre.
+[*][b]Borderless fullscreen[/b] at your desktop resolution, instead of the old blurry 4:3 display modes.
+[*][b]Supersampling[/b]: the game renders at up to 2560x1600 (or more) and is downscaled, giving clean, crisp edges.
+[*][b]Post-processing[/b] in the style of ReShade: anti-aliasing (SMAA/TAA), sharpening (CAS, FSR 1, NVIDIA sharpen), noise reduction, ambient occlusion, screen-space reflections, bloom, light shafts, fog, depth of field, ACES tone mapping and LUT colour grading.
+[*][b]Sharper textures[/b] through anisotropic filtering.
+[*][b]A settings editor[/b] with a live preview, so you can tune the look without restarting the game.
+[/list]
+
+[h2]Requirements[/h2]
+[table]
+[tr][th]What[/th][th]Needed[/th][/tr]
+[tr][td]OS[/td][td]Windows 10 or 11[/td][/tr]
+[tr][td]Game[/td][td]Anachronox (Steam or GOG), running its OpenGL renderer[/td][/tr]
+[tr][td]Graphics card[/td][td]Any GPU with OpenGL 4.3 support (practically anything from the last ten years)[/td][/tr]
+[tr][td]Extras[/td][td]Nothing to install. No Visual C++ runtime needed[/td][/tr]
+[/table]
+
+The project lives on GitHub: https://github.com/ASDAlexander77/opengl32_enhancer
+
+
+=== SECTION 2 TITLE: Before and after
+=== SECTION 2 BODY:
+
+Every picture below is the same frame twice: the left half is the original game, the right half is the enhancer's default settings.
+
+[h2]Neon corridor[/h2]
+{{IMAGE: compare-bricksc.jpg}}
+Deeper contrast, brighter neon, sharper metal detail.
+
+[h2]Rooftop walkway[/h2]
+{{IMAGE: compare-sunstrip.jpg}}
+Clearer sky and haze, sharper grating, reflections on the walkway.
+
+[h2]Museum hallway[/h2]
+{{IMAGE: compare-museum.jpg}}
+The original is very dark on modern screens. Gamma correction lifts it without washing out the blacks, and the polished floor now reflects the walls.
+
+[h2]Tower interior[/h2]
+{{IMAGE: compare-hephtower2.jpg}}
+
+[i]Tip: the small "FX" badge in the top-right corner shows the enhancer is running. You can turn it off once everything works (see "Tweaking the look").[/i]
+
+
+=== SECTION 3 TITLE: Step 1: Download
+=== SECTION 3 BODY:
+
+[olist]
+[*]Open the releases page: https://github.com/ASDAlexander77/opengl32_enhancer/releases
+[*]Under the newest release, click [b]opengl32_enhancer.zip[/b] to download it.
+[*]Right-click the zip and choose [b]Extract All...[/b]
+[/olist]
+
+Inside the zip you will find four files:
+[table]
+[tr][th]File[/th][th]What it is[/th][/tr]
+[tr][td][b]opengl32.dll[/b][/td][td]The enhancer itself[/td][/tr]
+[tr][td][b]opengl32_enhancer.ini[/b][/td][td]All settings, each one explained in comments[/td][/tr]
+[tr][td][b]cyberpunk.cube[/b][/td][td]The default colour-grading look[/td][/tr]
+[tr][td][b]config_editor.exe[/b][/td][td]Optional settings editor with a live preview[/td][/tr]
+[/table]
+
+
+=== SECTION 4 TITLE: Step 2: Install
+=== SECTION 4 BODY:
+
+[olist]
+[*]In Steam, right-click [b]Anachronox[/b] in your Library, then choose [b]Manage > Browse local files[/b]. This opens the game folder, the one that contains [b]anox.exe[/b].
+[*]Copy all four files from the zip into that folder.
+[/olist]
+
+{{IMAGE: install-files.jpg}}
+
+[b]Important:[/b]
+[list]
+[*]Put the files [b]next to anox.exe[/b]. Do [u]not[/u] copy them into C:\Windows\System32 or anywhere else.
+[*]If Windows asks whether to replace an existing [b]opengl32.dll[/b], another OpenGL wrapper is already installed. Only one can work at a time, so remove the old one first (back it up if you want to keep it).
+[/list]
+
+That's it. There is nothing to register or run.
+
+[h2]Uninstalling[/h2]
+Delete the four files from the game folder. The game is back to stock.
+
+
+=== SECTION 5 TITLE: Step 3: Launch the game
+=== SECTION 5 BODY:
+
+Start Anachronox from Steam as usual.
+
+The enhancer works with the game's [b]OpenGL[/b] renderer, which is the default. If you changed the renderer before, set it back to OpenGL in the game's video options. If the game still looks unchanged, add this to the Steam launch options (right-click the game > [b]Properties[/b] > [b]General[/b] > [b]Launch Options[/b]):
+
+[code]+set gl_driver opengl32[/code]
+
+[h2]How to tell it is working[/h2]
+[list]
+[*]A small [b]FX[/b] badge appears in the top-right corner.
+[*]The game fills your widescreen monitor without stretching.
+[*]A file called [b]opengl32_enhancer.log[/b] appears in the game folder. If something isn't working, the reason is usually written there.
+[/list]
+
+[h2]Windowed or fullscreen?[/h2]
+Both work. Fullscreen is borderless: the game covers your monitor at its native resolution, without the old blurry 4:3 display mode. In windowed mode the window opens at 2560x1600 by default; see the next section to change that.
+
+
+=== SECTION 6 TITLE: Widescreen and resolution
+=== SECTION 6 BODY:
+
+Anachronox only knows 4:3 resolutions. The enhancer widens its 3D view to the real shape of your screen, so you see more of the world at the sides instead of a stretched picture.
+
+{{IMAGE: widescreen-compare.jpg}}
+
+Widescreen is [b]on by default[/b] and follows your window's shape automatically, so 16:10 and 16:9 both work. Menus, dialogue and the HUD stay at their original 4:3 shape in the centre.
+
+[h2]Changing the resolution[/h2]
+Open [b]opengl32_enhancer.ini[/b] in Notepad and find these lines:
+
+[code]
+windowWidth=2560
+windowHeight=1600
+renderWidth=2560
+renderHeight=1600
+widescreen=1
+[/code]
+
+[list]
+[*][b]windowWidth / windowHeight[/b]: the window size in windowed mode. Set it to your monitor's resolution or smaller, e.g. [b]1920[/b] x [b]1080[/b]. (Ignored in fullscreen, which always uses the whole monitor.)
+[*][b]renderHeight[/b]: the quality. The game is rendered this many pixels tall and then scaled down to your screen, which gives clean edges. 1600 is a good default; lower it (e.g. 1080) on a slow GPU, raise it (e.g. 2160) on a fast one. The width is worked out automatically.
+[*][b]widescreen=0[/b]: go back to the original 4:3 picture with black bars at the sides.
+[/list]
+
+Save the file and restart the game. Settings are only read when the game starts.
+
+[h2]Things popping in at the edges?[/h2]
+The game still decides what to draw from its old 4:3 view, so walls at the far left and right edges can occasionally appear a moment late. Add this to the Steam launch options to fix it for level geometry:
+[code]+set r_nocull 1[/code]
+Characters can still pop in at the extreme edges, because the game itself hides them.
+
+
+=== SECTION 7 TITLE: Tweaking the look
+=== SECTION 7 BODY:
+
+All effects are listed on one line in [b]opengl32_enhancer.ini[/b]:
+
+[code]effect=nr, gamma, localcontrast, ssao, dof, fog, ssr, lightshafts, bloom, acestonemap, lutgrading, chromaticaberration, motionblur, taa, sharpen, dither[/code]
+
+Effects run [b]left to right[/b]. To turn one off, delete its name from the line. To turn everything off, write [b]effect=none[/b].
+
+[h2]What each effect does[/h2]
+[table]
+[tr][th]Name[/th][th]Effect[/th][/tr]
+[tr][td]nr[/td][td]Noise reduction: smooths grain while keeping edges[/td][/tr]
+[tr][td]gamma[/td][td]Brightness. Raise [b]gamma=[/b] if the game is too dark on your monitor[/td][/tr]
+[tr][td]localcontrast[/td][td]"Clarity": more depth in textures and surfaces[/td][/tr]
+[tr][td]ssao[/td][td]Ambient occlusion: soft shadows in corners and creases[/td][/tr]
+[tr][td]dof[/td][td]Depth of field: softly blurs what is nearer or farther than whatever is at the centre of the screen[/td][/tr]
+[tr][td]fog[/td][td]Distance haze[/td][/tr]
+[tr][td]ssr[/td][td]Reflections on floors and water[/td][/tr]
+[tr][td]lightshafts[/td][td]God rays from bright lights[/td][/tr]
+[tr][td]bloom[/td][td]Glow around bright lights[/td][/tr]
+[tr][td]acestonemap[/td][td]Film-like contrast curve[/td][/tr]
+[tr][td]lutgrading[/td][td]Colour grading (the cyberpunk.cube look)[/td][/tr]
+[tr][td]chromaticaberration[/td][td]Slight lens colour fringing at the edges[/td][/tr]
+[tr][td]motionblur[/td][td]Blur when the camera turns[/td][/tr]
+[tr][td]taa[/td][td]Temporal anti-aliasing: smooths jagged and shimmering edges[/td][/tr]
+[tr][td]smaa[/td][td]Alternative anti-aliasing (use [b]taa[/b] or [b]smaa[/b], not both)[/td][/tr]
+[tr][td]sharpen / cas / fsr[/td][td]Sharpening (use one of them, not several)[/td][/tr]
+[tr][td]vignette[/td][td]Darkens the screen corners[/td][/tr]
+[tr][td]dither[/td][td]Hides colour banding. Keep it near the end[/td][/tr]
+[/table]
+
+Every effect has its own strength settings further down in the ini, each explained in a comment right above it. A few useful ones:
+[list]
+[*][b]gamma=1.8[/b]: overall brightness. 1.0 is the original; higher is brighter.
+[*][b]lutStrength=0.15[/b]: how strong the colour grading is (0 = off).
+[*][b]bloomIntensity=0.5[/b]: how much the lights glow.
+[*][b]sharpness=0.5[/b]: sharpening strength.
+[*][b]ssrIntensity=0.35[/b]: how strong floor reflections are.
+[*][b]fxIndicator=0[/b]: hides the "FX" badge.
+[*][b]anisotropy=16[/b]: sharpest textures at a distance (0 = off).
+[/list]
+
+[h2]Suggested presets[/h2]
+[b]Clean and faithful[/b]: sharper image, original colours:
+[code]effect=smaa, cas, dither[/code]
+
+[b]Brighter, no stylised colour[/b]:
+[code]effect=nr, gamma, localcontrast, ssao, ssr, taa, sharpen, dither[/code]
+
+[b]Widescreen only, no effects[/b]:
+[code]effect=none[/code]
+
+
+=== SECTION 8 TITLE: The settings editor (optional)
+=== SECTION 8 BODY:
+
+Editing the ini and restarting the game over and over is slow. [b]config_editor.exe[/b] lets you change everything with a live preview instead.
+
+{{IMAGE: config-editor.jpg}}
+
+[olist]
+[*]Double-click [b]config_editor.exe[/b] in the game folder. It opens the ini sitting next to it.
+[*]The [b]Pipeline[/b] list shows the active effects in order. Use the arrows to reorder, [b]remove[/b] to drop one, and the drop-down plus [b]Add stage[/b] to add one.
+[*]Open the groups below it (Bloom / tone / grade, Anti-aliasing, Gamma / brightness and so on) to move the sliders.
+[*]Click [b]Save to ini[/b], then start the game.
+[/olist]
+
+The editor is a separate program. The game never loads it, and deleting it changes nothing.
+
+[h2]Preview with a real Anachronox scene[/h2]
+The built-in test room is fine for most settings, but you can tune against the actual game:
+[olist]
+[*]In-game, stand somewhere typical and press [b]F12[/b]. A file called [b]opengl32_enhancer_frame.dump[/b] is written to the game folder.
+[*]In the editor, select [b]Loaded game frame[/b] and click [b]Load frame dump[/b].
+[*]Now every slider shows its effect on your real scene, including the depth-based effects (ambient occlusion, fog, depth of field).
+[/olist]
+
+
+=== SECTION 9 TITLE: Screenshots and performance
+=== SECTION 9 BODY:
+
+[h2]Taking screenshots with effects[/h2]
+Set a key in the ini, e.g. F11:
+[code]screenshotKey=0x7A[/code]
+Press it in-game and the finished frame, with every effect and at full resolution, is saved as [b]opengl32_enhancer_shot_000.bmp[/b] (then 001, 002...) in the game folder.
+
+[h2]Checking performance[/h2]
+Set [b]debugStats=1[/b] in the ini. Every two seconds the window title and the log show the frame rate and how many milliseconds each effect costs, so you can see which one to drop on a slower PC. The full default chain costs about 6 to 9 ms per frame at 2560x1600 on a modern GPU.
+
+If the game feels slow:
+[list]
+[*]Lower [b]renderHeight[/b] (e.g. 1600 → 1080). This is the biggest win.
+[*]Remove the heavier effects: [b]ssr[/b], [b]ssao[/b], [b]lightshafts[/b], [b]motionblur[/b].
+[/list]
+
+
+=== SECTION 10 TITLE: Troubleshooting
+=== SECTION 10 BODY:
+
+[b]The game looks exactly the same / no FX badge[/b]
+[list]
+[*]Make sure the files are next to [b]anox.exe[/b], not in a subfolder.
+[*]Make sure the game uses its OpenGL renderer, and try the launch option [b]+set gl_driver opengl32[/b].
+[*]Check that the [b]effect=[/b] line does not start with [b];[/b] (that makes it a comment).
+[*]Read [b]opengl32_enhancer.log[/b] in the game folder.
+[/list]
+
+[b]Black screen, flickering or strange colours[/b]
+Another [b]opengl32.dll[/b] (another wrapper or mod) may be fighting with this one. Use a clean game folder with only this DLL added. Also update your graphics driver.
+
+[b]"GL 4.3" message in the log, effects disabled[/b]
+Your GPU or driver lacks the compute-shader support the effects need. Updating the driver usually fixes it.
+
+[b]The picture is stretched, or doesn't fill the screen[/b]
+Check that [b]renderWidth[/b] and [b]renderHeight[/b] are both set (widescreen needs them), and that [b]widescreen=1[/b].
+
+[b]Game window is too big for my screen[/b]
+Lower [b]windowWidth[/b] / [b]windowHeight[/b] to your monitor's resolution or smaller, or play in fullscreen.
+
+[b]Walls pop in at the left and right edges[/b]
+Add [b]+set r_nocull 1[/b] to the launch options.
+
+[b]Everything is too dark / too bright[/b]
+Change [b]gamma=[/b] in the ini (1.0 = original, 1.8 = default, higher = brighter).
+
+[b]I want the original game back[/b]
+Write [b]effect=none[/b] and [b]widescreen=0[/b] to keep only the fixes you like, or delete the four files to remove the enhancer completely.
+
+
+=== SECTION 11 TITLE: Credits and links
+=== SECTION 11 BODY:
+
+[list]
+[*]Source code, downloads and full documentation: https://github.com/ASDAlexander77/opengl32_enhancer
+[*]Bug reports and questions: open an issue on the GitHub page, or leave a comment below.
+[/list]
+
+Some effects are ported from public reference implementations: AMD FidelityFX [b]FSR 1[/b] and [b]CAS[/b], [b]NVIDIA Image Scaling[/b], and [b]SMAA[/b]. The settings editor uses [b]Dear ImGui[/b]. All are MIT licensed, as is the enhancer itself.
+
+If this guide helped, please give it a thumbs-up so other Anachronox players can find it.
