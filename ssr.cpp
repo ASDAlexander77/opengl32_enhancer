@@ -77,6 +77,22 @@ const char* kSsrShaderSource =
     "    vec2 uv = (vec2(c) + vec2(0.5)) / vec2(size);\n"
     "    return ViewPosFor(uv, LinearEyeDistance(raw, zNear, zFar), zNear);\n"
     "}\n"
+    // Surface normal at a texel from its neighbours' positions - see the comment at its use in
+    // main(). Returns vec3(0) when the neighbours give no usable orientation.
+    "vec3 NormalAt(ivec2 coord, vec3 P, ivec2 size, float zNear, float zFar) {\n"
+    "    vec3 Pr = ViewPosAt(coord + ivec2(1, 0), size, zNear, zFar);\n"
+    "    vec3 Pl = ViewPosAt(coord - ivec2(1, 0), size, zNear, zFar);\n"
+    "    vec3 Pu = ViewPosAt(coord + ivec2(0, 1), size, zNear, zFar);\n"
+    "    vec3 Pd = ViewPosAt(coord - ivec2(0, 1), size, zNear, zFar);\n"
+    "    vec3 dx = (abs(Pr.z - P.z) < abs(P.z - Pl.z)) ? (Pr - P) : (P - Pl);\n"
+    "    vec3 dy = (abs(Pu.z - P.z) < abs(P.z - Pd.z)) ? (Pu - P) : (P - Pd);\n"
+    "    vec3 N = cross(dx, dy);\n"
+    "    float nLen = length(N);\n"
+    "    if (nLen < 1e-8) { return vec3(0.0); }\n"
+    "    N /= nLen;\n"
+    "    if (dot(N, P) > 0.0) { N = -N; }\n"
+    "    return N;\n"
+    "}\n"
     "void main() {\n"
     "    ivec2 traceSize = imageSize(outputImage);\n"
     "    ivec2 traceCoord = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -106,22 +122,13 @@ const char* kSsrShaderSource =
     // Normals from neighbouring positions, taking whichever of the forward/backward difference
     // spans the smaller depth step on each axis so a silhouette's normal stays attached to the
     // surface it belongs to instead of tilting toward whatever sits across the edge.
-    "    vec3 Pr = ViewPosAt(outCoord + ivec2(1, 0), size, zNear, zFar);\n"
-    "    vec3 Pl = ViewPosAt(outCoord - ivec2(1, 0), size, zNear, zFar);\n"
-    "    vec3 Pu = ViewPosAt(outCoord + ivec2(0, 1), size, zNear, zFar);\n"
-    "    vec3 Pd = ViewPosAt(outCoord - ivec2(0, 1), size, zNear, zFar);\n"
-    "    vec3 dx = (abs(Pr.z - P.z) < abs(P.z - Pl.z)) ? (Pr - P) : (P - Pl);\n"
-    "    vec3 dy = (abs(Pu.z - P.z) < abs(P.z - Pd.z)) ? (Pu - P) : (P - Pd);\n"
-    "    vec3 N = cross(dx, dy);\n"
-    "    float nLen = length(N);\n"
+    "    vec3 N = NormalAt(outCoord, P, size, zNear, zFar);\n"
     // Degenerate cross product: the neighbours were collinear, or the surface is exactly
     // edge-on. There is no usable orientation, so there is nothing to decide reflectivity with.
-    "    if (nLen < 1e-8) {\n"
+    "    if (dot(N, N) < 0.5) {\n"
     "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
-    "    N /= nLen;\n"
-    "    if (dot(N, P) > 0.0) { N = -N; }\n"
     // THE GATE - the whole heuristic, in one line. A GL 1.1 game never says what a surface is
     // made of, so orientation stands in for material: only surfaces facing up reflect. The
     // comparison is <= rather than < so that upThreshold=1 gates off even a perfectly flat
@@ -146,11 +153,19 @@ const char* kSsrShaderSource =
     // fraction of the distance to that neighbour, fades the reflection out. A neighbour across a
     // depth edge (a different object, or sky) is far off the plane, so edges and small objects
     // fail together, which is the intent.
+    //
+    // Eight directions, not four: with only a "+" pattern, the crossing of two bars of a floor
+    // grating had all its samples land on bar and passed as floor, while every pixel around it
+    // failed - isolated bright specks wherever bars crossed. The diagonals see the holes. The
+    // third ring (24) catches the inside of a recess wider than 12 pixels.
     "    float worstOff = 0.0;\n"
-    "    for (int s = 0; s < 2; ++s) {\n"
-    "        int r = (s == 0) ? 4 : 12;\n"
-    "        for (int d = 0; d < 4; ++d) {\n"
-    "            ivec2 o = (d == 0) ? ivec2(r, 0) : (d == 1) ? ivec2(-r, 0) : (d == 2) ? ivec2(0, r) : ivec2(0, -r);\n"
+    "    for (int s = 0; s < 3; ++s) {\n"
+    "        int r = (s == 0) ? 4 : (s == 1) ? 12 : 24;\n"
+    "        int rd = (r * 7) / 10;\n"
+    "        for (int d = 0; d < 8; ++d) {\n"
+    "            ivec2 o = (d == 0) ? ivec2(r, 0) : (d == 1) ? ivec2(-r, 0) : (d == 2) ? ivec2(0, r) :\n"
+    "                      (d == 3) ? ivec2(0, -r) : (d == 4) ? ivec2(rd, rd) : (d == 5) ? ivec2(-rd, rd) :\n"
+    "                      (d == 6) ? ivec2(rd, -rd) : ivec2(-rd, -rd);\n"
     "            vec3 Q = ViewPosAt(outCoord + o, size, zNear, zFar) - P;\n"
     "            float qLen = length(Q);\n"
     "            if (qLen > 1e-4) { worstOff = max(worstOff, abs(dot(Q, N)) / qLen); }\n"
@@ -191,6 +206,19 @@ const char* kSsrShaderSource =
     "        }\n"
     "    }\n"
     "    if (!hit) {\n"
+    "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
+    "        return;\n"
+    "    }\n"
+    // BACK-FACE HITS. A real reflection ray can only meet a surface that faces it. If the
+    // surface the ray ended behind faces the same way the ray travels, the ray did not reflect
+    // off it - it passed underneath it: what the screen shows there is the far side of an
+    // occluder. That is what a recessed floor does (the lower floor under a grating, the
+    // bottom of a pit): its rays go up through the bars, "hit" their tops from below, or slip
+    // between them to a bright light - a random mix that showed up as isolated specks. Such a
+    // ray is occluded, so it reflects nothing.
+    "    ivec2 hitCoord = clamp(ivec2(hitUv * vec2(size)), ivec2(0), size - ivec2(1));\n"
+    "    vec3 hitN = NormalAt(hitCoord, ViewPosAt(hitCoord, size, zNear, zFar), size, zNear, zFar);\n"
+    "    if (dot(hitN, R) > 0.1) {\n"
     "        imageStore(outputImage, traceCoord, vec4(0.0));\n"
     "        return;\n"
     "    }\n"
