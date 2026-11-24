@@ -18,8 +18,8 @@ import re
 import sys
 
 GL_FILE = r"gl_full.txt"
-CPP_OUT = r"..\wrapper.cpp"
-DEF_OUT = r"..\wrapper.def"
+CPP_OUT = r"..\src\wrapper.cpp"
+DEF_OUT = r"..\src\wrapper.def"
 
 # Raw C type -> C++ type used in the generated file. Any pointer/handle type collapses to
 # void* (ABI only cares about pointer size/slot, never the pointee), matching Opaque in the

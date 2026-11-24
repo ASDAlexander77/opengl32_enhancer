@@ -13,6 +13,10 @@ if (NOT CMAKE_BUILD_TYPE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
 endif()
 
+# Sources live in src/, headers in include/. Every target below includes the project headers,
+# so the include path is set once, directory-wide, rather than per target.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # The tslang toolchain's runtime libraries (TypeScriptAsyncRuntime.lib, LLVMSupport.lib -
 # these link into every tslang-built program, not just the compiler) are only built for
 # x64 right now; a genuine wrapper.ts x86 build needs an x86 LLVM/MLIR rebuild first (see
@@ -40,9 +44,9 @@ endif()
 # Plain C++ proxy - see generators/gen_wrapper_cpp.py. Exports under the real function
 # names via the .def file (a __declspec(dllexport) alone would get __stdcall's "@N"
 # decoration on x86, which wouldn't match what a host app imports by name).
-add_library(${WRAPPER_NAME_CXX} SHARED wrapper.cpp pixel_invert.cpp config.cpp debug_log.cpp gl_loader.cpp post_effects.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp texture_effect.cpp texture_filter.cpp texture_mipmap.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp srgb_convert.cpp hud_mask.cpp perf_stats.cpp dll_init.cpp)
+add_library(${WRAPPER_NAME_CXX} SHARED src/wrapper.cpp src/pixel_invert.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp src/post_effects.cpp src/bilinear_upscale.cpp src/nis_effect.cpp src/hdr_look.cpp src/bloom.cpp src/lut_grading.cpp src/vignette.cpp src/depth_vignette.cpp src/ssao.cpp src/dof.cpp src/fog.cpp src/light_shafts.cpp src/ssr.cpp src/projection_capture.cpp src/modelview_capture.cpp src/world_capture.cpp src/motion_blur.cpp src/frame_dump.cpp src/chromatic_aberration.cpp src/taa.cpp src/taa_jitter.cpp src/dither.cpp src/gamma.cpp src/texture_effect.cpp src/texture_filter.cpp src/texture_mipmap.cpp src/smaa.cpp src/fsr.cpp src/cas.cpp src/nr.cpp src/local_contrast.cpp src/fx_indicator.cpp src/window_override.cpp src/render_target.cpp src/srgb_convert.cpp src/hud_mask.cpp src/perf_stats.cpp src/dll_init.cpp)
 set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
-    LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/wrapper.def"
+    LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/wrapper.def"
 )
 # Static CRT, for the same reason config_editor uses one (see its target below), and one more
 # that is specific to being a proxy DLL: this gets loaded into somebody else's process, next to
@@ -62,15 +66,15 @@ set_target_properties(${WRAPPER_NAME_CXX} PROPERTIES
 
 # Loads opengl32_enh32.dll by name (same output directory) and calls a couple of
 # functions through it, the same sanity check test.ts does for the x64 build.
-add_executable(${WRAPPER_NAME_CXX}_test wrapper_test.cpp)
+add_executable(${WRAPPER_NAME_CXX}_test src/wrapper_test.cpp)
 add_dependencies(${WRAPPER_NAME_CXX}_test ${WRAPPER_NAME_CXX})
 
 # Exercises config.cpp's INI parsing directly (no DLL/GL involved) - see config_test.cpp.
-add_executable(config_test config_test.cpp config.cpp)
+add_executable(config_test src/config_test.cpp src/config.cpp)
 
 # Checks config_writer.cpp rewrites the REAL shipped ini in place without destroying the inline
 # documentation that file mostly consists of - see config_writer_test.cpp. No GL involved.
-add_executable(config_writer_test config_writer_test.cpp config_writer.cpp config.cpp)
+add_executable(config_writer_test src/config_writer_test.cpp src/config_writer.cpp src/config.cpp)
 # Its own directory for the same reason texture_filter_test and config_editor have one: it needs
 # a copy of the real opengl32_enhancer.ini next to its .exe, and two targets writing that
 # filename into the shared build directory is an unordered race with the Ninja generator.
@@ -85,7 +89,7 @@ add_custom_command(TARGET config_writer_test POST_BUILD
 
 # No GL and no GPU: re-executes itself as a console-less child and checks a printf from that
 # child lands in the log file beside the module - see debug_log_test.cpp.
-add_executable(debug_log_test debug_log_test.cpp debug_log.cpp)
+add_executable(debug_log_test src/debug_log_test.cpp src/debug_log.cpp)
 target_link_libraries(debug_log_test user32)
 
 # Pure CPU: the Halton sequence, the frustum-shift arithmetic, and the per-frame arming rule
@@ -93,68 +97,68 @@ target_link_libraries(debug_log_test user32)
 # only because taa_jitter.cpp's ApplyTaaJitterToFrustumFromCurrentViewport references
 # GetGlComputeApi(); with no context current, GetGlComputeApi() resolves to loaded=false and
 # that function's guard keeps it from ever touching GL - see taa_jitter.h.
-add_executable(taa_jitter_test taa_jitter_test.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(taa_jitter_test src/taa_jitter_test.cpp src/taa_jitter.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp)
 
 # Pure CPU: projection_capture.h records only what the glFrustum wrapper hands it and never
 # touches the driver - see projection_capture_test.cpp.
-add_executable(projection_capture_test projection_capture_test.cpp projection_capture.cpp)
+add_executable(projection_capture_test src/projection_capture_test.cpp src/projection_capture.cpp)
 
 # Pure CPU: the lazy-generation decision rule from texture_mipmap.h - which textures are
 # candidates, and the world-pass-only gate that keeps HUD artwork out - with no GL context.
 # See texture_mipmap_test.cpp.
-add_executable(texture_mipmap_test texture_mipmap_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(texture_mipmap_test src/texture_mipmap_test.cpp src/texture_mipmap.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp)
 
 # Pure CPU: the viewport scaling rule, the reference latch and the arming decision from
 # render_target.h, with no GL context - see render_target_test.cpp.
-add_executable(render_target_test render_target_test.cpp render_target.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(render_target_test src/render_target_test.cpp src/render_target.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp)
 
 # No GL at all: pure CPU math turning a dump's depth plane into a viewable grayscale image,
 # plus a real write/read round trip through frame_dump.cpp - see depth_view_test.cpp.
-add_executable(depth_view_test depth_view_test.cpp depth_view.cpp frame_dump.cpp)
+add_executable(depth_view_test src/depth_view_test.cpp src/depth_view.cpp src/frame_dump.cpp)
 
 # Creates a real GL context and checks gl_loader.cpp resolves every GL 4.3 compute-shader
 # entry point it needs - see gl_loader_test.cpp.
-add_executable(gl_loader_test gl_loader_test.cpp gl_loader.cpp)
+add_executable(gl_loader_test src/gl_loader_test.cpp src/gl_loader.cpp)
 target_link_libraries(gl_loader_test opengl32 gdi32 user32)
 
 # Creates a real window (no GL context - this module never touches rendering) and checks
 # ApplyWindowSizeOverride() resizes its client area to config.h's windowWidth/windowHeight, only
 # when both are set - see window_override_test.cpp.
-add_executable(window_override_test window_override_test.cpp window_override.cpp config.cpp debug_log.cpp)
+add_executable(window_override_test src/window_override_test.cpp src/window_override.cpp src/config.cpp src/debug_log.cpp)
 target_link_libraries(window_override_test gdi32 user32)
 
 # Creates a real GL context and checks ApplyCas() reproduces a flat image and sharpens a
 # mid-contrast edge - see cas_test.cpp.
-add_executable(cas_test cas_test.cpp cas.cpp gl_loader.cpp)
+add_executable(cas_test src/cas_test.cpp src/cas.cpp src/gl_loader.cpp)
 target_link_libraries(cas_test opengl32 gdi32 user32)
 
 # Creates a real GL context and checks ApplyFsr()'s two passes (EASU then RCAS) reproduce a
 # flat image, respond near a hard edge, and survive the reduced-scale upscale path - see
 # fsr_test.cpp.
-add_executable(fsr_test fsr_test.cpp fsr.cpp gl_loader.cpp)
+add_executable(fsr_test src/fsr_test.cpp src/fsr.cpp src/gl_loader.cpp)
 target_link_libraries(fsr_test opengl32 gdi32 user32)
 
 # Runs an effect, destroys the GL context, creates a new one and runs the effect again -
 # checks cached GL objects are rebuilt rather than reused across contexts (the failure a
 # vid_restart / video mode change would otherwise cause) - see gl_context_change_test.cpp.
-add_executable(gl_context_change_test gl_context_change_test.cpp pixel_invert.cpp gl_loader.cpp)
+add_executable(gl_context_change_test src/gl_context_change_test.cpp src/pixel_invert.cpp src/gl_loader.cpp)
 target_link_libraries(gl_context_change_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyBilinearUpscale()'s
 # GPU pipeline (capture -> compute dispatch -> blit) reproduces it without a GL error - see
 # bilinear_upscale_test.cpp.
-add_executable(bilinear_upscale_test bilinear_upscale_test.cpp bilinear_upscale.cpp gl_loader.cpp)
+add_executable(bilinear_upscale_test src/bilinear_upscale_test.cpp src/bilinear_upscale.cpp src/gl_loader.cpp)
 target_link_libraries(bilinear_upscale_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks both ApplyNVScaler and
 # ApplyNVSharpen's GPU pipelines run to completion with no GL error - see nis_effect_test.cpp.
-add_executable(nis_effect_test nis_effect_test.cpp nis_effect.cpp gl_loader.cpp)
+add_executable(nis_effect_test src/nis_effect_test.cpp src/nis_effect.cpp src/gl_loader.cpp)
 target_link_libraries(nis_effect_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyHdrLook()'s GPU
 # pipeline at strength=0 (must reproduce the input) and strength=0.8 (must run with no GL
 # error) - see hdr_look_test.cpp.
-add_executable(hdr_look_test hdr_look_test.cpp hdr_look.cpp gl_loader.cpp)
+add_executable(hdr_look_test src/hdr_look_test.cpp src/hdr_look.cpp src/gl_loader.cpp)
 target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and calls ApplyTaa() four times in a
@@ -163,49 +167,49 @@ target_link_libraries(hdr_look_test opengl32 gdi32 user32)
 # HUD-masked, variance-clipped path - which is why taa_jitter.cpp (and the config/debug_log it
 # pulls in) is linked here: the anti-aliasing fixture drives the same jitter the game gets.
 # See taa_test.cpp.
-add_executable(taa_test taa_test.cpp taa.cpp taa_jitter.cpp config.cpp debug_log.cpp gl_loader.cpp hud_mask.cpp perf_stats.cpp)
+add_executable(taa_test src/taa_test.cpp src/taa.cpp src/taa_jitter.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp src/hud_mask.cpp src/perf_stats.cpp)
 target_link_libraries(taa_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, writes an identity .cube LUT fixture,
 # and checks ApplyLutGrading()'s GPU pipeline (parse .cube -> 3D texture -> dispatch -> blit)
 # at strength=1 (identity LUT reproduces the input), strength=0 (exact passthrough), and a
 # missing LUT file (no-op, no GL error) - see lut_grading_test.cpp.
-add_executable(lut_grading_test lut_grading_test.cpp lut_grading.cpp gl_loader.cpp)
+add_executable(lut_grading_test src/lut_grading_test.cpp src/lut_grading.cpp src/gl_loader.cpp)
 target_link_libraries(lut_grading_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyBloom()'s four-pass GPU
 # pipeline (extract -> blur x2 -> composite -> blit) at intensity=0 (must reproduce the input
 # exactly, no bloom contribution) and a nonzero intensity (must run with no GL error) - see
 # bloom_test.cpp.
-add_executable(bloom_test bloom_test.cpp bloom.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
+add_executable(bloom_test src/bloom_test.cpp src/bloom.cpp src/gl_loader.cpp src/perf_stats.cpp src/config.cpp src/debug_log.cpp)
 target_link_libraries(bloom_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyDither()'s GPU pipeline
 # at strength=0 (must reproduce the input exactly) and strength=1.0 (must run with no GL
 # error, and stay within +-1 LSB of the input since the dither offset is bounded to +-0.5 of
 # one 8-bit step) - see dither_test.cpp.
-add_executable(dither_test dither_test.cpp dither.cpp gl_loader.cpp)
+add_executable(dither_test src/dither_test.cpp src/dither.cpp src/gl_loader.cpp)
 target_link_libraries(dither_test opengl32 gdi32 user32)
 
 # Creates a real GL context, uploads a four-step grey wedge, and checks ApplyGamma()'s GPU
 # pipeline is an exact passthrough at gamma=1/brightness=1, a straight linear gain at
 # brightness alone, and a true gamma curve at gamma alone - midtones lifted to their arithmetic
 # values with black and white both left pinned - see gamma_test.cpp.
-add_executable(gamma_test gamma_test.cpp gamma.cpp gl_loader.cpp)
+add_executable(gamma_test src/gamma_test.cpp src/gamma.cpp src/gl_loader.cpp)
 target_link_libraries(gamma_test opengl32 gdi32 user32)
 
 # Creates a real GL context and checks the two sRGB conversion passes against the EXACT
 # piecewise transfer function - including the linear segment below the 0.04045 knee, which
 # is where the pow(2.2) approximation people reach for is most wrong - and that encode is
 # decode's inverse across both segments. See srgb_convert_test.cpp.
-add_executable(srgb_convert_test srgb_convert_test.cpp srgb_convert.cpp gl_loader.cpp)
+add_executable(srgb_convert_test src/srgb_convert_test.cpp src/srgb_convert.cpp src/gl_loader.cpp)
 target_link_libraries(srgb_convert_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyVignette()'s GPU pipeline
 # at intensity=0 (must reproduce the input exactly everywhere, corners included) and at a strong
 # intensity (center stays bit-exact inside `radius`, near-corner pixel comes back much darker) -
 # see vignette_test.cpp.
-add_executable(vignette_test vignette_test.cpp vignette.cpp gl_loader.cpp)
+add_executable(vignette_test src/vignette_test.cpp src/vignette.cpp src/gl_loader.cpp)
 target_link_libraries(vignette_test opengl32 gdi32 user32)
 
 # EXPERIMENTAL (see depth_vignette.h). Creates a real GL context, renders two real quads at
@@ -213,47 +217,47 @@ target_link_libraries(vignette_test opengl32 gdi32 user32)
 # buffer the same way post_effects.cpp does, and checks ApplyDepthVignette()'s GPU pipeline at
 # intensity=0 (must reproduce the input exactly) and a strong intensity/low threshold (the near
 # quad must stay bit-exact, the far quad must come back darker) - see depth_vignette_test.cpp.
-add_executable(depth_vignette_test depth_vignette_test.cpp depth_vignette.cpp gl_loader.cpp)
+add_executable(depth_vignette_test src/depth_vignette_test.cpp src/depth_vignette.cpp src/gl_loader.cpp)
 target_link_libraries(depth_vignette_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a hard dark/bright edge at two very different depths under
 # a real perspective frustum, and checks ApplyDof() leaves the in-focus edge bit-exact while
 # measurably smearing the out-of-focus one - see dof_test.cpp.
-add_executable(dof_test dof_test.cpp dof.cpp gl_loader.cpp projection_capture.cpp)
+add_executable(dof_test src/dof_test.cpp src/dof.cpp src/gl_loader.cpp src/projection_capture.cpp)
 target_link_libraries(dof_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders three bands at known world distances under a real
 # perspective frustum, and checks ApplyFog()'s linear ramp hits none / half / full fog at the
 # right depths - see fog_test.cpp.
-add_executable(fog_test fog_test.cpp fog.cpp gl_loader.cpp projection_capture.cpp)
+add_executable(fog_test src/fog_test.cpp src/fog.cpp src/gl_loader.cpp src/projection_capture.cpp)
 target_link_libraries(fog_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a bright square OFF-CENTRE on black, and checks
 # ApplyLightShafts()'s detect pass finds it and the shaft pass radiates from there rather than
 # from the middle of the frame - see light_shafts_test.cpp.
-add_executable(light_shafts_test light_shafts_test.cpp light_shafts.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
+add_executable(light_shafts_test src/light_shafts_test.cpp src/light_shafts.cpp src/gl_loader.cpp src/perf_stats.cpp src/config.cpp src/debug_log.cpp)
 target_link_libraries(light_shafts_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a dark floor with a bright wall standing on it under a real
 # glFrustum projection, and checks ApplySsr() reflects the wall in the floor - and, the check
 # that actually matters, that raising upThreshold alone gates that same pixel back to bit-exact
 # - see ssr_test.cpp.
-add_executable(ssr_test ssr_test.cpp ssr.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp config.cpp debug_log.cpp perf_stats.cpp)
+add_executable(ssr_test src/ssr_test.cpp src/ssr.cpp src/gl_loader.cpp src/projection_capture.cpp src/modelview_capture.cpp src/config.cpp src/debug_log.cpp src/perf_stats.cpp)
 target_link_libraries(ssr_test opengl32 gdi32 user32)
 
 # Creates a real GL context and drives the glFrustum/glOrtho sequence a Quake II-family engine
 # makes, checking that the world-only frame latches exactly once per frame and never survives
 # into the next one - see world_capture_test.cpp. Links config.cpp and debug_log.cpp because
 # the cameraLogInterval diagnostic reads the config, same as modelview_capture_test.
-add_executable(world_capture_test world_capture_test.cpp world_capture.cpp gl_loader.cpp
-    config.cpp debug_log.cpp render_target.cpp)
+add_executable(world_capture_test src/world_capture_test.cpp src/world_capture.cpp src/gl_loader.cpp
+    src/config.cpp src/debug_log.cpp src/render_target.cpp)
 target_link_libraries(world_capture_test opengl32 gdi32 user32)
 
 # Checks the pure reprojection matrix on the CPU and the blur stage against a real GL context -
 # see motion_blur_test.cpp.
-add_executable(motion_blur_test motion_blur_test.cpp motion_blur.cpp gl_loader.cpp
-    projection_capture.cpp modelview_capture.cpp world_capture.cpp config.cpp debug_log.cpp
-    render_target.cpp)
+add_executable(motion_blur_test src/motion_blur_test.cpp src/motion_blur.cpp src/gl_loader.cpp
+    src/projection_capture.cpp src/modelview_capture.cpp src/world_capture.cpp src/config.cpp src/debug_log.cpp
+    src/render_target.cpp)
 target_link_libraries(motion_blur_test opengl32 gdi32 user32)
 
 # Creates a real GL context, drives the matrix-call sequence a Quake II-family engine makes
@@ -261,42 +265,42 @@ target_link_libraries(motion_blur_test opengl32 gdi32 user32)
 # checks the captured camera against the driver's own GL_MODELVIEW_MATRIX - see
 # modelview_capture_test.cpp. Links config.cpp and debug_log.cpp because the optional
 # cameraLogInterval diagnostic reads the config, the same way window_override_test does.
-add_executable(modelview_capture_test modelview_capture_test.cpp modelview_capture.cpp
-    config.cpp debug_log.cpp)
+add_executable(modelview_capture_test src/modelview_capture_test.cpp src/modelview_capture.cpp
+    src/config.cpp src/debug_log.cpp)
 target_link_libraries(modelview_capture_test opengl32 gdi32 user32)
 
 # Creates a real GL context, renders a 3D scene under a real glFrustum projection (a wall with a
 # box in front of it), and checks ApplySsao()'s two-pass GPU pipeline reproduces the input exactly
 # at intensity=0, produces occlusion beside the box but not on open wall at full intensity, and
 # no-ops when no projection has been captured - see ssao_test.cpp.
-add_executable(ssao_test ssao_test.cpp ssao.cpp projection_capture.cpp gl_loader.cpp perf_stats.cpp config.cpp debug_log.cpp)
+add_executable(ssao_test src/ssao_test.cpp src/ssao.cpp src/projection_capture.cpp src/gl_loader.cpp src/perf_stats.cpp src/config.cpp src/debug_log.cpp)
 target_link_libraries(ssao_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyChromaticAberration()'s
 # GPU pipeline at strength=0 (exact passthrough) and strength=1 (flat frame must survive the
 # radial channel offsets unchanged - catches channel swaps and out-of-bounds sampling) - see
 # chromatic_aberration_test.cpp.
-add_executable(chromatic_aberration_test chromatic_aberration_test.cpp chromatic_aberration.cpp gl_loader.cpp)
+add_executable(chromatic_aberration_test src/chromatic_aberration_test.cpp src/chromatic_aberration.cpp src/gl_loader.cpp)
 target_link_libraries(chromatic_aberration_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplySmaa()'s three-pass GPU
 # pipeline (edge detection -> blending weight calculation -> neighborhood blending) runs with
 # no GL error and reproduces a flat/edgeless image exactly - see smaa_test.cpp.
-add_executable(smaa_test smaa_test.cpp smaa.cpp gl_loader.cpp)
+add_executable(smaa_test src/smaa_test.cpp src/smaa.cpp src/gl_loader.cpp)
 target_link_libraries(smaa_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyNr()'s filter+combine GPU
 # pipeline reproduces a flat/edgeless image exactly regardless of intensity/passes (a bilateral
 # filter of a uniform field is a no-op by construction), and that a checkerboard pattern is
 # measurably smoothed at a nonzero intensity - see nr_test.cpp.
-add_executable(nr_test nr_test.cpp nr.cpp gl_loader.cpp)
+add_executable(nr_test src/nr_test.cpp src/nr.cpp src/gl_loader.cpp)
 target_link_libraries(nr_test opengl32 gdi32 user32)
 
 # Creates a real GL context, clears to a known color, and checks ApplyLocalContrast()'s 5-pass
 # GPU pipeline reproduces a flat/edgeless image exactly (both detail layers are zero on a
 # uniform field) regardless of strength, and that a hard edge gains measurable local contrast
 # at a nonzero strength - see local_contrast_test.cpp.
-add_executable(local_contrast_test local_contrast_test.cpp local_contrast.cpp gl_loader.cpp)
+add_executable(local_contrast_test src/local_contrast_test.cpp src/local_contrast.cpp src/gl_loader.cpp)
 target_link_libraries(local_contrast_test opengl32 gdi32 user32)
 
 # Creates a real GL context, fills a texture with a known flat color, and checks
@@ -304,7 +308,7 @@ target_link_libraries(local_contrast_test opengl32 gdi32 user32)
 # stays exactly the fill color; a known "on" bit of the "F" glyph comes back white; the plate
 # darkens a non-glyph point inside its footprint) and leaves a too-small texture untouched -
 # see fx_indicator_test.cpp.
-add_executable(fx_indicator_test fx_indicator_test.cpp fx_indicator.cpp gl_loader.cpp)
+add_executable(fx_indicator_test src/fx_indicator_test.cpp src/fx_indicator.cpp src/gl_loader.cpp)
 target_link_libraries(fx_indicator_test opengl32 gdi32 user32)
 
 # Creates a real GL context, a real texture, and checks ApplyTextureFilterOverride[F]() only
@@ -318,14 +322,14 @@ target_link_libraries(fx_indicator_test opengl32 gdi32 user32)
 # output directory for the same reason texture_filter_test has one: it needs its own fixture
 # ini renamed to the filename config.cpp looks for, and two targets writing that name into the
 # shared build directory is an unordered race with the Ninja generator.
-add_executable(texture_mipmap_gpu_test texture_mipmap_gpu_test.cpp texture_mipmap.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(texture_mipmap_gpu_test src/texture_mipmap_gpu_test.cpp src/texture_mipmap.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp)
 target_link_libraries(texture_mipmap_gpu_test opengl32 gdi32 user32)
 set_target_properties(texture_mipmap_gpu_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/texture_mipmap_gpu_test_dir
 )
 add_custom_command(TARGET texture_mipmap_gpu_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/texture_mipmap_test.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/texture_mipmap_test.ini
         $<TARGET_FILE_DIR:texture_mipmap_gpu_test>/opengl32_enhancer.ini
 )
 
@@ -334,18 +338,18 @@ add_custom_command(TARGET texture_mipmap_gpu_test POST_BUILD
 # GetGameReadBuffer() route drawing into it instead of the real back buffer, and that a size
 # the driver refuses degrades to today's rendering - see render_target_gpu_test.cpp. Its own
 # output directory and fixture ini for the same reason texture_mipmap_gpu_test has one.
-add_executable(render_target_gpu_test render_target_gpu_test.cpp render_target.cpp config.cpp debug_log.cpp gl_loader.cpp)
+add_executable(render_target_gpu_test src/render_target_gpu_test.cpp src/render_target.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp)
 target_link_libraries(render_target_gpu_test opengl32 gdi32 user32)
 set_target_properties(render_target_gpu_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/render_target_gpu_test_dir
 )
 add_custom_command(TARGET render_target_gpu_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/render_target_test.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/render_target_test.ini
         $<TARGET_FILE_DIR:render_target_gpu_test>/opengl32_enhancer.ini
 )
 
-add_executable(texture_filter_test texture_filter_test.cpp texture_filter.cpp config.cpp gl_loader.cpp)
+add_executable(texture_filter_test src/texture_filter_test.cpp src/texture_filter.cpp src/config.cpp src/gl_loader.cpp)
 target_link_libraries(texture_filter_test opengl32 gdi32 user32)
 # texture_filter_test resolves opengl32_enhancer.ini next to its own .exe, same as
 # post_effects_test - but this needs a fixed, known anisotropy value rather than whatever the
@@ -361,7 +365,7 @@ set_target_properties(texture_filter_test PROPERTIES
 )
 add_custom_command(TARGET texture_filter_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_CURRENT_SOURCE_DIR}/texture_filter_test.ini
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/texture_filter_test.ini
         $<TARGET_FILE_DIR:texture_filter_test>/opengl32_enhancer.ini
 )
 
@@ -372,11 +376,11 @@ add_custom_command(TARGET texture_filter_test POST_BUILD
 # config actually looks right (an aesthetic call no automated assertion can make) - see
 # post_effects_test.cpp's header comment. Links the same stage sources as ${WRAPPER_NAME_CXX}
 # (everything except wrapper.cpp itself, which this doesn't need).
-add_executable(post_effects_test post_effects_test.cpp post_effects.cpp config.cpp debug_log.cpp gl_loader.cpp
-    pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
-    chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp smaa.cpp fsr.cpp cas.cpp nr.cpp
-    local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp srgb_convert.cpp hud_mask.cpp perf_stats.cpp)
+add_executable(post_effects_test src/post_effects_test.cpp src/post_effects.cpp src/config.cpp src/debug_log.cpp src/gl_loader.cpp
+    src/pixel_invert.cpp src/bilinear_upscale.cpp src/nis_effect.cpp src/hdr_look.cpp src/bloom.cpp src/lut_grading.cpp
+    src/vignette.cpp src/depth_vignette.cpp src/ssao.cpp src/dof.cpp src/fog.cpp src/light_shafts.cpp src/ssr.cpp src/projection_capture.cpp src/modelview_capture.cpp src/world_capture.cpp src/motion_blur.cpp src/frame_dump.cpp
+    src/chromatic_aberration.cpp src/taa.cpp src/taa_jitter.cpp src/dither.cpp src/gamma.cpp src/smaa.cpp src/fsr.cpp src/cas.cpp src/nr.cpp
+    src/local_contrast.cpp src/fx_indicator.cpp src/window_override.cpp src/render_target.cpp src/srgb_convert.cpp src/hud_mask.cpp src/perf_stats.cpp)
 target_link_libraries(post_effects_test opengl32 gdi32 user32)
 # post_effects_test resolves opengl32_enhancer.ini (and any lutPath it names) next to its own .exe
 # - see config.cpp's GetIniPathNextToThisModule. Copy the real files there after each build so
@@ -399,13 +403,13 @@ add_custom_command(TARGET post_effects_test POST_BUILD
 # ${WRAPPER_NAME_CXX} plus vendored ImGui; NOT registered with CTest, since it is an interactive
 # tool rather than something that can pass or fail unattended.
 add_executable(config_editor WIN32
-    config_editor.cpp editor_scene.cpp config_writer.cpp debug_log.cpp
-    post_effects.cpp config.cpp gl_loader.cpp projection_capture.cpp modelview_capture.cpp world_capture.cpp motion_blur.cpp frame_dump.cpp
-    pixel_invert.cpp bilinear_upscale.cpp nis_effect.cpp hdr_look.cpp bloom.cpp lut_grading.cpp
-    vignette.cpp depth_vignette.cpp ssao.cpp dof.cpp fog.cpp light_shafts.cpp ssr.cpp chromatic_aberration.cpp taa.cpp taa_jitter.cpp dither.cpp gamma.cpp
-    smaa.cpp fsr.cpp cas.cpp nr.cpp local_contrast.cpp fx_indicator.cpp window_override.cpp render_target.cpp
-    srgb_convert.cpp hud_mask.cpp perf_stats.cpp
-    depth_view.cpp
+    src/config_editor.cpp src/editor_scene.cpp src/config_writer.cpp src/debug_log.cpp
+    src/post_effects.cpp src/config.cpp src/gl_loader.cpp src/projection_capture.cpp src/modelview_capture.cpp src/world_capture.cpp src/motion_blur.cpp src/frame_dump.cpp
+    src/pixel_invert.cpp src/bilinear_upscale.cpp src/nis_effect.cpp src/hdr_look.cpp src/bloom.cpp src/lut_grading.cpp
+    src/vignette.cpp src/depth_vignette.cpp src/ssao.cpp src/dof.cpp src/fog.cpp src/light_shafts.cpp src/ssr.cpp src/chromatic_aberration.cpp src/taa.cpp src/taa_jitter.cpp src/dither.cpp src/gamma.cpp
+    src/smaa.cpp src/fsr.cpp src/cas.cpp src/nr.cpp src/local_contrast.cpp src/fx_indicator.cpp src/window_override.cpp src/render_target.cpp
+    src/srgb_convert.cpp src/hud_mask.cpp src/perf_stats.cpp
+    src/depth_view.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp
